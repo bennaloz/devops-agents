@@ -12,6 +12,9 @@ using DevOpsAgents.Infrastructure.Notifications;
 using DevOpsAgents.Infrastructure.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
+// come servizio Windows (sc create) o systemd (Type=notify): fuori da li non cambia niente
+builder.Host.UseWindowsService(o => o.ServiceName = "DevOps.Agents");
+builder.Host.UseSystemd();
 var options = builder.Configuration.GetSection("DevOpsAgents").Get<ApiOptions>() ?? new ApiOptions();
 var root = options.Root ?? SuiteConfig.FindRoot(builder.Environment.ContentRootPath);
 var suite = SuiteConfig.Load(root);

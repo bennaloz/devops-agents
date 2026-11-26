@@ -71,6 +71,79 @@ Il modo sicuro per provarla dal vivo: `Mode=live`, `AllowWrites=false`, e confro
 `pwsh -NoProfile -File src/Smistatore.ps1 -WhatIf` sulle stesse card. Le due versioni non vanno accese in scrittura insieme:
 hanno stati locali separati e farebbero partire due volte le stesse sessioni.
 
+## La riga di comando
+
+`devops-agents` parla con il servizio avviato (di default `http://localhost:18800`, altrimenti `DEVOPS_AGENTS_URL`):
+
+| Comando | Cosa fa |
+| --- | --- |
+| `devops-agents stato` | Modalita, scrittura, giro automatico, pausa del sistema, ultimo giro |
+| `devops-agents giro [--prova] [--card <id>]` | Un giro adesso (di prova con `--prova`, o con la scrittura spenta) |
+| `devops-agents pausa` / `riprendi` | Pausa di sistema (D60): nessuna sessione nuova, le card restano dove sono |
+| `devops-agents feature` | Le Feature in ordine di priorita, con le pause |
+| `devops-agents feature pausa <id>` / `riprendi <id>` | Pausa di una Feature |
+| `devops-agents feature sposta <id> <dopo>` | Riordino: `<dopo>` e l'id della Feature che la precede, 0 la mette in cima |
+| `devops-agents da-fare` | I problemi aperti del supervisore: cosa aspetta te |
+
+Esce con 3 se il servizio non risponde. Si installa come strumento .NET:
+
+```bash
+cd app/backend && dotnet pack src/DevOpsAgents.Cli -o ../nupkg && dotnet tool install -g devops-agents --add-source ../nupkg
+```
+
+Gli agenti sulla board continuano a usare `src/card.ps1`, che i brief dei ruoli gia descrivono.
+
+## Come servizio
+
+Il servizio e lo stesso eseguibile: su Windows si registra come servizio (nome `DevOps.Agents`), su Linux parla con systemd.
+
+**Windows** (PowerShell da amministratore). Il servizio gira con l'utente indicato, perche i token in `~/.claude` sono cifrati
+DPAPI per quell'utente:
+
+```powershell
+dotnet publish app/backend/src/DevOpsAgents.Api -c Release -o C:/DevOps.Agents/server
+cd app/frontend; npm ci; npm run build; Copy-Item -Recurse ../backend/src/DevOpsAgents.Api/wwwroot C:/DevOps.Agents/server/
+sc.exe create DevOps.Agents binPath= "C:\DevOps.Agents\server\DevOpsAgents.Api.exe --DevOpsAgents:Mode=live --DevOpsAgents:Root=C:\develop\GIT\devops-agents" obj= ".\<utente>" password= "<password>" start= delayed-auto
+sc.exe start DevOps.Agents
+```
+
+**Linux** (systemd, unita utente):
+
+```ini
+# ~/.config/systemd/user/devops-agents.service
+[Unit]
+Description=DevOps.Agents
+[Service]
+Type=notify
+ExecStart=/opt/devops-agents/server/DevOpsAgents.Api --DevOpsAgents:Mode=live --DevOpsAgents:Root=%h/devops-agents
+Restart=on-failure
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload && systemctl --user enable --now devops-agents
+```
+
+**Container**. `app/Dockerfile` mette in un'immagine il servizio con la dashboard, la CLI, gli attrezzi del repo (config, ruoli,
+regole, skill, hook, `card.ps1`, `memoria.ps1`) e quello che usano le sessioni: git, Claude Code e PowerShell 7. Gira con un
+utente senza privilegi e la porta si pubblica solo su localhost:
+
+```bash
+cd app && docker compose up -d --build
+```
+
+```bash
+DEVOPS_AGENTS_MODE=live docker compose up -d
+```
+
+`docker-compose.yml` monta `~/.claude` (token e accesso di Claude Code: nel container vanno in chiaro, DPAPI e solo Windows),
+`./dati` (stato, quota, impostazioni, flussi) e `./repos` (cloni e worktree: in `config/mappa.json` le cartelle diventano
+`/repos/<repo>`). Per usare la propria `config/` invece di quella dell'immagine si monta il repo e si imposta
+`DevOpsAgents__Root`. Dietro un proxy con certificato proprio la build accetta `--secret id=ca,src=<certificato.pem>`.
+Il collaudo su Docker della card (D59) dal container richiede il socket di Docker dell'host: e una scelta da fare consapevolmente
+(chi ha il socket comanda l'host), per questo non e montato di default.
+
 ## Test
 
 ```bash
@@ -101,4 +174,4 @@ script al posto di claude).
 | Aggiornamento automatico della suite (D53) | **manca** |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
 | `card.ps1` (il punto d'ingresso degli agenti sulla board) | resta quello PowerShell, che i brief usano gia |
-| Installazione come servizio Windows / container | **manca** |
+| Riga di comando, servizio Windows e systemd, container | portato: `devops-agents` (CLI), `UseWindowsService`/`UseSystemd`, `app/Dockerfile` e `app/docker-compose.yml` |

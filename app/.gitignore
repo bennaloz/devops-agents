@@ -8,3 +8,6 @@ frontend/node_modules/
 frontend/.angular/
 # la build di Angular finisce qui: si rigenera con `npm run build` in frontend
 backend/src/DevOpsAgents.Api/wwwroot/
+# i volumi di docker-compose.yml
+dati/
+repos/

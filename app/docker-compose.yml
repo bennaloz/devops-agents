@@ -1,0 +1,26 @@
+# Il servizio in un container. Di default parte in demo e senza scrittura: si accende la board vera con
+#   DEVOPS_AGENTS_MODE=live  e, dopo aver confrontato i giri di prova con lo smistatore PowerShell,  DEVOPS_AGENTS_WRITE=true
+# Volumi:
+#   ~/.claude   -> i token (pat-smistatore.txt, pat-github.txt, ...) e l'accesso di Claude Code (in chiaro: DPAPI e solo Windows)
+#   ./dati      -> stato, quota, impostazioni, flussi delle sessioni, supervisore
+#   ./repos     -> i cloni dei repo della mappa e i worktree delle card (in config/mappa.json le cartelle vanno scritte come /repos/<repo>)
+#   la copia degli attrezzi, per usare la propria config/mappa.json e la memoria dei ruoli da git (DevOpsAgents__Root)
+services:
+  devops-agents:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    image: devops-agents:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18800:18800"
+    environment:
+      DevOpsAgents__Mode: ${DEVOPS_AGENTS_MODE:-demo}
+      DevOpsAgents__AllowWrites: ${DEVOPS_AGENTS_WRITE:-false}
+      DevOpsAgents__AutoRun: ${DEVOPS_AGENTS_AUTORUN:-false}
+      # DevOpsAgents__Root: /attrezzi
+    volumes:
+      - ${HOME}/.claude:/home/agenti/.claude
+      - ./dati:/dati
+      - ./repos:/repos
+      # - ../:/attrezzi:ro

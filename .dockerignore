@@ -1,0 +1,7 @@
+.git
+**/node_modules
+**/bin
+**/obj
+app/frontend/.angular
+app/backend/src/DevOpsAgents.Api/wwwroot
+**/TestResults
