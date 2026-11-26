@@ -62,6 +62,7 @@ In `src/DevOpsAgents.Api/appsettings.json`, sezione `DevOpsAgents`:
 | `WorktreeRoot` | `C:/develop/GIT/_wt` | Dove nascono i worktree delle card |
 | `DataDir` | `%LOCALAPPDATA%/DevOps.Agents.Net` | Stato locale e flussi delle sessioni (separati da quelli del PowerShell) |
 | `ClaudeExecutable` | `claude` | La CLI di Claude Code |
+| `McpServer` | accanto all'API | Il server MCP degli agenti (`devops-agents-mcp`, eseguibile o dll). `off`: le sessioni usano `card.ps1` come la versione PowerShell |
 
 I token si leggono dalle variabili `DEVOPS_AGENTS_ADO_PAT` e `DEVOPS_AGENTS_GITHUB_TOKEN`, altrimenti dagli stessi file della
 versione PowerShell in `~/.claude` (`pat-smistatore.txt`, `pat-github.txt`, cifrati DPAPI su Windows o in chiaro). Le sessioni
@@ -91,7 +92,37 @@ Esce con 3 se il servizio non risponde. Si installa come strumento .NET:
 cd app/backend && dotnet pack src/DevOpsAgents.Cli -o ../nupkg && dotnet tool install -g devops-agents --add-source ../nupkg
 ```
 
-Gli agenti sulla board continuano a usare `src/card.ps1`, che i brief dei ruoli gia descrivono.
+## Gli strumenti degli agenti (MCP)
+
+Nella versione .NET gli agenti non usano `card.ps1`: ogni sessione `claude -p` riceve un solo server MCP, `devops-agents-mcp`
+(`src/DevOpsAgents.Mcp`), lanciato su stdio con la card, il ruolo e il task della sessione:
+
+```bash
+devops-agents-mcp --card 42 --ruolo dev --task 57 --root <repo degli attrezzi> --dati <cartella dati>
+```
+
+- **Ogni ruolo vede solo i suoi strumenti.** `card_leggi` e `card_commenta` per tutti; `card_sposta` per chi ha transizioni in
+  `config/ruoli.json` (la descrizione dello strumento le elenca); `card_criteri`, `card_crea_task`, `card_senza_test`,
+  `card_prova_umana`, `card_deploy`, `card_correzione` per il responsabile; `card_chiudi_task` per il dev di un task;
+  `card_titolo_pr` e `card_descrizione_pr` per dev e responsabile; `memoria_leggi`, `memoria_scrivi`, `memoria_rivedi`,
+  `memoria_togli`, `memoria_conflitto` per il mentore. Uno strumento che il ruolo non ha non esiste, invece di rifiutare a runtime.
+  `devops-agents-mcp --card 1 --ruolo <ruolo> --elenca` stampa l'elenco.
+- **La card non e un argomento**: e fissata all'avvio, come `ATTREZZI_CARD` per `card.ps1`. Una sessione non scrive su un'altra card.
+- **Parametri strutturati**: il testo va nei parametri dello strumento, niente stdin ne here-string (che la shell alterava: `$`,
+  backtick, trattino iniziale). `card_deploy` prende l'elenco dei parametri e il perche, `card_correzione` natura, titolo e descrizione.
+- **Stessi controlli e stessi testi sulla board** di `card.ps1` (`Core/Agents/CardTools.cs`): prefisso `[ruolo]` e firma, marche del
+  deploy, della descrizione della PR e della correzione, tetto della descrizione, doppioni dei task, ramo della card per lo YAML del
+  deploy. Lo smistatore PowerShell e quello .NET leggono gli stessi commenti. Un rifiuto torna all'agente come errore dello strumento,
+  con lo stesso messaggio.
+- **I token li legge il server** (variabili `DEVOPS_AGENTS_*` o i file in `~/.claude`), non la sessione, che continua a ricevere solo
+  quelli in lettura. Il file del PAT resta raggiungibile dall'utente che fa girare le sessioni: lo protegge l'hook `deny-pat`, come prima.
+
+I brief dei ruoli restano uno per le due versioni: descrivono `card.ps1`, e per una sessione con MCP lo smistatore aggiunge in fondo una
+tabella "comando di `card.ps1` -> strumento" con i soli strumenti del ruolo (`Core/Agents/AgentBrief.cs`). Il server finisce accanto
+all'API (riferimento di progetto) e l'API lo trova da sola; `McpServer=off` torna a `card.ps1`.
+
+Restano in PowerShell: la scrittura della memoria (gli strumenti `memoria_*` chiamano `src/memoria.ps1`, che fa worktree, commit, push e
+PR della memoria; il mentore pero non usa piu la shell per questo), `card.ps1 crea` (si usa fuori dai ruoli) e gli hook di Claude Code.
 
 ## Come servizio
 
@@ -173,5 +204,5 @@ script al posto di claude).
 | Supervisore (D51): smistatore fermo o che si interrompe, PAT rifiutato o in scadenza, card in on-hold con il gesto e le card che tiene ferme, prove in Test, domande del responsabile, card ferme da ore senza motivo, card che saltano per errore, rilasci in attesa per area con le soglie, quota; problemi aperti con primo visto e ricordi; urgenti subito, riepilogo ai feriali, rilasci a parte; Telegram con i topic | portato, con test; la dashboard ha il riquadro "Da fare per te". Manca: la diagnosi con un modello e i controlli sulle pipeline |
 | Aggiornamento automatico della suite (D53) | **manca** |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
-| `card.ps1` (il punto d'ingresso degli agenti sulla board) | resta quello PowerShell, che i brief usano gia |
+| `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. Restano PowerShell: la scrittura della memoria (chiamata dal server), `card.ps1 crea`, gli hook |
 | Riga di comando, servizio Windows e systemd, container | portato: `devops-agents` (CLI), `UseWindowsService`/`UseSystemd`, `app/Dockerfile` e `app/docker-compose.yml` |

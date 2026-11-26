@@ -12,7 +12,7 @@ namespace DevOpsAgents.Infrastructure.GitHub;
 /// Il codice su GitHub (area con "sorgente": "github"): PR, controlli sul commit di testa, merge, rilanci. Come src/GitHub.psm1.
 /// Le build di Azure Pipelines che validano un repo GitHub si rilanciano su Azure DevOps (<paramref name="ado"/>).
 /// </summary>
-public sealed class GitHubCodeHost(HttpClient http, Func<string> token, AdoClient? ado = null) : ICodeHost
+public sealed class GitHubCodeHost(HttpClient http, Func<string> token, AdoClient? ado = null) : ICodeHost, IPullRequestEditor
 {
     public const string Api = "https://api.github.com";
     public bool NeedsCardLink => true;
@@ -157,6 +157,25 @@ public sealed class GitHubCodeHost(HttpClient http, Func<string> token, AdoClien
     {
         var pr = await SendAsync(HttpMethod.Get, $"/repos/{Repo(area)}/pulls/{prId}", ct: ct);
         return pr is null ? null : (StatusOf(pr), pr.Str("head", "ref") ?? "");
+    }
+
+    public async Task<string> GetDescriptionAsync(AreaMapping area, int prId, CancellationToken ct = default) =>
+        (await SendAsync(HttpMethod.Get, $"/repos/{Repo(area)}/pulls/{prId}", ct: ct)).Str("body") ?? "";
+
+    /// <summary>Come Set-GhPr: il testo e la firma.</summary>
+    public Task SetDescriptionAsync(AreaMapping area, int prId, string description, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Patch, $"/repos/{Repo(area)}/pulls/{prId}", new { body = $"{description}\n\n{AzureReposCodeHost.Signature}" }, ct: ct);
+
+    public Task SetTitleAsync(AreaMapping area, int prId, string title, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Patch, $"/repos/{Repo(area)}/pulls/{prId}", new { title }, ct: ct);
+
+    /// <summary>Un file del repo sul ramo, come testo (lo YAML di una pipeline di Azure Pipelines su un repo GitHub).</summary>
+    public async Task<string> GetFileAsync(string repo, string path, string branch, CancellationToken ct = default)
+    {
+        if (!Regex.IsMatch(repo, @"^[\w.-]+/[\w.-]+$")) throw new InvalidOperationException($"repo GitHub '{repo}' non e nella forma <owner>/<repo>");
+        var p = string.Join('/', path.TrimStart('/').Split('/').Select(Uri.EscapeDataString));
+        var r = await SendAsync(HttpMethod.Get, $"/repos/{repo}/contents/{p}?ref={Uri.EscapeDataString(branch)}", accept: "application/vnd.github.raw+json", ct: ct);
+        return r is JsonValue v && v.TryGetValue<string>(out var text) ? text : r?.ToJsonString() ?? "";
     }
 }
 

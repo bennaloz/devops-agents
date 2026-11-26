@@ -5,7 +5,7 @@ using static DevOpsAgents.Infrastructure.AzureDevOps.AdoClient;
 namespace DevOpsAgents.Infrastructure.AzureDevOps;
 
 /// <summary>Il codice su Azure Repos: PR e validazioni (le policy di build), come Get-AdoPr e compagne in src/Ado.psm1.</summary>
-public sealed class AzureReposCodeHost(AdoClient ado) : ICodeHost
+public sealed class AzureReposCodeHost(AdoClient ado) : ICodeHost, IPullRequestEditor
 {
     public const string Signature = "🤖 Generated with [Claude Code](https://claude.com/claude-code)";
 
@@ -120,6 +120,16 @@ public sealed class AzureReposCodeHost(AdoClient ado) : ICodeHost
         var pr = await ado.GetAsync($"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", ct);
         return pr is null ? null : (pr.Str("status") ?? "", (pr.Str("sourceRefName") ?? "").Replace("refs/heads/", ""));
     }
+    public async Task<string> GetDescriptionAsync(AreaMapping area, int prId, CancellationToken ct = default) =>
+        (await ado.GetAsync($"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", ct)).Str("description") ?? "";
+
+    /// <summary>Come Set-AdoDescrizionePr: dalla REST (az perde gli accenti), con la firma.</summary>
+    public Task SetDescriptionAsync(AreaMapping area, int prId, string description, CancellationToken ct = default) =>
+        ado.SendAsync(HttpMethod.Patch, $"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", new { description = $"{description}\n\n{Signature}" }, ct: ct);
+
+    public Task SetTitleAsync(AreaMapping area, int prId, string title, CancellationToken ct = default) =>
+        ado.SendAsync(HttpMethod.Patch, $"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", new { title }, ct: ct);
+
 }
 
 /// <summary>Il deploy in Test su Azure Pipelines, per i repo di Azure Repos e di GitHub.</summary>
@@ -177,5 +187,36 @@ public sealed class AzurePipelinesCi(AdoClient ado) : ICiService
     {
         var r = await ado.GetAsync($"/{E(area.AdoProject)}/_apis/build/builds/{runId}?api-version=7.1", ct);
         return new PipelineRun(r.Str("status") ?? "", r.Str("result"), $"{ado.Organization}/{E(area.AdoProject)}/_build/results?buildId={runId}", r.Str("sourceVersion"));
+    }
+}
+
+/// <summary>
+/// D43: i parametri deploy* dello YAML della pipeline di deploy dell'area, letto sul ramo (Get-AdoParametriDeploy): il percorso e il repo
+/// dalla definizione della pipeline, il contenuto da Azure Repos o, per una pipeline su un repo GitHub, da GitHub.
+/// </summary>
+public sealed class AzurePipelinesDeployParameters(AdoClient ado, GitHub.GitHubCodeHost? github = null) : IDeployParameters
+{
+    public async Task<IReadOnlyList<string>> GetAsync(AreaMapping area, string branch, CancellationToken ct = default)
+    {
+        if (area.DeployPipeline is not { } id) throw new InvalidOperationException($"il componente '{area.Component}' non ha pipelineDeploy nella mappa");
+        var b = $"/{E(area.AdoProject)}";
+        var def = await ado.GetAsync($"{b}/_apis/pipelines/{id}?api-version=7.1", ct);
+        var conf = def?["configuration"];
+        var path = conf.Str("path");
+        var repo = conf.Str("repository", "id");
+        if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(repo))
+            throw new InvalidOperationException($"La pipeline {id} non dice dove sta il suo YAML (configuration.path e repository): non so quali parametri di deploy ha");
+        string yaml;
+        if (conf.Str("repository", "type") == "gitHub")
+        {
+            if (github is null) throw new InvalidOperationException($"La pipeline {id} e su un repo GitHub e non c'e un token di GitHub");
+            yaml = await github.GetFileAsync(conf.Str("repository", "fullName") ?? repo, path, branch, ct);
+        }
+        else
+        {
+            var item = await ado.GetAsync($"{b}/_apis/git/repositories/{E(repo)}/items?path={E(path)}&versionDescriptor.version={E(branch)}&versionDescriptor.versionType=branch&includeContent=true&$format=json&api-version=7.1", ct);
+            yaml = item.Str("content") ?? "";
+        }
+        return Core.Agents.CardTools.DeployParametersFromYaml(yaml);
     }
 }

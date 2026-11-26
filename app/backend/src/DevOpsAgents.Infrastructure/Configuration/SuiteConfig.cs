@@ -52,7 +52,8 @@ public sealed record SuiteConfig(
             var brief = node!["brief"]!.GetValue<string>();
             if (!File.Exists(Path.Combine(root, brief))) throw new InvalidDataException($"Ruolo '{name}': il brief '{brief}' non esiste");
             roles[name] = new RoleSettings(node["modello"]!.GetValue<string>(), node["sforzo"]?.GetValue<string>() ?? "",
-                brief, node["strumenti"]!.AsArray().Select(t => t!.GetValue<string>()).ToList(), node["advisor"]?.GetValue<string>());
+                brief, node["strumenti"]!.AsArray().Select(t => t!.GetValue<string>()).ToList(), node["advisor"]?.GetValue<string>(),
+                node["transizioni"]?.AsArray().Select(t => new RoleTransition(t![0]!.GetValue<string>(), t[1]!.GetValue<string>())).ToList() ?? []);
         }
 
         var m = Read("mappa");

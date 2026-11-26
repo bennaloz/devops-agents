@@ -18,11 +18,17 @@ public sealed record ClaudeRunnerOptions
     public required string DataDir { get; init; }
     /// <summary>La cartella ~/.claude (le credenziali di prova del collaudatore); nei test una finta.</summary>
     public string? ClaudeDir { get; init; }
+    /// <summary>
+    /// Il server MCP degli agenti (devops-agents-mcp): il comando e i suoi primi argomenti, per esempio ["dotnet", ".../devops-agents-mcp.dll"].
+    /// Con questo le sessioni usano gli strumenti MCP al posto di card.ps1 e memoria.ps1; senza, card.ps1 come la versione PowerShell.
+    /// </summary>
+    public IReadOnlyList<string>? McpServer { get; init; }
 }
 
 /// <summary>
 /// Le sessioni dei ruoli con claude -p, come Start-SessioneRuolo (src/Sessioni.psm1): modello, sforzo, advisor, brief del
-/// ruolo, strumenti, nessun MCP, eventi stream-json su file. La sessione riceve solo i token in sola lettura.
+/// ruolo, strumenti, eventi stream-json su file. La sessione riceve solo i token in sola lettura. L'unico server MCP e quello degli agenti
+/// (se configurato), legato alla card e al ruolo della sessione; nessun altro (--strict-mcp-config).
 /// </summary>
 public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, ClaudeRunnerOptions options, IMemorySource? memory = null) : ISessionRunner
 {
@@ -35,17 +41,32 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
 
     private string LogPath(string id) => Path.Combine(options.DataDir, "sessioni", $"{id}.jsonl");
 
-    public static IReadOnlyList<string> Arguments(RoleSettings role, string brief, string message, string sessionId, bool resume)
+    public static IReadOnlyList<string> Arguments(RoleSettings role, string brief, string message, string sessionId, bool resume, string? mcpConfig = null)
     {
         var a = new List<string> { "-p", message, "--model", role.Model };
         if (!string.IsNullOrEmpty(role.Effort)) a.AddRange(["--effort", role.Effort]);
         if (!string.IsNullOrEmpty(role.Advisor)) a.AddRange(["--advisor", role.Advisor]);
         a.AddRange(["--output-format", "stream-json", "--verbose", resume ? "--resume" : "--session-id", sessionId, "--append-system-prompt-file", brief]);
         a.Add("--tools"); a.AddRange(role.Tools);
-        a.Add("--allowedTools"); a.AddRange(role.Tools);
-        a.AddRange(["--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--permission-mode", "acceptEdits"]);
+        // il server degli agenti espone solo gli strumenti del ruolo: si permettono tutti quelli che ha
+        a.Add("--allowedTools"); a.AddRange(role.Tools); if (mcpConfig is not null) a.Add($"mcp__{Core.Agents.AgentBrief.ServerName}");
+        a.AddRange(["--strict-mcp-config", "--mcp-config", mcpConfig ?? "{\"mcpServers\":{}}", "--permission-mode", "acceptEdits"]);
         return a;
     }
+
+    /// <summary>La --mcp-config con il solo server degli agenti, legato a card, ruolo e task della sessione.</summary>
+    public static string McpConfig(IReadOnlyList<string> server, int cardId, string role, int? taskId, string root, string dataDir)
+    {
+        var args = new System.Text.Json.Nodes.JsonArray();
+        foreach (var x in server.Skip(1)) args.Add(x);
+        foreach (var x in new[] { "--card", cardId.ToString(), "--ruolo", role }) args.Add(x);
+        if (taskId is { } t) { args.Add("--task"); args.Add(t.ToString()); }
+        foreach (var x in new[] { "--root", root, "--dati", dataDir }) args.Add(x);
+        return new JsonObject { ["mcpServers"] = new JsonObject { [Core.Agents.AgentBrief.ServerName] = new JsonObject { ["command"] = server[0], ["args"] = args } } }
+            .ToJsonString();
+    }
+
+    private bool UsesMcp(string role) => options.McpServer is { Count: > 0 } && role != "supervisore";
 
     public async Task<string> StartAsync(SessionRequest r, CancellationToken ct = default)
     {
@@ -58,7 +79,8 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
         };
         foreach (var a in options.PrefixArguments) psi.ArgumentList.Add(a);
-        foreach (var a in Arguments(role, await BriefAsync(r.Role, role, r.Area.Repo, id, ct), r.Message, id, r.Resume)) psi.ArgumentList.Add(a);
+        var mcp = UsesMcp(r.Role) ? McpConfig(options.McpServer!, r.CardId, r.Role, r.TaskId, config.Root, options.DataDir) : null;
+        foreach (var a in Arguments(role, await BriefAsync(r.Role, role, r.Area.Repo, id, r.TaskId, ct), r.Message, id, r.Resume, mcp)) psi.ArgumentList.Add(a);
 
         // le variabili che leggono hook e card.ps1; mai i token di chi lancia, solo quelli in lettura
         var env = psi.Environment;
@@ -90,16 +112,19 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
     }
 
     /// <summary>
-    /// D46: il brief della sessione: quello del ruolo, con in fondo la sezione Memoria (lezioni stabili e in prova del repo) in un file accanto
-    /// all'uscita della sessione. Senza memoria, o se la lettura non riesce, il brief del ruolo.
+    /// D46: il brief della sessione: quello del ruolo, con in fondo la sezione Memoria (lezioni stabili e in prova del repo) e, con il server
+    /// MCP, la tabella degli strumenti che prendono il posto di card.ps1, in un file accanto all'uscita della sessione. Senza nessuna delle
+    /// due, o se la lettura della memoria non riesce, il brief del ruolo.
     /// </summary>
-    private async Task<string> BriefAsync(string roleName, RoleSettings role, string repo, string id, CancellationToken ct)
+    private async Task<string> BriefAsync(string roleName, RoleSettings role, string repo, string id, int? taskId, CancellationToken ct)
     {
         var path = Path.Combine(config.Root, role.Brief);
-        if (memory is null) return path;
-        var files = await memory.GetAsync(roleName, repo, ct);
-        if (files.Count == 0) return path;
-        var composed = Core.Memory.Lessons.BriefWithMemory(await File.ReadAllTextAsync(path, ct), files);
+        var files = memory is null ? [] : await memory.GetAsync(roleName, repo, ct);
+        var mcp = UsesMcp(roleName);
+        if (files.Count == 0 && !mcp) return path;
+        var composed = await File.ReadAllTextAsync(path, ct);
+        if (files.Count > 0) composed = Core.Memory.Lessons.BriefWithMemory(composed, files);
+        if (mcp) composed = composed.TrimEnd() + "\n" + Core.Agents.AgentBrief.McpSection(roleName, taskId, config.Roles);
         var target = Path.Combine(options.DataDir, "sessioni", $"{id}.brief.md");
         await File.WriteAllTextAsync(target, composed, ct);
         return target;

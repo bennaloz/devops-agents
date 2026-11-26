@@ -7,7 +7,7 @@ using static DevOpsAgents.Infrastructure.AzureDevOps.AdoClient;
 namespace DevOpsAgents.Infrastructure.AzureDevOps;
 
 /// <summary>La board su Azure DevOps Boards: le stesse chiamate di src/Ado.psm1.</summary>
-public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames names) : IBoard
+public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames names) : IBoard, ICardEditor
 {
     private const string ChildLink = "System.LinkTypes.Hierarchy-Forward";
     private const string ParentLink = "System.LinkTypes.Hierarchy-Reverse";
@@ -233,6 +233,63 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
         // l'indirizzo (properties.Account) serve ad assegnare le Bug che crea lo smistatore
         return new Person(u.Str("id") ?? "", u.Str("providerDisplayName") ?? "", u?["properties"]?["Account"]?["$value"]?.ToString());
     }
+
+    // ---- ICardEditor: gli strumenti degli agenti sulla loro card (card.ps1, il server MCP) ----------------------------------
+
+    private const string CriteriaField = "Microsoft.VSTS.Common.AcceptanceCriteria";
+    private static string DescriptionField(string? type) => type == "Bug" ? "Microsoft.VSTS.TCM.ReproSteps" : "System.Description";
+
+    public async Task<CardDetail> GetCardAsync(int cardId, CancellationToken ct = default)
+    {
+        var wi = await ado.GetAsync($"/_apis/wit/workitems/{cardId}?$expand=relations&api-version=7.1", ct);
+        var card = ToCard(wi!);
+        return new CardDetail(card, wi!["fields"].Str(DescriptionField(card.WorkItemType)), wi["fields"].Str(CriteriaField));
+    }
+
+    public async Task<IReadOnlyList<TaskDetail>> GetTaskDetailsAsync(int cardId, CancellationToken ct = default) =>
+        (await RelatedAsync(cardId, ChildLink, ct)).Where(t => t["fields"].Str("System.WorkItemType") == "Task")
+            .Select(t => new TaskDetail(t.Int("id")!.Value, t["fields"].Str("System.Title") ?? "", t["fields"].Str("System.State") ?? "", t["fields"].Str("System.Description")))
+            .OrderBy(t => t.Id).ToList();
+
+    public async Task<WorkItemInfo> GetWorkItemAsync(int id, CancellationToken ct = default)
+    {
+        var wi = await ado.GetAsync($"/_apis/wit/workitems/{id}?$expand=relations&api-version=7.1", ct);
+        var f = wi?["fields"];
+        var children = wi.Items("relations").Where(r => r.Str("rel") == ChildLink)
+            .Select(r => int.TryParse(r.Str("url")?.Split('/').Last(), out var c) ? c : 0).Where(c => c > 0).OrderBy(c => c).ToList();
+        return new WorkItemInfo(wi.Int("id") ?? id, f.Str("System.WorkItemType") ?? "", f.Str("System.State") ?? "", f.Str("System.Title") ?? "", f.Str("System.AreaPath"), children);
+    }
+
+    public async Task<int> MoveAsync(int cardId, string stateName, CancellationToken ct = default)
+    {
+        var r = await ado.SendAsync(HttpMethod.Patch, $"/_apis/wit/workitems/{cardId}?api-version=7.1",
+            new JsonArray(new JsonObject { ["op"] = "add", ["path"] = "/fields/System.State", ["value"] = stateName }), "application/json-patch+json", ct);
+        return r.Int("rev") ?? 0;
+    }
+
+    /// <summary>In markdown: in html un testo con a capo ed elenchi diventa una riga sola (il formato vale se il campo cambia nella stessa patch).</summary>
+    public Task SetCriteriaAsync(int cardId, string markdown, CancellationToken ct = default) =>
+        PatchAsync(cardId, [
+            new JsonObject { ["op"] = "add", ["path"] = $"/multilineFieldsFormat/{CriteriaField}", ["value"] = "Markdown" },
+            new JsonObject { ["op"] = "add", ["path"] = $"/fields/{CriteriaField}", ["value"] = markdown },
+        ], ct);
+
+    public async Task<TaskDetail> CreateTaskAsync(int cardId, string title, string description, string area, CancellationToken ct = default)
+    {
+        var project = area.Split('\\')[0];
+        JsonArray ops =
+        [
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.Title", ["value"] = title },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.AreaPath", ["value"] = area },
+            new JsonObject { ["op"] = "add", ["path"] = "/multilineFieldsFormat/System.Description", ["value"] = "Markdown" },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.Description", ["value"] = description },
+            new JsonObject { ["op"] = "add", ["path"] = "/relations/-", ["value"] = new JsonObject { ["rel"] = ParentLink, ["url"] = $"{ado.Organization}/_apis/wit/workItems/{cardId}" } },
+        ];
+        var t = await ado.SendAsync(HttpMethod.Post, $"/{E(project)}/_apis/wit/workitems/$Task?api-version=7.1", ops, "application/json-patch+json", ct);
+        return new TaskDetail(t.Int("id")!.Value, t?["fields"].Str("System.Title") ?? title, t?["fields"].Str("System.State") ?? "", description);
+    }
+
+    public Task SetTaskStateAsync(int taskId, string stateName, CancellationToken ct = default) => SetStateAsync(taskId, stateName, ct);
 
     public string CardUrl(int cardId) => $"{ado.Organization}/{E(boardProject)}/_workitems/edit/{cardId}";
 }

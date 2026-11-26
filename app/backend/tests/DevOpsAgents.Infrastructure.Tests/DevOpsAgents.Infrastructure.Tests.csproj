@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DevOpsAgents.Infrastructure\DevOpsAgents.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\DevOpsAgents.Core\DevOpsAgents.Core.csproj" />
+    <ProjectReference Include="..\..\src\DevOpsAgents.Mcp\DevOpsAgents.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

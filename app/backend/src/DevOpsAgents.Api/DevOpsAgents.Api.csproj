@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="..\DevOpsAgents.Core\DevOpsAgents.Core.csproj" />
     <ProjectReference Include="..\DevOpsAgents.Infrastructure\DevOpsAgents.Infrastructure.csproj" />
+    <!-- il server MCP degli agenti finisce accanto all'API: le sessioni lo trovano da sole -->
+    <ProjectReference Include="..\DevOpsAgents.Mcp\DevOpsAgents.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

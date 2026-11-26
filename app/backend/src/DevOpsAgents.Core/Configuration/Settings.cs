@@ -82,4 +82,8 @@ public sealed record Limits
 }
 
 /// <summary>Un ruolo di config/ruoli.json: modello, sforzo, brief e strumenti della sessione claude -p.</summary>
-public sealed record RoleSettings(string Model, string Effort, string Brief, IReadOnlyList<string> Tools, string? Advisor = null);
+public sealed record RoleSettings(string Model, string Effort, string Brief, IReadOnlyList<string> Tools, string? Advisor = null,
+    IReadOnlyList<RoleTransition>? Transitions = null);
+
+/// <summary>Uno spostamento che il ruolo puo fare con card sposta (config/ruoli.json, transizioni): dalla chiave dello stato alla chiave.</summary>
+public sealed record RoleTransition(string From, string To);

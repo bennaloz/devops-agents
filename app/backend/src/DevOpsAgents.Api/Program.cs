@@ -47,7 +47,7 @@ if (options.Mode == "live")
     builder.Services.AddSingleton<ICodeHostResolver, CodeHostResolver>();
     builder.Services.AddSingleton<ICiService>(sp => new AzurePipelinesCi(sp.GetRequiredService<AdoClient>()));
     builder.Services.AddSingleton<IWorkspace>(new GitWorkspace(options.WorktreeRoot));
-    builder.Services.AddSingleton<ISessionRunner>(new ClaudeSessionRunner(suite, tokens, new ClaudeRunnerOptions { Executable = options.ClaudeExecutable, DataDir = dataDir }, new GitMemorySource(root)));
+    builder.Services.AddSingleton<ISessionRunner>(new ClaudeSessionRunner(suite, tokens, new ClaudeRunnerOptions { Executable = options.ClaudeExecutable, DataDir = dataDir, McpServer = options.McpCommand(AppContext.BaseDirectory) }, new GitMemorySource(root)));
     builder.Services.AddSingleton<IStateStore>(new JsonStateStore(Path.Combine(dataDir, "stato.json")));
     // D59: gli ambienti Docker di collaudo, se config/collaudo.json c'e
     if (DockerSettings.Load(root) is { } docker) builder.Services.AddSingleton<ITestEnvironments>(new DockerTestEnvironments(docker, dataDir));

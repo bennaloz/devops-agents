@@ -16,6 +16,21 @@ public sealed record ApiOptions
     public string? DataDir { get; init; }
     public string WorktreeRoot { get; init; } = "C:/develop/GIT/_wt";
     public string ClaudeExecutable { get; init; } = "claude";
+    /// <summary>
+    /// Il server MCP degli agenti (devops-agents-mcp, l'eseguibile o la dll): le sessioni lo usano al posto di card.ps1. Vuoto: lo si cerca
+    /// accanto all'API (bin o ../mcp); "off": niente MCP, le sessioni usano card.ps1 come la versione PowerShell.
+    /// </summary>
+    public string? McpServer { get; init; }
+
+    /// <summary>Il comando del server MCP, o null se spento o non trovato.</summary>
+    public IReadOnlyList<string>? McpCommand(string baseDir)
+    {
+        if (string.Equals(McpServer, "off", StringComparison.OrdinalIgnoreCase)) return null;
+        var path = McpServer is { Length: > 0 } p ? p
+            : new[] { Path.Combine(baseDir, "devops-agents-mcp.dll"), Path.Combine(baseDir, "..", "mcp", "devops-agents-mcp.dll") }.FirstOrDefault(File.Exists);
+        if (path is null) return null;
+        return path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? ["dotnet", Path.GetFullPath(path)] : [path];
+    }
 }
 
 /// <summary>I client della dashboard: ricevono ogni giro appena finito.</summary>
