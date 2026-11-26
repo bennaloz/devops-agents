@@ -80,6 +80,31 @@ public sealed record SuiteConfig(
         return new SuiteConfig(root, org, board!, new StateNames(stati), limits, roles, areas);
     }
 
+    /// <summary>config/supervisore.json: soglie e orari del supervisore (D51).</summary>
+    public static DevOpsAgents.Core.Supervision.SupervisorSettings LoadSupervisor(string root)
+    {
+        var p = Path.Combine(root, "config", "supervisore.json");
+        if (!File.Exists(p)) return new();
+        var o = JsonNode.Parse(File.ReadAllText(p))!;
+        int I(string k, int d) => o[k]?.GetValue<int>() ?? d;
+        var rel = o["rilasci"];
+        var byArea = (rel?["perArea"] as JsonObject)?.ToDictionary(kv => kv.Key, kv => (kv.Value!["card"]?.GetValue<int>() ?? 5, kv.Value!["giorni"]?.GetValue<int>() ?? 7))
+            ?? new Dictionary<string, (int, int)>();
+        return new()
+        {
+            IntervalMinutes = I("intervalloMinuti", 5),
+            MinutesWithoutRound = I("minutiSenzaGiro", 10),
+            CardErrorsInARow = I("erroriDiFilaPerCard", 5),
+            HoursWithoutMovement = I("oreSenzaMovimento", 6),
+            UrgentReminderHours = I("oreRicordoUrgente", 4),
+            SummaryTimes = o["orariRiepilogo"]?.AsArray().Select(x => TimeSpan.Parse(x!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture)).ToList() ?? [new(8, 30, 0), new(14, 0, 0)],
+            PatNoticeDays = I("giorniPreavvisoPat", 7),
+            ReleaseCards = rel?["predefinito"]?["card"]?.GetValue<int>() ?? 5,
+            ReleaseDays = rel?["predefinito"]?["giorni"]?.GetValue<int>() ?? 7,
+            ReleaseByArea = byArea,
+        };
+    }
+
     /// <summary>D59: la voce collaudo di un'area (compose, porte, url); ogni URL deve nominare una porta dell'elenco.</summary>
     private static TestEnvironmentSpec? TestEnvironmentOf(JsonNode a)
     {

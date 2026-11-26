@@ -41,6 +41,21 @@
   <div [class.rosso]="counts().errors > 0"><b>{{ counts().errors }}</b> errori</div>
 </section>
 
+@if (api.problems().length) {
+  <section class="da-fare" aria-label="Da fare per te">
+    <h2>Da fare per te <span class="conta">{{ api.problems().length }}</span></h2>
+    <ul>
+      @for (p of api.problems(); track p.key) {
+        <li [class.urgente]="p.urgent">
+          <div class="cosa">@if (p.urgent) { <span class="pillola rosso">urgente</span> } {{ p.text }}</div>
+          @for (l of p.lines ?? []; track $index) { <div class="riga-p">{{ l }}</div> }
+          <div class="gesto">→ {{ p.action }} @if (p.link) { <a [href]="p.link" target="_blank" rel="noopener">apri</a> }</div>
+        </li>
+      }
+    </ul>
+  </section>
+}
+
 @if (api.features().length) {
   <section class="feature" aria-label="Feature in ordine di priorita">
     <h2>Feature, in ordine di priorità</h2>

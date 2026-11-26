@@ -10,6 +10,7 @@ using DevOpsAgents.Infrastructure.Configuration;
 using DevOpsAgents.Infrastructure.GitHub;
 using DevOpsAgents.Infrastructure.Local;
 using DevOpsAgents.Infrastructure.Secrets;
+using DevOpsAgents.Core.Supervision;
 using Xunit;
 
 namespace DevOpsAgents.Infrastructure.Tests;
@@ -767,5 +768,60 @@ public class AdoptionInfrastructureTests
         Assert.Equal(r, await ws.CreateWorktreeFromRemoteAsync(area, new Card(42, 1, "x", "In review", [], null)));
         Assert.Null(await ws.CreateWorktreeFromRemoteAsync(area, new Card(43, 1, "y", "In review", [], null)));
         Directory.Delete(tmp, true);
+    }
+}
+
+public class TelegramTests
+{
+    private static Notice N(string text, string action, string? link = null, bool reminder = false, IReadOnlyList<string>? lines = null) =>
+        new("k", new Problem("k", text, action, link, Lines: lines), reminder, "3 h");
+
+    [Fact]
+    public void Il_messaggio_ha_la_cosa_l_azione_e_il_link_con_l_html_escapato()
+    {
+        var u = DevOpsAgents.Infrastructure.Notifications.TelegramFormat.Urgent(N("Card #1 <x> & y", "togli il tag", "https://board/1?a=1&b=2", lines: ["Perche: z"]));
+        Assert.Equal("🚨 <b>Urgente</b>\n• Card #1 &lt;x&gt; &amp; y\n   Perche: z\n   → togli il tag — <a href=\"https://board/1?a=1&amp;b=2\">apri</a>", u);
+        Assert.Contains("(aspetta da 3 h)", DevOpsAgents.Infrastructure.Notifications.TelegramFormat.Summary([N("a", "b", reminder: true)]));
+    }
+
+    [Fact]
+    public async Task Al_primo_invio_crea_il_topic_poi_lo_riusa_e_un_errore_non_mostra_il_token()
+    {
+        var file = Path.Combine(Directory.CreateTempSubdirectory("tg").FullName, "telegram-topic.json");
+        var h = new FakeHttp((r, _) => r.RequestUri!.ToString().EndsWith("/createForumTopic")
+            ? FakeHttp.Ok("""{ "ok": true, "result": { "message_thread_id": 77 } }""")
+            : FakeHttp.Ok("""{ "ok": true, "result": {} }"""));
+        var t = new DevOpsAgents.Infrastructure.Notifications.TelegramNotifier(new HttpClient(h), "123:SEGRETO", "-100", file);
+        Assert.True(await t.SendAsync("urgenti", "<b>x</b>"));
+        Assert.True(await t.SendAsync("urgenti", "<b>y</b>"));
+        Assert.Single(h.Calls, c => c.Url.EndsWith("/createForumTopic"));
+        var send = JsonNode.Parse(h.Calls.Last().Body)!;
+        Assert.Equal((77, "HTML"), (send["message_thread_id"]!.GetValue<int>(), send["parse_mode"]!.GetValue<string>()));
+
+        var fails = new FakeHttp((_, _) => (HttpStatusCode.BadRequest, """{ "ok": false, "description": "chat not found" }"""));
+        Assert.False(await new DevOpsAgents.Infrastructure.Notifications.TelegramNotifier(new HttpClient(fails), "123:SEGRETO", "-100", file + "2").SendAsync("riepilogo", "x"));
+        Assert.False(new DevOpsAgents.Infrastructure.Notifications.TelegramNotifier(new HttpClient(fails), null, null, file).Configured);
+    }
+
+    [Fact]
+    public async Task Fuori_da_un_forum_tutto_va_nel_topic_generale()
+    {
+        var file = Path.Combine(Directory.CreateTempSubdirectory("tg").FullName, "telegram-topic.json");
+        var h = new FakeHttp((r, _) => r.RequestUri!.ToString().EndsWith("/createForumTopic")
+            ? (HttpStatusCode.BadRequest, """{ "ok": false, "description": "Bad Request: the chat is not a forum" }""")
+            : FakeHttp.Ok("""{ "ok": true, "result": {} }"""));
+        var t = new DevOpsAgents.Infrastructure.Notifications.TelegramNotifier(new HttpClient(h), "123:SEGRETO", "-100", file);
+        Assert.True(await t.SendAsync("riepilogo", "x"));
+        Assert.Null(JsonNode.Parse(h.Calls.Last().Body)!["message_thread_id"]);
+        Assert.True(await t.SendAsync("urgenti", "y"));
+        Assert.Single(h.Calls, c => c.Url.EndsWith("/createForumTopic"));
+    }
+
+    [Fact]
+    public void Le_soglie_del_supervisore_si_leggono_da_supervisore_json()
+    {
+        var s = SuiteConfig.LoadSupervisor(Tx.Root);
+        Assert.Equal((5, 10, 4, 5, 7), (s.IntervalMinutes, s.MinutesWithoutRound, s.UrgentReminderHours, s.ReleaseCards, s.ReleaseDays));
+        Assert.Equal([new TimeSpan(8, 30, 0), new TimeSpan(14, 0, 0)], s.SummaryTimes);
     }
 }

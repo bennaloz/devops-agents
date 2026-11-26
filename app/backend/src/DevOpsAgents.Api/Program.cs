@@ -8,6 +8,7 @@ using DevOpsAgents.Infrastructure.AzureDevOps;
 using DevOpsAgents.Infrastructure.Configuration;
 using DevOpsAgents.Infrastructure.GitHub;
 using DevOpsAgents.Infrastructure.Local;
+using DevOpsAgents.Infrastructure.Notifications;
 using DevOpsAgents.Infrastructure.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -72,6 +73,15 @@ builder.Services.AddSingleton(sp => new Dispatcher(
 builder.Services.AddSingleton(sp => new DispatcherService(sp.GetRequiredService<Dispatcher>(), sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<LiveHub>>(),
     options, TimeSpan.FromMinutes(Math.Max(1, suite.Limits.IntervalMinutes)), sp.GetRequiredService<ILogger<DispatcherService>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());
+// D51: il supervisore, con Telegram se ci sono token e chat (~/.claude/telegram-token.txt, <dati>/telegram-chat.txt)
+builder.Services.AddSingleton(SuiteConfig.LoadSupervisor(root));
+builder.Services.AddSingleton<INotifier>(sp => options.Mode == "live"
+    ? TelegramNotifier.FromFiles(new HttpClient(), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"), dataDir)
+    : new TelegramNotifier(new HttpClient(), null, null, Path.Combine(storeDir, "telegram-topic.json")));
+builder.Services.AddSingleton(sp => new SupervisorService(sp.GetRequiredService<DispatcherService>(), options, sp.GetRequiredService<DevOpsAgents.Core.Supervision.SupervisorSettings>(),
+    suite, sp.GetRequiredService<IQuotaStore>(), sp.GetRequiredService<INotifier>(), sp.GetRequiredService<IClock>(), Path.Combine(storeDir, "supervisore.json"),
+    sp.GetRequiredService<ILogger<SupervisorService>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SupervisorService>());
 
 var app = builder.Build();
 app.UseCors();
@@ -126,6 +136,19 @@ api.MapPost("/system/pause", async (HttpRequest req, PriorityService p, Dispatch
     await p.SetSystemPausedAsync(active, ct);
     _ = await svc.RunNowAsync(true, ct: ct);
     return Results.Ok(new { systemPaused = active });
+});
+// D51: cosa aspetta una persona, secondo il supervisore (i problemi aperti), e un suo giro a richiesta (di prova: non manda niente)
+api.MapGet("/supervisor", (SupervisorService s) => new
+{
+    problems = s.State.Problems.Values.OrderByDescending(p => p.Problem.Urgent).ThenBy(p => p.FirstSeen)
+        .Select(p => new { key = p.Problem.Key, text = p.Problem.Text, action = p.Problem.Action, link = p.Problem.Link, urgent = p.Problem.Urgent, lines = p.Problem.Lines, since = p.FirstSeen, lastNotice = p.LastNotice }),
+    lastRun = s.State.LastRun,
+});
+api.MapPost("/supervisor", async (HttpRequest req, SupervisorService s, CancellationToken ct) =>
+{
+    if (!Allowed(req)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var plan = await s.RunOnceAsync(whatIf: true, ct);
+    return Results.Ok(new { urgent = plan.Urgent.Count, summary = plan.Summary.Count + plan.Releases.Count });
 });
 api.MapGet("/config", (SuiteConfig s) => new
 {

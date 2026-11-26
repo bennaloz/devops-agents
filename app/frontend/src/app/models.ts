@@ -24,6 +24,17 @@ export interface CardReport {
   whatToDo?: string[];
 }
 
+/** D51: un problema aperto del supervisore: la cosa, il gesto esatto, il link. */
+export interface SupervisorProblem {
+  key: string;
+  text: string;
+  action: string;
+  link?: string;
+  urgent: boolean;
+  lines?: string[];
+  since: string;
+}
+
 /** D60: una Feature aperta, in ordine di priorita (l'ordine del backlog). */
 export interface FeatureReport {
   id: number;

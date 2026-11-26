@@ -97,7 +97,8 @@ script al posto di claude).
 | Passata del responsabile prima di un on-hold (D42), on-hold sciolti da soli quando la validazione torna verde (D51), ripresa automatica una volta dopo silenzio o processo morto, sessione fallita in on-hold | portato, con test |
 | Presa in carico da un altro PC (`AdottaCard`): worktree dal ramo pubblicato, PR collegata per le card gia unite, attesa se la sessione dell'altro PC e recente; commenti di avvio e fine sessione compatibili con il PowerShell | portato, con test. Manca: togliere i worktree delle card cedute a un collega |
 | Mentore e memoria dei ruoli (D46) | **manca** |
-| Supervisore, Telegram, aggiornamento automatico della suite (D53) | **manca** |
+| Supervisore (D51): smistatore fermo o che si interrompe, PAT rifiutato o in scadenza, card in on-hold con il gesto e le card che tiene ferme, prove in Test, domande del responsabile, card ferme da ore senza motivo, card che saltano per errore, rilasci in attesa per area con le soglie, quota; problemi aperti con primo visto e ricordi; urgenti subito, riepilogo ai feriali, rilasci a parte; Telegram con i topic | portato, con test; la dashboard ha il riquadro "Da fare per te". Manca: la diagnosi con un modello e i controlli sulle pipeline |
+| Aggiornamento automatico della suite (D53) | **manca** |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
 | `card.ps1` (il punto d'ingresso degli agenti sulla board) | resta quello PowerShell, che i brief usano gia |
 | Installazione come servizio Windows / container | **manca** |

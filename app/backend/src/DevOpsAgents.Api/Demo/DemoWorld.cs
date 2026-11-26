@@ -97,7 +97,8 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
         return Task.CompletedTask;
     }
     public Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<FeatureInfo>>(_features.ToList()); }
-    public Task<int?> GetLinkedPullRequestIdAsync(int cardId, CancellationToken ct = default) => Task.FromResult<int?>(null);
+    // la card 105 e gia stata unita da un altro PC: la sua PR (completata) e collegata alla card
+    public Task<int?> GetLinkedPullRequestIdAsync(int cardId, CancellationToken ct = default) => Task.FromResult<int?>(cardId == 105 ? 9105 : null);
     public Task<(string Branch, string Folder)?> CreateWorktreeFromRemoteAsync(AreaMapping a, Card c, CancellationToken ct = default) => Task.FromResult<(string, string)?>(null);
     public Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<Card>>(_cards.Where(c => c.ParentId == featureId).ToList()); }
     public Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default)
@@ -148,6 +149,7 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
     public Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping a, string prefix, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<string>>(_branches.Where(b => b.StartsWith(prefix)).ToList()); }
     public Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping a, int id, CancellationToken ct = default)
     {
+        if (id == 9105) return Task.FromResult<(string, string)?>((PrStatuses.Completed, "feature/105-stato"));
         lock (_lock) return Task.FromResult<(string, string)?>(_prs.Where(p => p.Value.Id == id).Select(p => ((string, string)?)(p.Value.Status, p.Key)).FirstOrDefault());
     }
     public Task<string?> GetBuildErrorsAsync(AreaMapping a, int buildId, CancellationToken ct = default) => Task.FromResult<string?>(null);
@@ -177,11 +179,15 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
         lock (_lock)
         {
             if (!_sessions.TryGetValue(id, out var s)) return Task.FromResult<SessionResult?>(new SessionResult("fatto", "demo"));
-            if (s.Polls == 0) { _sessions[id] = s with { Polls = 1 }; return Task.FromResult<SessionResult?>(null); }
+            if (s.Polls == 0)
+            {
+                // il responsabile, nella realta, sposta la card con card.ps1 mentre lavora: qui lo fa la demo, prima della fine della sessione
+                var key = _names.KeyOf(CardById(s.Card).State);
+                if (s.Role == "responsabile" && key is K.New or K.NeedsClarification) Move(s.Card, _names[K.Ready]);
+                _sessions[id] = s with { Polls = 1 };
+                return Task.FromResult<SessionResult?>(null);
+            }
             _sessions.Remove(id);
-            var key = _names.KeyOf(CardById(s.Card).State);
-            // il responsabile, nella realta, sposta la card con card.ps1: qui lo fa la demo
-            if (s.Role == "responsabile" && key is K.New or K.NeedsClarification) Move(s.Card, _names[K.Ready]);
             var outcome = s.Role switch { "reviewer" or "collaudatore" => "superata", _ => "fatto" };
             return Task.FromResult<SessionResult?>(new SessionResult(outcome, $"[{s.Role}] sessione simulata\nESITO={outcome}"));
         }

@@ -26,6 +26,9 @@ public sealed class DispatcherService(Dispatcher dispatcher, IHubContext<LiveHub
 {
     private readonly SemaphoreSlim _one = new(1, 1);
     public RoundReport? Last { get; private set; }
+    /// <summary>Gli ultimi giri interrotti (quando e perche): il supervisore li guarda per "il giro si interrompe a ogni giro" e il PAT rifiutato.</summary>
+    public IReadOnlyList<(DateTimeOffset When, string Error)> Errors => _errors.ToList();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(DateTimeOffset, string)> _errors = new();
     public DateTimeOffset? NextRun { get; private set; }
     public bool Running => _one.CurrentCount == 0;
 
@@ -44,6 +47,8 @@ public sealed class DispatcherService(Dispatcher dispatcher, IHubContext<LiveHub
         {
             // un giro che si interrompe (PAT scaduto, rete) non ferma il servizio: lo dice il log, il giro dopo riprova
             logger.LogError(e, "giro interrotto");
+            _errors.Enqueue((DateTimeOffset.UtcNow, e.Message));
+            while (_errors.Count > 20) _errors.TryDequeue(out _);
             throw;
         }
         finally { _one.Release(); }

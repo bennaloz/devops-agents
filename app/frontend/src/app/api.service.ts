@@ -2,7 +2,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
 import { firstValueFrom } from 'rxjs';
-import { FeatureReport, RoundReport, Status, SuiteInfo } from './models';
+import { FeatureReport, RoundReport, Status, SuiteInfo, SupervisorProblem } from './models';
 
 /** Le chiamate all'API e gli aggiornamenti live (SignalR): ogni giro finito arriva da solo. */
 @Injectable({ providedIn: 'root' })
@@ -16,6 +16,7 @@ export class ApiService {
   readonly suite = signal<SuiteInfo | null>(null);
   readonly round = signal<RoundReport | null>(null);
   readonly features = signal<FeatureReport[]>([]);
+  readonly problems = signal<SupervisorProblem[]>([]);
   readonly live = signal(false);
   readonly error = signal<string | null>(null);
 
@@ -29,10 +30,20 @@ export class ApiService {
       this.status.set(status);
       this.suite.set(suite);
       if (round) { this.round.set(round); if (round.features) this.features.set(round.features); }
+      void this.refreshProblems();
       this.error.set(null);
     } catch (e) {
       this.error.set(`API non raggiungibile: ${(e as Error).message}`);
     }
+  }
+
+  /** D51: i problemi aperti del supervisore, dopo un suo giro di prova (che non manda niente). */
+  async refreshProblems(): Promise<void> {
+    try {
+      await firstValueFrom(this.http.post('/api/supervisor', null, { headers: this.writeHeaders }));
+      const r = await firstValueFrom(this.http.get<{ problems: SupervisorProblem[] }>('/api/supervisor'));
+      this.problems.set(r.problems);
+    } catch { /* la prossima volta */ }
   }
 
   async refreshStatus(): Promise<void> {
@@ -53,6 +64,7 @@ export class ApiService {
   private setRound(r: RoundReport): void {
     this.round.set(r);
     if (r.features) this.features.set(r.features);
+    void this.refreshProblems();
   }
 
   /** D60: pausa o ripresa di una Feature, e il riordino (dopo = id della Feature che la precede, 0 = in cima). */
