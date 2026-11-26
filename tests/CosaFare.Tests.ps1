@@ -11,6 +11,9 @@ Describe 'Get-IndicazioniPersona' {
         $i.PercheNonAgenti | Should -Be 'dev non rilancia una build (D38)'
         $i.Fonte | Should -Be 'agente'
     }
+    It 'la riga del brief del responsabile, Per il titolare:, vale come Per Titolare:' {
+        (Get-IndicazioniPersona "Per il titolare: rilancia la validazione`nPerche: instabile").Gesto | Should -Be 'rilancia la validazione'
+    }
     It 'senza la riga Per Titolare non ci sono indicazioni' {
         Get-IndicazioniPersona "Perche: qualcosa`nESITO=bloccato" | Should -BeNullOrEmpty
         Get-IndicazioniPersona '' | Should -BeNullOrEmpty

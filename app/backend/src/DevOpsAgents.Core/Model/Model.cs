@@ -135,6 +135,8 @@ public sealed class CardLocalState
     public Dictionary<string, SessionRecord> LastSessionByRole { get; set; } = new();
     /// <summary>Come ripartire quando una persona toglie l'on-hold: sessione, limite, deploy, quota.</summary>
     public string? WaitingFor { get; set; }
+    /// <summary>D57: cosa deve fare una persona per l'on-hold in corso (gesto, perche, perche non gli agenti).</summary>
+    public Decisions.Indications? OnHoldIndications { get; set; }
     public int ReviewRounds { get; set; }
     public int RedInARow { get; set; }
     public int TestRounds { get; set; }

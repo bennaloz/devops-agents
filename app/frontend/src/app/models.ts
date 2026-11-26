@@ -20,6 +20,8 @@ export interface CardReport {
   runningRole?: string;
   error?: string;
   featureId?: number;
+  /** D57: per una card in on-hold, i passi in ordine per sbloccarla. */
+  whatToDo?: string[];
 }
 
 /** D60: una Feature aperta, in ordine di priorita (l'ordine del backlog). */

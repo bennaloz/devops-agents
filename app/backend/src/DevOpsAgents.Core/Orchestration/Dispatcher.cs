@@ -16,7 +16,9 @@ public sealed record DispatcherOptions
 
 /// <summary>Cosa e successo a una card in un giro: le azioni decise (ed eseguite, se non e un giro di prova), il motivo, l'errore.</summary>
 public sealed record CardReport(int Id, string Title, string State, string? StateKey, string? Area, string? AssignedTo, string? Url,
-    IReadOnlyList<string> Actions, BlockReason? Reason, string? RunningRole, string? Error, int? FeatureId = null);
+    IReadOnlyList<string> Actions, BlockReason? Reason, string? RunningRole, string? Error, int? FeatureId = null,
+    /// <summary>D57: per una card in on-hold, i passi in ordine per sbloccarla.</summary>
+    IReadOnlyList<string>? WhatToDo = null);
 
 /// <summary>Una Feature come la vede la dashboard: in ordine di priorita, con la pausa.</summary>
 public sealed record FeatureReport(int Id, string Title, string State, double? Rank, bool Paused, string? Area);
@@ -48,6 +50,8 @@ public sealed class Dispatcher(
 {
     private readonly DispatcherOptions _options = options ?? new DispatcherOptions();
     private const string DeployMark = "Parametri del deploy in Test:";
+    /// <summary>Il tetto della descrizione di una PR su Azure DevOps (4000) meno la firma che aggiunge il provider.</summary>
+    public const int PrDescriptionLimit = 4000 - 70;
     private static readonly Regex DeployLine = new(@"^\s*\[responsabile\]\s*" + Regex.Escape(DeployMark) + "(.*)$", RegexOptions.Compiled);
 
     public async Task<RoundReport> RunRoundAsync(bool whatIf, int? onlyCard = null, CancellationToken ct = default)
@@ -141,7 +145,9 @@ public sealed class Dispatcher(
                 }
                 foreach (var d in described) Log($"card {card.Id}: {(whatIf ? "farei " : "")}{d}");
                 if (decision.Reason is { } r) Log($"card {card.Id}: ferma ({r.Type}{(r.Detail is null ? "" : $": {r.Detail}")})");
-                reports.Add(Report(card, described, decision.Reason, running, null));
+                var todo = decision.Reason?.Type == "onHold" || decision.Actions.Any(a => a is PutOnHold)
+                    ? local.OnHoldIndications is { } ind ? WhatToDo.Lines(ind, local.WaitingFor) : null : null;
+                reports.Add(Report(card, described, decision.Reason, running, null) with { WhatToDo = todo });
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {
@@ -283,10 +289,15 @@ public sealed class Dispatcher(
                 await board.AddCommentAsync(card.Id, $"[smistatore] {b.Reason}", ct);
                 break;
             case PutOnHold h:
+            {
+                // D57: il commento chiude con la sezione Cosa fare: le righe del ruolo che ha visto la causa, o il testo predefinito
+                var indications = WhatToDo.Resolve(WhatToDo.LatestSession(local)?.Text, h.Reason, h.For, null);
                 await board.AddTagAsync(card.Id, names.OnHoldTag, ct);
-                await board.AddCommentAsync(card.Id, $"{Mention(card)}[smistatore] on-hold: {h.Reason}", ct);
+                await board.AddCommentAsync(card.Id, $"{Mention(card)}[smistatore] {h.Reason}\n\n{WhatToDo.Format(indications, h.For)}", ct);
                 local.WaitingFor = h.For;
+                local.OnHoldIndications = indications;
                 break;
+            }
             case Notify n:
                 await board.AddCommentAsync(card.Id, $"{Mention(card)}[smistatore] {n.Text}", ct);
                 local.Notices.Add(n.Key);
@@ -301,7 +312,15 @@ public sealed class Dispatcher(
                 break;
             case OpenPr when local.Branch is { } br:
                 var host = code.For(area);
-                var (prId, url) = await host.CreatePullRequestAsync(area, br, local.Destination ?? "develop", $"#{card.Id} {card.Title}", $"Card #{card.Id}: {card.Title}", card.Id, ct);
+                // D58: sotto il link alla card, il testo che dev ha salvato con descrizione-pr prima che la PR esistesse, se sta nel tetto
+                var description = $"[Card {card.Id}]({board.CardUrl(card.Id)}): {card.Title}";
+                if (WhatToDo.SavedPrDescription(await board.GetCommentsAsync(card.Id, ct)) is { } saved)
+                {
+                    var joined = $"{description}\n\n{saved}";
+                    if (joined.Length <= PrDescriptionLimit) description = joined;
+                    else logger.LogWarning("card {Card}: la descrizione salvata non sta nel tetto della PR, la PR si apre senza", card.Id);
+                }
+                var (prId, url) = await host.CreatePullRequestAsync(area, br, local.Destination ?? "develop", WhatToDo.PrTitle(br, card.Title), description, card.Id, ct);
                 local.PrId = prId;
                 if (host.NeedsCardLink) await board.AddLinkAsync(card.Id, url, $"PR {prId}", ct);
                 break;

@@ -8,7 +8,8 @@ Import-Module (Join-Path $PSScriptRoot 'Comune.psm1') -Global
 
 # Le tre righe del ruolo, cercate a inizio riga con o senza elenco, citazione o grassetto, e con o senza accento.
 $script:Etichette = [ordered]@{
-    Gesto           = 'Per Titolare'
+    # il brief del responsabile dice "Per il titolare:"; si accetta anche la forma senza articolo
+    Gesto           = 'Per (?:il )?titolare'
     PercheNonAgenti = 'Perch(?:e|é|è) non gli agenti'
     Perche          = 'Perch(?:e|é|è)'
 }

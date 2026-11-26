@@ -83,3 +83,7 @@ button.attivo { border-color: var(--arancio); color: var(--arancio); }
 .feature .nome { flex: 1 1 180px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .feature .quante { color: var(--testo-tenue); font-size: 12px; }
 .feature .tasti { display: flex; gap: 4px; margin-left: auto; }
+
+.cosa-fare { font-size: 12px; border: 1px solid var(--arancio); border-radius: 6px; padding: 6px 8px; }
+.cosa-fare b { color: var(--arancio); }
+.cosa-fare p { margin: 4px 0 0; }

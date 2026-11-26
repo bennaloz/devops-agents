@@ -84,6 +84,12 @@
             } @else if (c.reason) {
               <div class="motivo">{{ describeReason(c.reason) }}</div>
             }
+            @if (c.whatToDo?.length) {
+              <div class="cosa-fare">
+                <b>Cosa fare</b>
+                @for (r of c.whatToDo; track $index) { <p>{{ r }}</p> }
+              </div>
+            }
             @if (c.actions.length) {
               <ul class="azioni">
                 @for (a of c.actions; track $index) { <li>{{ a }}</li> }

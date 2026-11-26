@@ -21,6 +21,8 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     public Dictionary<string, SessionResult?> Results { get; } = new();
     public List<string> Writes { get; } = [];
     public bool LinksPr { get; set; }
+    public string? LastPrTitle { get; private set; }
+    public string? LastPrDescription { get; private set; }
     public DateTimeOffset Now { get; set; } = Fx.T0.AddHours(1);
     private int _sessions;
 
@@ -64,6 +66,7 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     public Task<(int Id, string Url)> CreatePullRequestAsync(AreaMapping a, string branch, string dest, string title, string desc, int cardId, CancellationToken ct = default)
     {
         Writes.Add($"pr {branch}->{dest}");
+        LastPrTitle = title; LastPrDescription = desc;
         Prs[branch] = new PullRequestInfo(99, PrStatuses.Active, Validations.Running);
         return Task.FromResult((99, "https://github.com/acme/web/pull/99"));
     }
@@ -206,7 +209,8 @@ public class DispatcherTests
         w.State[42].LastSessionByRole["dev"] = Fx.Session("dev", null);
         await w.Dispatcher().RunRoundAsync(whatIf: false);
         Assert.Contains($"tag 42 {Fx.Names.OnHoldTag}", w.Writes);
-        Assert.Contains(w.Writes, x => x.StartsWith("commento 42 @Titolare [smistatore] on-hold: La sessione di dev e finita senza riga ESITO"));
+        Assert.Contains(w.Writes, x => x.StartsWith("commento 42 @Titolare [smistatore] La sessione di dev e finita senza riga ESITO\n\n**Cosa fare**\n\n1. "));
+        Assert.Equal("predefinita", w.State[42].OnHoldIndications!.Source);
         Assert.Equal("sessione", w.State[42].WaitingFor);
     }
 
