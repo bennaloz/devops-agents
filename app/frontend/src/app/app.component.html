@@ -1,0 +1,82 @@
+<header class="testata">
+  <div class="titolo">
+    <h1>DevOps.Agents</h1>
+    @if (api.status(); as s) {
+      <span class="pillola" [class.demo]="s.mode === 'demo'">{{ s.mode === 'demo' ? 'demo' : s.boardProject }}</span>
+      <span class="pillola" [class.spenta]="!s.allowWrites" title="Con la scrittura spenta ogni giro e di prova: non tocca board, repo ne pipeline">
+        scrittura {{ s.allowWrites ? 'accesa' : 'spenta' }}
+      </span>
+      <span class="pillola" [class.spenta]="!api.live()">{{ api.live() ? 'live' : 'non connesso' }}</span>
+    }
+  </div>
+  <div class="comandi">
+    @if (api.round(); as r) {
+      <span class="quando">ultimo giro {{ r.finished | date: 'HH:mm:ss' }}{{ r.whatIf ? ' (di prova)' : '' }}</span>
+    }
+    <button type="button" (click)="run(true)" [disabled]="busy()">giro di prova</button>
+    <button type="button" class="primario" (click)="run(false)" [disabled]="busy() || !api.status()?.allowWrites"
+            [title]="api.status()?.allowWrites ? 'Esegue le azioni decise' : 'Accendi AllowWrites nella configurazione per eseguire le azioni'">
+      giro adesso
+    </button>
+  </div>
+</header>
+
+@if (api.error(); as e) {
+  <div class="banner">{{ e }}</div>
+}
+
+<section class="numeri">
+  <div><b>{{ counts().total }}</b> card</div>
+  <div><b>{{ counts().sessions }}</b> sessioni in corso</div>
+  <div><b>{{ counts().blocked }}</b> ferme</div>
+  <div [class.rosso]="counts().errors > 0"><b>{{ counts().errors }}</b> errori</div>
+</section>
+
+<main class="corpo">
+  <div class="kanban">
+    @for (col of columns(); track col.key) {
+      <section class="colonna" [class.vuota]="col.cards.length === 0">
+        <h2>{{ col.name }} <span class="conta">{{ col.cards.length }}</span></h2>
+        @for (c of col.cards; track c.id) {
+          <article class="card {{ reasonClass(c) }}" [class.scelta]="selected() === c.id" (click)="toggle(c.id)" tabindex="0" (keydown.enter)="toggle(c.id)">
+            <div class="riga">
+              <a class="id" [href]="c.url" target="_blank" rel="noopener" (click)="$event.stopPropagation()">#{{ c.id }}</a>
+              @if (c.runningRole) {
+                <span class="ruolo" title="sessione in corso">{{ c.runningRole }}</span>
+              }
+            </div>
+            <div class="titolo-card">{{ c.title }}</div>
+            @if (c.area) { <div class="area">{{ c.area }}</div> }
+            @if (c.error) {
+              <div class="motivo">errore: {{ c.error }}</div>
+            } @else if (c.reason) {
+              <div class="motivo">{{ describeReason(c.reason) }}</div>
+            }
+            @if (c.actions.length) {
+              <ul class="azioni">
+                @for (a of c.actions; track $index) { <li>{{ a }}</li> }
+              </ul>
+            }
+          </article>
+        }
+      </section>
+    }
+  </div>
+
+  <aside class="log">
+    <h2>
+      {{ selected() === null ? 'Log del giro' : 'Card #' + selected() }}
+      @if (selected() !== null) { <button type="button" class="piccolo" (click)="selected.set(null)">tutte</button> }
+    </h2>
+    @if (selectedCard(); as c) {
+      <dl>
+        <dt>Stato</dt><dd>{{ c.state }}</dd>
+        <dt>Assegnata a</dt><dd>{{ c.assignedTo ?? '-' }}</dd>
+        <dt>Sessione</dt><dd>{{ c.runningRole ?? 'nessuna' }}</dd>
+      </dl>
+    }
+    <ol>
+      @for (l of selectedLog(); track $index) { <li>{{ l }}</li> } @empty { <li class="niente">niente da fare in questo giro</li> }
+    </ol>
+  </aside>
+</main>

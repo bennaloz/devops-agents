@@ -31,6 +31,10 @@ scritto in PowerShell 7 e usa le attività pianificate e DPAPI di Windows.
 
 I test si lanciano con `pwsh -NoProfile -File ci/Invoke-PrValidation.ps1` (Pester, test degli hook, PSScriptAnalyzer).
 
+In `app/` c'è una prima versione dello stesso sistema in .NET 8 e Angular, pensata come prodotto: stesso motore decisionale
+per le card isolate, provider Azure DevOps e GitHub, dashboard con aggiornamenti live e una modalità demo. Cosa c'è e cosa
+manca rispetto alla versione PowerShell è in `app/README.md`.
+
 ### Il codice su Azure Repos o su GitHub
 
 La board resta sempre su Azure DevOps. Il codice di ogni area può stare su Azure Repos (il default) o su GitHub: lo dice
