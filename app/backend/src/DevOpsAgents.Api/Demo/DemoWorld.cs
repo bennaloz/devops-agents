@@ -97,6 +97,8 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
         return Task.CompletedTask;
     }
     public Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<FeatureInfo>>(_features.ToList()); }
+    public Task<int?> GetLinkedPullRequestIdAsync(int cardId, CancellationToken ct = default) => Task.FromResult<int?>(null);
+    public Task<(string Branch, string Folder)?> CreateWorktreeFromRemoteAsync(AreaMapping a, Card c, CancellationToken ct = default) => Task.FromResult<(string, string)?>(null);
     public Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<Card>>(_cards.Where(c => c.ParentId == featureId).ToList()); }
     public Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default)
     {

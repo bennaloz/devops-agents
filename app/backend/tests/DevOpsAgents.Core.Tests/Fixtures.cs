@@ -23,6 +23,19 @@ internal static class Fx
 
     public static string N(string key) => Names[key];
 
+    /// <summary>
+    /// L'on-hold deciso: diretto, o (D42) la passata del responsabile che lo precede (AvviaPassataAttesa + responsabile "attesa"): in tutti e
+    /// due i casi il motivo, il per e il tipo sono quelli dell'on-hold.
+    /// </summary>
+    public static PutOnHold Hold(Decision d)
+    {
+        var real = d.Actions.Where(a => a is not ResetCounters and not ResetDeploy and not ResetHoldReviews).ToList();
+        if (real is [PutOnHold h]) return h;
+        if (real is [StartHoldReview r, LaunchSession { Role: "responsabile", Reason: "attesa" }])
+            return new PutOnHold(r.Reason, r.For, WaitKind: r.Key == r.Reason ? null : r.Key);
+        throw new Xunit.Sdk.XunitException($"nessun on-hold: {string.Join(", ", d.Actions.Select(a => a.Kind))}");
+    }
+
     public static DecisionContext Ctx(int active = 0, Limits? limits = null, QuotaInfo? quota = null,
         Dictionary<string, IReadOnlyList<int>>? inDev = null, Dictionary<string, IReadOnlyList<int>>? inTest = null) =>
         new(Names, limits ?? new Limits(), T0.AddHours(1), active, [], inDev, inTest, quota);
@@ -66,6 +79,11 @@ internal sealed class CardBuilder(string stateKey)
     private readonly List<Comment> _all = [];
     public CardLocalState Local { get; } = new();
 
+    // una card in uno stato con il ramo ha il suo ramo nello stato locale (senza, e una presa in carico da un altro PC)
+    private readonly bool _withBranch = StateKeys.WithBranch.Contains(stateKey);
+    private bool _noBranch;
+    public CardBuilder NoBranch() { Local.Branch = null; _noBranch = true; return this; }
+
     public CardBuilder Tag(string tag) { _tags.Add(tag); return this; }
     public CardBuilder Parent(int featureId) { _parent = featureId; return this; }
     /// <summary>D52: la funzionalita della card (Feature 10, card di chiusura 90).</summary>
@@ -103,6 +121,7 @@ internal sealed class CardBuilder(string stateKey)
 
     public Snapshot Build()
     {
+        if (_withBranch && Local.Branch is null && !_noBranch) Local.Branch = "feature/42-card";
         var history = new List<StateChange>(_history);
         if (_from is not null) history.Add(new StateChange(10, Fx.N(_from), Fx.N(stateKey), Fx.T0));
         var card = new Card(42, 12, "Importare le stime", Fx.N(stateKey), _tags, _area?.Area, ParentId: _parent);

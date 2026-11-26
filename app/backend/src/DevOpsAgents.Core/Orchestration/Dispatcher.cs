@@ -68,7 +68,8 @@ public sealed class Dispatcher(
         void Log(string m) { log.Add(m); logger.LogInformation("{Message}", m); }
 
         var state = await store.LoadAsync(ct);
-        if (!whatIf) await CloseFinishedSessionsAsync(state, Log, ct);
+        var active = (await board.GetActiveCardsAsync(ct)).ToDictionary(c => c.Id);
+        if (!whatIf) await CloseFinishedSessionsAsync(state, active, Log, ct);
 
         // D60: le Feature aperte, per la pausa e per l'ordine. Se non si leggono il giro si ferma: senza, una Feature in pausa ripartirebbe.
         var features = await board.GetOpenFeaturesAsync(areas.Select(a => a.Area).ToList(), ct);
@@ -82,7 +83,7 @@ public sealed class Dispatcher(
         _me = await board.GetCurrentUserAsync(ct);
         var me = _options.OnlyMine ? _me : null;
         // D60: un posto libero (sessioni, repo, Test) va alla card della Feature piu in alto
-        var cards = FeaturePriority.OrderCards((await board.GetActiveCardsAsync(ct))
+        var cards = FeaturePriority.OrderCards(active.Values
             .Where(c => onlyCard is null || c.Id == onlyCard)
             .Where(c => me is null || c.AssignedTo?.Id == me.Id), features).ToList();
 
@@ -126,10 +127,10 @@ public sealed class Dispatcher(
                     continue;
                 }
                 var snapshot = await BuildSnapshotAsync(card, local, area, ct);
-                var active = state.Values.Count(s => s.RunningSession is not null);
+                var activeSessions = state.Values.Count(x => x.RunningSession is not null);
                 var ctx = baseCtx with
                 {
-                    ActiveSessions = active,
+                    ActiveSessions = activeSessions,
                     CardsWithSession = state.Where(kv => kv.Value.RunningSession is not null).Select(kv => kv.Key).ToList(),
                     InDevelopmentByRepo = inDev.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase),
                     InTestByComponent = inTest.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase),
@@ -183,33 +184,89 @@ public sealed class Dispatcher(
 
     // ---- sessioni finite ---------------------------------------------------------------------------------------------
 
-    private async Task CloseFinishedSessionsAsync(Dictionary<int, CardLocalState> state, Action<string> log, CancellationToken ct)
+    /// <summary>
+    /// Le sessioni finite, come Close-Sessione: l'esito si registra; una sessione senza risultato (silenzio o processo morto) la prima volta si
+    /// riprende da sola senza on-hold (D51), la seconda va in on-hold con la causa; una fallita va in on-hold; sul limite di token si aspetta
+    /// la quota. La quota letta dalla sessione si salva.
+    /// </summary>
+    private async Task CloseFinishedSessionsAsync(Dictionary<int, CardLocalState> state, Dictionary<int, Card> cards, Action<string> log, CancellationToken ct)
     {
         foreach (var (id, local) in state)
         {
             if (local.RunningSession is not { } sid || local.LastRole is not { } role) continue;
             var result = await sessions.PollAsync(sid, ct);
-            var s = local.Of(role);
-            // ancora in corso. Il silenzio (nessun evento da silenzioMinuti) lo giudica il runner: chiude il processo e restituisce
-            // un risultato senza esito, che la regola "senza ESITO" mette in attesa.
+            // ancora in corso. Il silenzio lo giudica il runner: chiude il processo e restituisce un risultato senza esito.
             if (result is null) continue;
-            if (s is not null) { s.End = clock.Now; s.Outcome = result.Outcome; s.Text = result.Text; }
+            var s = local.Of(role);
+            var card = cards.GetValueOrDefault(id);
             local.RunningSession = null;
-            if (quotaStore is not null && (result.Quota is not null || result.HitTokenLimit))
+            if (quotaStore is not null && (result.Quota is not null || result.HitTokenLimit)) await SaveQuotaAsync(result, ct);
+
+            if (result.NoResultCause is { } cause)
             {
-                // D51: la quota e una sola per tutti i ruoli; vale l'ultima letta. Sul limite di token, pausa fino al reset (piu un margine).
-                var current = await quotaStore.LoadAsync(ct) ?? new QuotaInfo(null, null, null);
-                var q = result.Quota is { } r ? current with
+                if (s is not null) { s.End = null; s.Outcome = null; s.Text = null; }
+                var what = cause == "silenzio" ? $"e rimasta in silenzio per piu di {limits.SilenceMinutes} minuti ed e stata chiusa" : "e terminata senza dare un risultato (il processo non c'e piu)";
+                if (card is null) { log($"card {id}: sessione {sid} chiusa ({cause}), ma la card non e piu fra le attive: nessun on-hold"); continue; }
+                if (local.AutoResumes < 1)
                 {
-                    WeeklyUtilization = r.WeeklyUtilization ?? current.WeeklyUtilization, WeeklyResetsAt = r.WeeklyResetsAt ?? current.WeeklyResetsAt,
-                    FiveHourUtilization = r.FiveHourUtilization ?? current.FiveHourUtilization, FiveHourResetsAt = r.FiveHourResetsAt ?? current.FiveHourResetsAt,
-                } : current;
-                if (result.HitTokenLimit) q = q with { PauseUntil = (result.LimitResetsAt ?? clock.Now).AddMinutes(5) };
-                await quotaStore.SaveAsync(q, ct);
+                    local.WaitingFor = "sessione"; local.ResumedBySystem = true; local.AutoResumes++; local.HoldCause = null;
+                    log($"card {id}: sessione {sid} ({role}) {what}: la riprendo da sola, una volta, senza on-hold");
+                    await board.AddCommentAsync(id, $"[smistatore] La sessione di {role} {what}. La riprendo da sola, una volta: se si ferma di nuovo la card va in on-hold.", ct);
+                }
+                else
+                {
+                    var reason = cause == "silenzio"
+                        ? $"La sessione di {role} e rimasta in silenzio per piu di {limits.SilenceMinutes} minuti ed e stata chiusa. Si puo riprendere togliendo il tag {names.OnHoldTag}."
+                        : $"La sessione di {role} e terminata senza dare un risultato (il processo non c'e piu): non riprovo da solo.";
+                    await PutOnHoldAsync(card, local, reason, "sessione", cause, ct);
+                    cards[id] = WithOnHold(card);
+                }
+                continue;
             }
-            if (result.HitTokenLimit) local.WaitingFor = "quota";
-            log($"card {id}: sessione di {role} finita, ESITO={result.Outcome ?? "(nessuno)"}");
+
+            if (s is not null) { s.End = clock.Now; s.Outcome = result.Failed || result.HitTokenLimit ? null : result.Outcome; s.Text = result.Text; }
+            if (result.HitTokenLimit)
+            {
+                local.WaitingFor = "quota";
+                if (card is not null) await board.AddCommentAsync(id, $"[smistatore] La sessione di {role} si e fermata sul limite di token e riprende da sola dopo il reset.", ct);
+            }
+            else if (result.Failed && card is not null)
+            {
+                await PutOnHoldAsync(card, local, $"La sessione di {role} e fallita (errore, oppure comandi negati dai permessi): non riprovo da solo. Il registro delle sessioni ha i dettagli.", "sessione", "fallita", ct);
+                cards[id] = WithOnHold(card);
+            }
+            else if (card is not null)
+                await board.AddCommentAsync(id, $"[smistatore] Sessione {sid} finita: ruolo {role}, esito {(result.Outcome is { } o ? $"**{o}**" : "senza riga ESITO")}.", ct);
+            log($"card {id}: sessione di {role} finita, ESITO={result.Outcome ?? "(nessuno)"}{(result.Failed ? ", FALLITA" : "")}");
         }
+    }
+
+    private async Task SaveQuotaAsync(SessionResult result, CancellationToken ct)
+    {
+        // D51: la quota e una sola per tutti i ruoli; vale l'ultima letta. Sul limite di token, pausa fino al reset (piu un margine).
+        var current = await quotaStore!.LoadAsync(ct) ?? new QuotaInfo(null, null, null);
+        var q = result.Quota is { } r ? current with
+        {
+            WeeklyUtilization = r.WeeklyUtilization ?? current.WeeklyUtilization, WeeklyResetsAt = r.WeeklyResetsAt ?? current.WeeklyResetsAt,
+            FiveHourUtilization = r.FiveHourUtilization ?? current.FiveHourUtilization, FiveHourResetsAt = r.FiveHourResetsAt ?? current.FiveHourResetsAt,
+        } : current;
+        if (result.HitTokenLimit) q = q with { PauseUntil = (result.LimitResetsAt ?? clock.Now).AddMinutes(5) };
+        await quotaStore.SaveAsync(q, ct);
+    }
+
+    /// <summary>La card del giro con il tag di on-hold appena messo: chi decide dopo, nello stesso giro, deve vederlo.</summary>
+    private Card WithOnHold(Card c) => c with { Tags = c.Tags.Append(names.OnHoldTag).ToList() };
+
+    /// <summary>Set-InAttesa: il tag, il commento con la menzione e la sezione Cosa fare (D57), come ripartire e la causa.</summary>
+    private async Task PutOnHoldAsync(Card card, CardLocalState local, string reason, string? waitingFor, string? cause, CancellationToken ct)
+    {
+        var indications = WhatToDo.Resolve(WhatToDo.LatestSession(local)?.Text, reason, waitingFor, cause);
+        await board.AddTagAsync(card.Id, names.OnHoldTag, ct);
+        await board.AddCommentAsync(card.Id, $"{Mention(card)}[smistatore] {reason}\n\n{WhatToDo.Format(indications, waitingFor)}", ct);
+        local.WaitingFor = waitingFor;
+        local.OnHoldIndications = indications;
+        local.HoldCause = cause;
+        local.ResumedBySystem = false;
     }
 
     // ---- istantanea --------------------------------------------------------------------------------------------------
@@ -369,9 +426,11 @@ public sealed class Dispatcher(
                 if (cb.FromLinkedPr)
                 {
                     // in Ready to release senza stato locale il ramo e gia cancellato dal merge: lo ricorda la PR della card
-                    if (local.PrId is not { } linkedId || await code.For(area).GetPullRequestByIdAsync(area, linkedId, ct) is not { Status: PrStatuses.Completed } linked)
+                    var linkedId = local.PrId ?? await board.GetLinkedPullRequestIdAsync(card.Id, ct);
+                    if (linkedId is null || await code.For(area).GetPullRequestByIdAsync(area, linkedId.Value, ct) is not { Status: PrStatuses.Completed } linked)
                         throw new InvalidOperationException($"La card di chiusura {card.Id} e in Ready to release ma non ha una PR completata nota: non so quale ramo guardare");
                     local.Branch = linked.Branch;
+                    local.PrId = linkedId;
                 }
                 else local.Branch = cb.Branch;
                 local.Destination = "develop";
@@ -415,15 +474,30 @@ public sealed class Dispatcher(
                 await board.AddCommentAsync(card.Id, $"[smistatore] {b.Reason}", ct);
                 break;
             case PutOnHold h:
-            {
                 // D57: il commento chiude con la sezione Cosa fare: le righe del ruolo che ha visto la causa, o il testo predefinito
-                var indications = WhatToDo.Resolve(WhatToDo.LatestSession(local)?.Text, h.Reason, h.For, null);
-                await board.AddTagAsync(card.Id, names.OnHoldTag, ct);
-                await board.AddCommentAsync(card.Id, $"{Mention(card)}[smistatore] {h.Reason}\n\n{WhatToDo.Format(indications, h.For)}", ct);
-                local.WaitingFor = h.For;
-                local.OnHoldIndications = indications;
+                await PutOnHoldAsync(card, local, h.Reason, h.For, null, ct);
                 break;
-            }
+            case StartHoldReview r:
+                local.HoldInReview = new HoldReview(r.Reason, r.For, r.Role, r.Key);
+                local.PassesDone.Add(r.Key);
+                break;
+            case CloseHoldReview c:
+                local.HoldInReview = null;
+                local.LastRole = c.Role;
+                break;
+            case ResetHoldReviews:
+                local.PassesDone.Clear();
+                local.AutoResumes = 0;
+                break;
+            case RemoveOnHold ro:
+                await board.RemoveTagAsync(card.Id, names.OnHoldTag, ct);
+                await board.AddCommentAsync(card.Id, $"[smistatore] tolgo l'on-hold: {ro.Cause}", ct);
+                local.WaitingFor = ro.For;
+                local.ResumedBySystem = true;
+                break;
+            case AdoptCard ad:
+                await AdoptAsync(ad, card, area, local, ct);
+                break;
             case Notify n:
                 await board.AddCommentAsync(card.Id, $"{Mention(card)}[smistatore] {n.Text}", ct);
                 local.Notices.Add(n.Key);
@@ -519,8 +593,11 @@ public sealed class Dispatcher(
             l.Resume ? previous?.Id : null, l.Resume, l.TaskId, local.Destination), ct);
         local.RunningSession = id;
         local.LastRole = l.Role;
+        local.ResumedBySystem = false;
         local.LastSessionByRole[l.Role] = new SessionRecord { Id = id, Role = l.Role, Reason = l.Reason, Start = clock.Now, TaskId = l.TaskId };
         local.WaitingFor = null;
+        // il commento dice agli altri smistatori che la card ha una sessione viva (una presa in carico aspetta, spec sezione 19)
+        await board.AddCommentAsync(s.Card.Id, $"[smistatore] Sessione {id} {(l.Resume ? "ripresa" : "avviata")}: ruolo {l.Role}, cartella {local.Folder ?? "-"}.", ct);
         // i commenti letti dalla sessione non fanno ripartire nessuno
         if (s.NewComments.Count > 0) local.LastCommentId = s.NewComments.Max(c => c.Id);
         switch (l.Role, l.Reason)
@@ -529,6 +606,40 @@ public sealed class Dispatcher(
             case ("dev", "rilievi"): local.ReviewRounds++; break;
             case ("responsabile", "collaudoRespinto"): local.TestRounds++; break;
         }
+    }
+
+    /// <summary>
+    /// Presa in carico (spec, sezione 19): il worktree dal ramo della card su origin. Senza ramo pubblicato: in Ready to release e In feature
+    /// branch la card ricorda la sua PR; In development si riparte da develop (o dal ramo della funzionalita); altrove non c'e lavoro da riprendere.
+    /// </summary>
+    private async Task AdoptAsync(AdoptCard ad, Card card, AreaMapping area, CardLocalState local, CancellationToken ct)
+    {
+        var key = names.KeyOf(card.State);
+        if (ad.FeatureCard && ad.Base is null && key != K.InFeatureBranch)
+            throw new InvalidOperationException($"Il ramo della funzionalita non e su origin: non posso riprendere la card {card.Id} da li");
+        var found = key == K.InFeatureBranch ? null : await workspace.CreateWorktreeFromRemoteAsync(area, card, ct);
+        string note;
+        if (found is null)
+        {
+            if (key is K.ReadyToRelease or K.InFeatureBranch)
+            {
+                // dopo il merge il ramo e cancellato: la card ricorda la sua PR
+                if (await board.GetLinkedPullRequestIdAsync(card.Id, ct) is not { } prId || await code.For(area).GetPullRequestByIdAsync(area, prId, ct) is not { Status: PrStatuses.Completed })
+                    throw new InvalidOperationException($"Su origin non c'e nessun ramo della card {card.Id} e nessuna PR collegata completata: non so cosa rilasciare");
+                local.PrId = prId;
+                if (ad.FeatureCard && ad.Base is not null) local.Destination = ad.Base;
+                logger.LogInformation("card {Card}: presa in carico gia unita (PR {Pr} completata), niente da fare", card.Id, prId);
+                return;
+            }
+            if (key != K.InDevelopment) throw new InvalidOperationException($"Su origin non c'e nessun ramo della card {card.Id}: in {card.State} non c'e lavoro da riprendere. Riportare la card in Ready to develop");
+            var (branch, folder) = await workspace.CreateWorktreeAsync(area, card, ad.Base, ct);
+            found = (branch, folder);
+            note = $"nessun ramo pubblicato: worktree nuovo da origin/{ad.Base ?? "develop"}, ramo `{branch}`.";
+        }
+        else note = $"worktree ricreato dal ramo `{found.Value.Branch}` pubblicato su origin.";
+        if (ad.FeatureCard) local.Destination = ad.Base;
+        local.Branch = found.Value.Branch; local.Folder = found.Value.Folder;
+        await board.AddCommentAsync(card.Id, $"[smistatore] Card presa in carico da {_me?.Name}: {note}", ct);
     }
 
     /// <summary>Il messaggio della sessione: la card, perche parte, l'allegato. Il resto lo dice il brief del ruolo.</summary>
@@ -540,7 +651,14 @@ public sealed class Dispatcher(
             $"Motivo del lancio: {l.Reason}.",
         };
         if (l.TaskId is { } t) lines.Add($"Lavori sul task {t}.");
-        if (l.Resume) lines.Add("Riprendi da dove eri arrivato: rileggi il brief del tuo ruolo e i commenti sulla card dopo il tuo ultimo.");
+        if (l.Resume)
+            lines.Add(l.ResumeKind switch
+            {
+                "dopoRipresaAutomatica" => "La tua sessione era stata chiusa dallo smistatore (in silenzio da troppo, oppure il processo era terminato senza risultato): nessuno ha tolto un on-hold. Riprendi da dove eri arrivato.",
+                "dopoQuota" => "La tua sessione si era fermata per il limite di token: nessuno ha tolto un on-hold e non e cambiato niente, la quota e tornata. Continua da dove eri arrivato.",
+                "dopoPassata" => "Il responsabile ha esaminato l'attesa per cui la card si stava fermando e ha sistemato la causa: leggi il suo commento sulla card, dice cosa ha cambiato.",
+                _ => "Chi ha la card ha tolto l'on-hold: qualcosa e cambiato da quando ti sei fermato. Prima di concludere rileggi il brief del tuo ruolo e i commenti sulla card dopo il tuo ultimo.",
+            });
         if (!string.IsNullOrWhiteSpace(l.Attachment)) lines.Add($"Allegato:\n{l.Attachment}");
         lines.Add("Chiudi con una riga ESITO=<esito> come dice il brief.");
         return string.Join("\n", lines);

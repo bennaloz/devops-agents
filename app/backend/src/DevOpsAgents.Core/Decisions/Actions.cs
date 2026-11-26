@@ -12,7 +12,9 @@ public sealed record LaunchSession(string Role, string Reason, string? Attachmen
     /// <summary>D52: il collaudatore della card di chiusura lavora in un worktree in sola lettura del ramo della funzionalita.</summary>
     bool ClosingWorktree = false,
     /// <summary>D52: la build della CI rossa data al responsabile della card di chiusura.</summary>
-    string? Build = null) : AgentAction
+    string? Build = null,
+    /// <summary>Come riparte una sessione ripresa: dopoPassata (D42), dopoQuota, dopoRipresaAutomatica (D51); null se l'ha sbloccata una persona.</summary>
+    string? ResumeKind = null) : AgentAction
 {
     public override string Kind => "LanciaSessione";
 }
@@ -103,6 +105,35 @@ public sealed record CreateCorrection(string Key, string Nature, string Title, s
 public sealed record CreateAlignDevelop(int FeatureId, string Branch, string Commit) : AgentAction
 {
     public override string Kind => "CreaAllineaDevelop";
+}
+
+/// <summary>D42: AvviaPassataAttesa, il responsabile esamina l'attesa prima dell'on-hold.</summary>
+public sealed record StartHoldReview(string Reason, string? For, string? Role, string Key) : AgentAction
+{
+    public override string Kind => "AvviaPassataAttesa";
+}
+
+public sealed record CloseHoldReview(string? Role) : AgentAction
+{
+    public override string Kind => "ChiudiPassataAttesa";
+}
+
+/// <summary>D42: una persona ha tolto l'on-hold: ogni tipo di attesa ha di nuovo la sua passata, e le riprese automatiche ripartono.</summary>
+public sealed record ResetHoldReviews : AgentAction
+{
+    public override string Kind => "AzzeraPassateAttesa";
+}
+
+/// <summary>D51: TogliAttesa, un on-hold che lo smistatore toglie perche un dato dice che la causa non c'e piu.</summary>
+public sealed record RemoveOnHold(string Cause, string? For) : AgentAction
+{
+    public override string Kind => "TogliAttesa";
+}
+
+/// <summary>AdottaCard: la card e arrivata da un altro PC, il lavoro e sul ramo pubblicato. Base: il ramo della funzionalita (D52).</summary>
+public sealed record AdoptCard(string? Base = null, bool FeatureCard = false) : AgentAction
+{
+    public override string Kind => "AdottaCard";
 }
 
 public sealed record ResetCiRed : AgentAction

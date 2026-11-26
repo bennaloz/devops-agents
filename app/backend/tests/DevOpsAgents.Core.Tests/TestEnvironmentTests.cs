@@ -46,7 +46,7 @@ public class TestEnvironmentTests
     [Fact]
     public void Un_ambiente_non_creato_va_in_attesa_deploy_con_il_log()
     {
-        var h = Assert.IsType<PutOnHold>(Assert.Single(_engine.Decide(InTest(K.DeployingToTest).Run("completed", "failed").Build(), Fx.Ctx()).Actions));
+        var h = Fx.Hold(_engine.Decide(InTest(K.DeployingToTest).Run("completed", "failed").Build(), Fx.Ctx()));
         Assert.Equal(("deploy", "deployFallito"), (h.For, h.WaitKind));
         Assert.Contains("ambiente di collaudo non creato, log: https://run/70", h.Reason);
     }
@@ -102,6 +102,7 @@ public class TestEnvironmentTests
         public bool Exists(string folder) => folder.StartsWith("/wt/");
         public Task<string> PublishFeatureBranchAsync(AreaMapping a, FeatureInfo f, bool bug, CancellationToken ct = default) => w.PublishFeatureBranchAsync(a, f, bug, ct);
         public Task<string> UpdateClosingWorktreeAsync(AreaMapping a, Card c, string branch, CancellationToken ct = default) => w.UpdateClosingWorktreeAsync(a, c, branch, ct);
+        public Task<(string Branch, string Folder)?> CreateWorktreeFromRemoteAsync(AreaMapping a, Card c, CancellationToken ct = default) => w.CreateWorktreeFromRemoteAsync(a, c, ct);
     }
 
     private static Dispatcher D(World w, Envs e) =>

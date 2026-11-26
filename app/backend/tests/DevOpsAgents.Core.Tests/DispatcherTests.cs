@@ -59,6 +59,15 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     public Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<FeatureInfo>>(Features.ToList());
     public Task SetRankAsync(int id, double rank, CancellationToken ct = default) { Writes.Add($"rank {id} {rank}"); return Task.CompletedTask; }
     public Dictionary<int, List<Card>> Children { get; } = new();
+    public int? LinkedPr { get; set; }
+    public Task<int?> GetLinkedPullRequestIdAsync(int cardId, CancellationToken ct = default) => Task.FromResult(LinkedPr);
+    public Dictionary<int, string> RemoteBranches { get; } = new();
+    public Task<(string Branch, string Folder)?> CreateWorktreeFromRemoteAsync(AreaMapping a, Card c, CancellationToken ct = default)
+    {
+        if (!RemoteBranches.TryGetValue(c.Id, out var b)) return Task.FromResult<(string, string)?>(null);
+        Writes.Add($"worktree remoto {c.Id} {b}");
+        return Task.FromResult<(string, string)?>((b, $"/wt/{c.Id}"));
+    }
     public Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Card>>(Children.GetValueOrDefault(featureId) ?? []);
     public List<NewBug> Bugs { get; } = [];
     public Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default) { Bugs.Add(bug); Writes.Add($"bug {bug.Title}"); return Task.FromResult(500 + Bugs.Count); }
@@ -143,7 +152,7 @@ public class DispatcherTests
         var w = new World();
         w.Add(42, K.Ready);
         await w.Dispatcher().RunRoundAsync(whatIf: false);
-        Assert.Equal(["worktree 42", $"stato 42 {Fx.N(K.InDevelopment)}"], w.Writes);
+        Assert.Equal(["worktree 42", $"stato 42 {Fx.N(K.InDevelopment)}", "commento 42 [smistatore] Sessione s1 avviata: ruolo dev, cartella /wt/42."], w.Writes);
         var s = Assert.Single(w.Started);
         Assert.Equal(("dev", "/wt/42"), (s.Role, s.WorkingFolder));
         Assert.Contains("Motivo del lancio: pronto", s.Message);
@@ -223,6 +232,8 @@ public class DispatcherTests
         w.Add(42, K.InDevelopment);
         w.State[42] = new CardLocalState { Branch = "b", LastRole = "dev" };
         w.State[42].LastSessionByRole["dev"] = Fx.Session("dev", null);
+        // la passata del responsabile per questo tipo di attesa c'e gia stata (D42): l'on-hold e diretto
+        w.State[42].PassesDone.Add("senzaEsito");
         await w.Dispatcher().RunRoundAsync(whatIf: false);
         Assert.Contains($"tag 42 {Fx.Names.OnHoldTag}", w.Writes);
         Assert.Contains(w.Writes, x => x.StartsWith("commento 42 @Titolare [smistatore] La sessione di dev e finita senza riga ESITO\n\n**Cosa fare**\n\n1. "));
@@ -283,7 +294,8 @@ public class DispatcherPriorityTests
         w.Results["s9"] = new SessionResult("fatto", "ok");
         var r = await D(w, new Settings(true)).RunRoundAsync(whatIf: false);
         Assert.True(r.SystemPaused);
-        Assert.Empty(w.Writes);
+        // l'unica scrittura e il commento che chiude la sessione finita
+        Assert.Equal(["commento 43 [smistatore] Sessione s9 finita: ruolo dev, esito **fatto**."], w.Writes);
         Assert.Empty(w.Started);
         Assert.All(r.Cards, c => Assert.Equal("pausaSistema", c.Reason!.Type));
         Assert.Null(w.State[43].RunningSession);

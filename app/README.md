@@ -93,9 +93,10 @@ script al posto di claude).
 | Collaudo nell'ambiente Docker della card (D59): creazione da compose nel worktree, slot e porte, limite `ambientiCollaudo`, URL al collaudatore, ambiente buttato all'uscita dal Test e orfani; credenziali di prova `COLLAUDO_*` al collaudatore | portato, con test (docker finto) |
 | Cosa fare negli on-hold (D57): gesto del ruolo o testo predefinito nel commento, nello stato e nella dashboard; descrizione della PR salvata prima della PR (D58) e titolo dal ramo | portato, con test |
 | Quota letta dai `rate_limit_event` delle sessioni, pausa dopo il limite di token (D51) | portato |
-| Funzionalita di piu card con card di chiusura (D52): ramo della funzionalita, card In feature branch, card di chiusura con PR verso develop, sorelle, vincolo sul commit, CI rossa al responsabile, Bug di correzione e allinea-develop, Feature Active e Resolved, worktree in sola lettura del collaudatore | portato, con test. Manca: la Feature che passa Closed quando la card di chiusura si chiude, e il ramo dalla PR collegata alla card per una chiusura senza stato locale |
-| Passata del responsabile prima di un on-hold (D42), on-hold sciolti da soli (D51), riprese automatiche dopo silenzio | **manca** |
-| Mentore e memoria dei ruoli (D46), presa in carico da un altro PC (`AdottaCard`), sessione altrui recente | **manca** |
+| Funzionalita di piu card con card di chiusura (D52): ramo della funzionalita, card In feature branch, card di chiusura con PR verso develop, sorelle, vincolo sul commit, CI rossa al responsabile, Bug di correzione e allinea-develop, Feature Active e Resolved, worktree in sola lettura del collaudatore | portato, con test. Manca: la Feature che passa Closed quando la card di chiusura si chiude |
+| Passata del responsabile prima di un on-hold (D42), on-hold sciolti da soli quando la validazione torna verde (D51), ripresa automatica una volta dopo silenzio o processo morto, sessione fallita in on-hold | portato, con test |
+| Presa in carico da un altro PC (`AdottaCard`): worktree dal ramo pubblicato, PR collegata per le card gia unite, attesa se la sessione dell'altro PC e recente; commenti di avvio e fine sessione compatibili con il PowerShell | portato, con test. Manca: togliere i worktree delle card cedute a un collega |
+| Mentore e memoria dei ruoli (D46) | **manca** |
 | Supervisore, Telegram, aggiornamento automatico della suite (D53) | **manca** |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
 | `card.ps1` (il punto d'ingresso degli agenti sulla board) | resta quello PowerShell, che i brief usano gia |

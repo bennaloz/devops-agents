@@ -99,7 +99,7 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
             if ((DateTime.UtcNow - last).TotalMinutes <= config.Limits.SilenceMinutes) return null;
             try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
             _processes.TryRemove(sessionId, out _);
-            return new SessionResult(null, $"chiusa dallo smistatore: nessun evento da {config.Limits.SilenceMinutes} minuti");
+            return new SessionResult(null, $"chiusa dallo smistatore: nessun evento da {config.Limits.SilenceMinutes} minuti", NoResultCause: "silenzio");
         }
         if (p is not null)
         {
@@ -117,8 +117,9 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
     /// </summary>
     public static SessionResult ParseResult(string logPath)
     {
-        if (!File.Exists(logPath)) return new SessionResult(null, "la sessione non ha scritto niente");
+        if (!File.Exists(logPath)) return new SessionResult(null, "la sessione non ha scritto niente", NoResultCause: "morta");
         string? text = null;
+        JsonNode? final = null;
         Core.Model.QuotaInfo? quota = null;
         JsonNode? rejected = null;
         foreach (var line in File.ReadLines(logPath))
@@ -127,7 +128,7 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
             JsonNode? n;
             try { n = JsonNode.Parse(line); } catch (System.Text.Json.JsonException) { continue; }
             var type = n?["type"]?.GetValue<string>();
-            if (type == "result") text = n!["result"]?.GetValue<string>() ?? "";
+            if (type == "result") { final = n; text = n!["result"]?.GetValue<string>() ?? ""; }
             else if (type == "rate_limit_event")
             {
                 var info = n!["rate_limit_info"];
@@ -136,14 +137,19 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
                 if (info?["status"]?.GetValue<string>() == "rejected") rejected = info;
             }
         }
-        if (text is null) return new SessionResult(null, "la sessione e terminata senza evento result", Quota: quota);
+        if (text is null) return new SessionResult(null, "la sessione e terminata senza evento result", Quota: quota, NoResultCause: "morta");
         var m = Esito.Matches(text);
         var outcome = m.Count > 0 ? m[^1].Groups[1].Value : null;
         DateTimeOffset? reset = null;
         if (rejected is not null) reset = Epoch(rejected["resetsAt"]);
         else if (text.Contains("hit your", StringComparison.OrdinalIgnoreCase) && text.Contains("limit", StringComparison.OrdinalIgnoreCase) && quota is not null)
             reset = quota.FiveHourUtilization >= 1 ? quota.FiveHourResetsAt : quota.WeeklyUtilization >= 1 ? quota.WeeklyResetsAt : null;
-        return new SessionResult(outcome, text, reset is not null, reset, quota);
+        // un comando negato non e un errore se la sessione ha chiuso lo stesso con un esito; senza esito la sessione e fallita
+        var isError = final?["is_error"] is JsonValue e && e.TryGetValue<bool>(out var b) && b;
+        var subtypeKo = final?["subtype"] is JsonValue st && st.TryGetValue<string>(out var sub) && sub != "success";
+        var denied = final?["permission_denials"] is JsonArray d && d.Count > 0;
+        var failed = (isError || subtypeKo || (denied && outcome is null)) && reset is null;
+        return new SessionResult(outcome, text, reset is not null, reset, quota, failed);
     }
 
     private static double? Utilization(JsonNode? w) => w?["utilization"] is JsonValue v && v.TryGetValue<double>(out var d) ? d : null;

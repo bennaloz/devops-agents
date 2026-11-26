@@ -58,7 +58,11 @@ public sealed class DecisionEngine
 
         if (!tags.Contains(names.AgentsTag, StringComparer.OrdinalIgnoreCase)) return Decision.Nothing;
         if (tags.Contains(names.OnHoldTag, StringComparer.OrdinalIgnoreCase))
+        {
+            // D51: alcuni on-hold si tolgono da soli, solo se un dato dice che la causa non c'e piu
+            if (HoldReleased(snapshot, ctx) is { } released) return new Decision([released], null);
             return new Decision([], new BlockReason("onHold", Detail: local.WaitingFor));
+        }
         if (local.RunningSession is not null) return Decision.Nothing;
         // D60: una card in pausa (tag sulla card o sulla sua Feature) e una card nuova senza Feature restano ferme. La sessione in
         // corso finisce, ma non ne parte un'altra e la card non si sposta.
@@ -68,6 +72,39 @@ public sealed class DecisionEngine
 
         var actions = new List<AgentAction>();
         var waiting = local.WaitingFor;
+        // D42, D51: una persona ha tolto l'on-hold (non lo smistatore, non la pausa di quota): ogni attesa ha di nuovo la sua passata
+        var bySystem = local.ResumedBySystem;
+        var resetPasses = waiting is not null && waiting != "quota" && !bySystem && (local.PassesDone.Count > 0 || local.AutoResumes > 0);
+        var afterReview = false;
+        CloseHoldReview? closeReview = null;
+        // D42: il responsabile ha finito la passata prima di un on-hold: cosa succede dipende dal suo esito
+        if (local.HoldInReview is { } review && waiting != "sessione" && local.LastRole == "responsabile")
+        {
+            var resp = local.Of("responsabile");
+            if (resp is { IsFinished: true, Reason: "attesa" } && !string.IsNullOrWhiteSpace(resp.Outcome))
+            {
+                closeReview = new CloseHoldReview(review.Role);
+                var outcome = resp.Outcome;
+                // le domande spostano la card solo da New e da In development: fuori da li servirebbe un on-hold
+                if (outcome == "domande" && names.KeyOf(snapshot.Card.State) != K.NeedsClarification) outcome = "domandeFuori";
+                switch (outcome)
+                {
+                    case "fatto":
+                        // come se una persona avesse tolto l'on-hold, con l'ultimo ruolo di prima della passata
+                        waiting = review.For;
+                        afterReview = true;
+                        local = local.Clone();
+                        local.LastRole = review.Role;
+                        break;
+                    case "domande":
+                        return new Decision([closeReview], null);
+                    case "domandeFuori":
+                        return new Decision([closeReview, new PutOnHold($"{review.Reason} (il responsabile ha domande per te: sono nel commento sulla card)", review.For)], null);
+                    default:
+                        return new Decision([closeReview, new PutOnHold($"{review.Reason} (il responsabile ha guardato: la sua diagnosi e nel commento sulla card)", review.For)], null);
+                }
+            }
+        }
         // Lo stato e cambiato dopo l'ultima sessione (qualcuno ha spostato la card a mano): la sessione a meta non c'entra piu.
         if (waiting is "sessione" or "quota" && StateChangedAfterLastSession(snapshot)) waiting = "limite";
 
@@ -77,7 +114,8 @@ public sealed class DecisionEngine
             // l'on-hold e stato tolto: si riprende la sessione rimasta a meta, sul suo task
             var role = local.LastRole;
             if (role is null) return Decision.Nothing;
-            actions.Add(new LaunchSession(role, "ripresa", null, true, local.Of(role)?.TaskId));
+            var kind = afterReview ? "dopoPassata" : waiting == "quota" ? "dopoQuota" : bySystem ? "dopoRipresaAutomatica" : null;
+            actions.Add(new LaunchSession(role, "ripresa", null, true, local.Of(role)?.TaskId, ClosingWorktree: role == "collaudatore" && snapshot.Feature is { IsClosing: true, Error: null }, ResumeKind: kind));
         }
         else
         {
@@ -97,6 +135,7 @@ public sealed class DecisionEngine
                 }
                 // D52: per la CI rossa della card di chiusura non si rilancia il responsabile sulla stessa build: si rilancia la validazione
                 effective.CiRedRetry = true;
+                if (resetPasses) effective.PassesDone.Clear();
                 reset = true;
             }
             env = new Env(snapshot, ctx, effective);
@@ -105,13 +144,24 @@ public sealed class DecisionEngine
             if (env.LastRole is not null && env.Last is { IsFinished: true } && string.IsNullOrWhiteSpace(env.Last.Outcome))
                 actions.Add(new PutOnHold($"La sessione di {env.LastRole} e finita senza riga ESITO", "sessione", WaitKind: "senzaEsito"));
             else
+            {
                 actions.AddRange(StateActions(env));
+                if (actions.Count == 0 && ResponsabileWithoutFollowUp(env))
+                    actions.Add(new PutOnHold("il responsabile ha finito ma nessuna regola sa come proseguire: leggi il suo commento", "sessione"));
+            }
+            // D42: un on-hold passa prima dal responsabile, una volta per tipo di attesa
+            var converted = ConvertHoldsForResponsabile(env, actions).ToList();
+            actions.Clear();
+            actions.AddRange(converted);
 
             if (resetDeploy) actions.Insert(0, new ResetDeploy());
             // D52: la CI della card di chiusura e tornata verde: i giri del responsabile per la CI rossa ripartono da zero
             if (env.IsClosing && env.Local.CiRedInARow > 0 && ClosingCiGreen(env)) actions.Insert(0, new ResetCiRed());
             if (reset) actions.Insert(0, new ResetCounters());
         }
+
+        if (closeReview is not null) actions.Insert(0, closeReview);
+        if (resetPasses) actions.Insert(0, new ResetHoldReviews());
 
         // al limite di sessioni attive non parte niente, nemmeno gli spostamenti legati al lancio: al giro dopo si riprova
         var launches = actions.OfType<LaunchSession>().ToList();
@@ -121,7 +171,7 @@ public sealed class DecisionEngine
             return new Decision([], quota with { Role = launches[0].Role });
 
         BlockReason? reason = null;
-        if (env is not null && actions.All(a => a is ResetCounters or ResetDeploy or ResetCiRed)) reason = StartBlock(env) ?? ClosingInDraft(env);
+        if (env is not null && actions.All(a => a is ResetCounters or ResetDeploy or ResetCiRed or CloseHoldReview or ResetHoldReviews)) reason = StartBlock(env) ?? ClosingInDraft(env);
         return new Decision(actions, reason);
     }
 
@@ -131,6 +181,13 @@ public sealed class DecisionEngine
     {
         // D52: la funzionalita non c'e piu: nessuna regola sa dove portare la card, e il motivo (StartBlock) lo dice a una persona
         if (a.Path == "perduta") return [];
+        // la card e arrivata da un altro PC (riassegnata dalla board): il lavoro e sul ramo pubblicato
+        if (ToAdopt(a))
+        {
+            // una sessione avviata da poco dall'altro smistatore potrebbe essere ancora viva: si aspetta
+            if (RecentForeignSession(a)) return [];
+            return [new AdoptCard(a.IsFeatureCard ? a.Feature!.Branch : null, a.IsFeatureCard)];
+        }
         if (a.IsClosing)
         {
             // la correzione scritta dal responsabile diventa una Bug figlia della Feature, da sola in questo giro
@@ -602,6 +659,59 @@ public sealed class DecisionEngine
         var done = a.Local.CorrectionsDone.Concat(BugsCreated(a.S.AllComments, "Correzione #")).ToHashSet();
         return CorrectionsWritten(a.S.AllComments).FirstOrDefault(c => !done.Contains(c.Key));
     }
+
+    // ---- D42, D51, presa in carico ----------------------------------------------------------------------------------
+
+    /// <summary>D42: ogni on-hold non diretto passa prima dal responsabile, una volta per tipo di attesa (la chiave e il tipo, o il motivo).</summary>
+    private static IEnumerable<AgentAction> ConvertHoldsForResponsabile(Env a, IEnumerable<AgentAction> actions)
+    {
+        foreach (var action in actions)
+        {
+            if (action is not PutOnHold h) { yield return action; continue; }
+            var key = h.WaitKind ?? h.Reason;
+            if (h.Direct || a.LastRole == "responsabile" || a.Local.PassesDone.Contains(key)) { yield return h; continue; }
+            yield return new StartHoldReview(h.Reason, h.For, a.LastRole, key);
+            yield return new LaunchSession("responsabile", "attesa", HoldAttachment(a, h));
+        }
+    }
+
+    private static string HoldAttachment(Env a, PutOnHold h)
+    {
+        var lines = new List<string> { $"La card stava per andare in on-hold per una persona. Motivo: {h.Reason}" };
+        if (a.LastRole is not null && !string.IsNullOrWhiteSpace(a.Last?.Text))
+            lines.Add($"Ultima sessione ({a.LastRole}{(a.Last.Outcome is { } o ? $", esito {o}" : "")}):\n{a.Last.Text}");
+        if (a.S.Run?.Url is { } run) lines.Add($"Run del deploy in Test: {run}");
+        if (a.S.Pr?.LogUrl is { } build) lines.Add($"Build della PR: {build}");
+        return string.Join("\n\n", lines);
+    }
+
+    /// <summary>Il responsabile ha finito una passata, un blocco o un bivio e nessuna regola sa come proseguire.</summary>
+    private static bool ResponsabileWithoutFollowUp(Env a) =>
+        a.LastRole == "responsabile" && a.Last is { IsFinished: true } l && l.Reason is "attesa" or "bloccato" or "bivio" &&
+        a.Key != K.NeedsClarification && StartBlock(a) is null;
+
+    /// <summary>
+    /// D51: l'on-hold per il limite di rosse di fila (o per un secondo rilancia di dev) si toglie da solo quando la validazione della PR e verde.
+    /// Mai per i giri di revisione o di collaudo, e mai senza un dato che lo dica.
+    /// </summary>
+    public static RemoveOnHold? HoldReleased(Snapshot s, DecisionContext ctx)
+    {
+        var l = s.Local;
+        if (l.WaitingFor != "limite") return null;
+        if (l.ReviewRounds >= ctx.Limits.ReviewRounds || l.TestRounds >= ctx.Limits.TestRounds) return null;
+        var reds = l.RedInARow >= ctx.Limits.RedInARow || (l.Relaunches >= 1 && l.Of("dev")?.Outcome == "rilancia");
+        return reds && s.Pr?.Validation == Validations.Green ? new RemoveOnHold("la validazione della PR ora e verde", "limite") : null;
+    }
+
+    /// <summary>Presa in carico: una card in uno stato con il ramo, senza niente nello stato locale di questo PC.</summary>
+    private static bool ToAdopt(Env a) =>
+        !a.IsClosing && a.Key is not null && K.WithBranch.Contains(a.Key) && a.Local.Branch is null && a.Local.Folder is null &&
+        a.Local.PrId is null && a.LastRole is null && a.Local.LastSessionByRole.Count == 0;
+
+    private static readonly Regex ForeignSession = new(@"^(?:\s|&nbsp;|<a\b[^>]*>[^<]*</a>|<[^>]*>|@)*\[smistatore\] Sessione \S+ (avviata|ripresa)", RegexOptions.Compiled);
+
+    private static bool RecentForeignSession(Env a) =>
+        a.S.NewComments.Any(c => ForeignSession.IsMatch(c.Text) && (a.Ctx.Now - c.When).TotalMinutes < a.Ctx.Limits.SilenceMinutes);
 
     private static IEnumerable<AgentAction> TaskAdded(Env a)
     {

@@ -94,6 +94,37 @@ public sealed class GitWorkspace(string worktreeRoot, string git = "git") : IWor
         return folder;
     }
 
+    /// <summary>
+    /// Come New-WorktreeDaRemoto: il ramo feature/&lt;id&gt; o fix/&lt;id&gt; pubblicato su origin, in un worktree; null se non c'e. Un ramo locale
+    /// con commit non pubblicati non si sovrascrive; una cartella gia presente va bene solo se e sul ramo di questa card.
+    /// </summary>
+    public async Task<(string Branch, string Folder)?> CreateWorktreeFromRemoteAsync(AreaMapping area, Card card, CancellationToken ct = default)
+    {
+        var folder = Path.Combine(worktreeRoot, area.Repo, $"card-{card.Id}");
+        if (Directory.Exists(folder))
+        {
+            var current = (await RunAsync(folder, ct, "branch", "--show-current")).Trim();
+            if (!Regex.IsMatch(current, $@"^(feature|fix)/{card.Id}(-.*)?$")) throw new InvalidOperationException($"La cartella {folder} e sul ramo '{current}', che non e della card {card.Id}: non la uso");
+            return (current, folder);
+        }
+        await RunAsync(area.Folder, ct, "fetch", "--prune", "origin");
+        var remotes = (await RunAsync(area.Folder, ct, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/feature/", "refs/remotes/origin/fix/"))
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(r => Regex.IsMatch(r, $@"^origin/(feature|fix)/{card.Id}(-.*)?$")).ToList();
+        if (remotes.Count == 0) return null;
+        if (remotes.Count > 1) throw new InvalidOperationException($"Su origin c'e piu di un ramo della card {card.Id}: {string.Join(", ", remotes)}. Quale continuare lo decide una persona");
+        var branch = remotes[0]["origin/".Length..];
+        var hasLocal = await SucceedsAsync(area.Folder, ct, "rev-parse", "--verify", "--quiet", $"refs/heads/{branch}");
+        if (hasLocal && !await SucceedsAsync(area.Folder, ct, "merge-base", "--is-ancestor", $"refs/heads/{branch}", remotes[0]))
+            throw new InvalidOperationException($"Il ramo locale {branch} ha commit non pubblicati che {remotes[0]} non contiene: non lo sovrascrivo");
+        await RunAsync(area.Folder, ct, "worktree", "add", "-B", branch, folder, remotes[0]);
+        return (branch, folder);
+    }
+
+    private async Task<bool> SucceedsAsync(string dir, CancellationToken ct, params string[] args)
+    {
+        try { await RunAsync(dir, ct, args); return true; } catch (InvalidOperationException) { return false; }
+    }
+
     public async Task RemoveWorktreeAsync(AreaMapping area, string folder, CancellationToken ct = default)
     {
         // lavoro non pubblicato: il worktree resta, e chi decide lo vede nell'errore

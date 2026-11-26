@@ -24,6 +24,8 @@ public interface IBoard
     Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default);
     /// <summary>D52: una Bug figlia della Feature (correzione o allinea-develop), assegnata, con i tag e lo stato iniziale. Restituisce l'id.</summary>
     Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default);
+    /// <summary>La PR collegata alla card (Azure Repos: il link della PR; GitHub: il link che mette lo smistatore), la piu recente; null se nessuna.</summary>
+    Task<int?> GetLinkedPullRequestIdAsync(int cardId, CancellationToken ct = default);
     /// <summary>D60: l'ordine del backlog (Microsoft.VSTS.Common.StackRank).</summary>
     Task SetRankAsync(int workItemId, double rank, CancellationToken ct = default);
     string CardUrl(int cardId);
@@ -75,11 +77,18 @@ public interface IWorkspace
     Task<string> PublishFeatureBranchAsync(AreaMapping area, FeatureInfo feature, bool bug, CancellationToken ct = default);
     /// <summary>D52: il worktree in sola lettura della card di chiusura (detached su origin/&lt;ramo&gt;), creato o riportato al ramo aggiornato.</summary>
     Task<string> UpdateClosingWorktreeAsync(AreaMapping area, Card card, string branch, CancellationToken ct = default);
+    /// <summary>Presa in carico (spec, sezione 19): il worktree dal ramo della card pubblicato su origin; null se su origin non c'e.</summary>
+    Task<(string Branch, string Folder)?> CreateWorktreeFromRemoteAsync(AreaMapping area, Card card, CancellationToken ct = default);
     bool Exists(string folder) => Directory.Exists(folder);
 }
 
 /// <summary>Il risultato di una sessione finita: la riga ESITO, il testo, e se e finita sul limite di token.</summary>
-public sealed record SessionResult(string? Outcome, string? Text, bool HitTokenLimit = false, DateTimeOffset? LimitResetsAt = null, QuotaInfo? Quota = null);
+/// <summary>
+/// L'esito di una sessione. Failed: errore o comandi negati senza esito. NoResultCause: la sessione non ha dato un risultato (silenzio: chiusa
+/// dallo smistatore; morta: il processo non c'e piu).
+/// </summary>
+public sealed record SessionResult(string? Outcome, string? Text, bool HitTokenLimit = false, DateTimeOffset? LimitResetsAt = null, QuotaInfo? Quota = null,
+    bool Failed = false, string? NoResultCause = null);
 
 /// <summary>Le sessioni dei ruoli (claude -p): avvio e controllo. Non decide niente.</summary>
 public interface ISessionRunner

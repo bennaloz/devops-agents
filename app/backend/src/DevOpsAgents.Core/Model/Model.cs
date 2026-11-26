@@ -137,6 +137,14 @@ public sealed class CardLocalState
     public string? WaitingFor { get; set; }
     /// <summary>D57: cosa deve fare una persona per l'on-hold in corso (gesto, perche, perche non gli agenti).</summary>
     public Decisions.Indications? OnHoldIndications { get; set; }
+    /// <summary>D42: l'attesa che il responsabile sta esaminando prima di un on-hold, e le chiavi delle attese gia esaminate.</summary>
+    public HoldReview? HoldInReview { get; set; }
+    public List<string> PassesDone { get; set; } = new();
+    /// <summary>D51: l'on-hold (o la chiusura di una sessione) l'ha tolto lo smistatore, non una persona; le riprese automatiche fatte.</summary>
+    public bool ResumedBySystem { get; set; }
+    public int AutoResumes { get; set; }
+    /// <summary>D57: la causa di un on-hold deciso dallo smistatore chiudendo una sessione (silenzio, morta, fallita).</summary>
+    public string? HoldCause { get; set; }
     public int ReviewRounds { get; set; }
     public int RedInARow { get; set; }
     public int TestRounds { get; set; }
@@ -178,6 +186,7 @@ public sealed class CardLocalState
         c.Notices = new List<string>(Notices);
         c.CorrectionsDone = new List<string>(CorrectionsDone);
         c.AlignDone = new List<string>(AlignDone);
+        c.PassesDone = new List<string>(PassesDone);
         return c;
     }
 
@@ -200,6 +209,9 @@ public sealed record FeatureContext(FeatureInfo Feature, bool IsClosing, int Clo
 {
     public static FeatureContext Failed(string error) => new(new FeatureInfo(0, "", "", [], null, null), false, 0, null, null, [], error);
 }
+
+/// <summary>D42: l'attesa in esame dal responsabile: il motivo e il per di prima, il ruolo che aveva lavorato per ultimo, la chiave del tipo.</summary>
+public sealed record HoldReview(string Reason, string? For, string? Role, string Key);
 
 /// <summary>Tutto cio che serve per decidere su una card, letto una volta per giro.</summary>
 public sealed record Snapshot(

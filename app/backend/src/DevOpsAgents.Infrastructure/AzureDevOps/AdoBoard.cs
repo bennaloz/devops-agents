@@ -45,6 +45,20 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
 
     public const string RankField = "Microsoft.VSTS.Common.StackRank";
 
+    /// <summary>La PR collegata alla card: il link di una PR di Azure Repos (ArtifactLink), o il link a una PR di GitHub; la piu recente.</summary>
+    public async Task<int?> GetLinkedPullRequestIdAsync(int cardId, CancellationToken ct = default)
+    {
+        var wi = await ado.GetAsync($"/_apis/wit/workitems/{cardId}?$expand=relations&api-version=7.1", ct);
+        var ids = wi.Items("relations").Select(r =>
+        {
+            var url = r.Str("url") ?? "";
+            var m = r.Str("rel") == "ArtifactLink" ? System.Text.RegularExpressions.Regex.Match(url, @"^vstfs:///Git/PullRequestId/.*%2[fF](\d+)$")
+                : r.Str("rel") == "Hyperlink" ? System.Text.RegularExpressions.Regex.Match(url, @"^https://github\.com/[\w.-]+/[\w.-]+/pull/(\d+)/?$") : null;
+            return m is { Success: true } ? int.Parse(m.Groups[1].Value) : (int?)null;
+        }).Where(x => x is not null).Select(x => x!.Value).ToList();
+        return ids.Count == 0 ? null : ids.Max();
+    }
+
     public async Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default) =>
         (await RelatedAsync(featureId, ChildLink, ct)).Select(ToCard).OrderBy(c => c.Id).ToList();
 

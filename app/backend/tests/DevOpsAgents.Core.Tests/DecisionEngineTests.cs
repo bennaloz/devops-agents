@@ -70,7 +70,7 @@ public class DecisionEngineTests
     public void New_dopo_che_il_responsabile_ha_finito_senza_spostarla_va_in_attesa()
     {
         var d = Decide(Fx.Card(K.New).From(K.Draft).Last(Fx.Session("responsabile", "fatto")));
-        var h = Assert.IsType<PutOnHold>(Assert.Single(d.Actions));
+        var h = Fx.Hold(d);
         Assert.Equal("sessione", h.For);
     }
 
@@ -152,7 +152,7 @@ public class DecisionEngineTests
         Assert.Equal(("dev", "rossa", "https://log/7"), (l.Role, l.Reason, l.Attachment));
 
         var d = Decide(Fx.Card(K.InDevelopment).Pr(Validations.Red).Last(Fx.Session("dev", "fatto")).With(s => s.RedInARow = 3));
-        Assert.Equal("limite", Assert.IsType<PutOnHold>(Assert.Single(d.Actions)).For);
+        Assert.Equal("limite", Fx.Hold(d).For);
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class DecisionEngineTests
     {
         Assert.Equal("conflitti", ((LaunchSession)Decide(Fx.Card(K.InDevelopment).Pr(Validations.Conflicts).Last(Fx.Session("dev", "fatto"))).Actions[0]).Reason);
         var d = Decide(Fx.Card(K.InDevelopment).Pr(Validations.Conflicts).Last(Fx.Session("dev", "fatto", reason: "conflitti")));
-        Assert.IsType<PutOnHold>(Assert.Single(d.Actions));
+        Fx.Hold(d);
     }
 
     [Fact]
@@ -196,7 +196,7 @@ public class DecisionEngineTests
 
         var d = Decide(Fx.Card(K.InDevelopment).Earlier(Fx.Session("responsabile", "fatto", reason: "bloccato", minutesAfterT0: 20))
             .Last(Fx.Session("dev", "bloccato", reason: "decisione")));
-        Assert.True(Assert.IsType<PutOnHold>(Assert.Single(d.Actions)).Direct);
+        Assert.True(Fx.Hold(d).Direct);
     }
 
     [Fact]
@@ -217,17 +217,17 @@ public class DecisionEngineTests
     [Fact]
     public void Rilancia_vale_solo_dopo_una_rossa_e_una_volta()
     {
-        Assert.IsType<PutOnHold>(Decide(Fx.Card(K.InDevelopment).Last(Fx.Session("dev", "rilancia", reason: "pronto"))).Actions[0]);
+        Fx.Hold(Decide(Fx.Card(K.InDevelopment).Last(Fx.Session("dev", "rilancia", reason: "pronto"))));
         Assert.IsType<RequeueValidation>(Decide(Fx.Card(K.InDevelopment).Last(Fx.Session("dev", "rilancia", reason: "rossa"))).Actions[0]);
         var d = Decide(Fx.Card(K.InDevelopment).Last(Fx.Session("dev", "rilancia", reason: "rossa")).With(s => s.Relaunches = 1));
-        Assert.Equal("limite", Assert.IsType<PutOnHold>(d.Actions[0]).For);
+        Assert.Equal("limite", Fx.Hold(d).For);
     }
 
     [Fact]
     public void Dev_fatto_con_il_suo_task_ancora_aperto_va_in_attesa_con_un_altro_task_aperto_lo_prende()
     {
         var d = Decide(Fx.Card(K.InDevelopment).Task(7).Last(Fx.Session("dev", "fatto", task: 7)));
-        Assert.Equal("taskNonChiuso", Assert.IsType<PutOnHold>(Assert.Single(d.Actions)).WaitKind);
+        Assert.Equal("taskNonChiuso", Fx.Hold(d).WaitKind);
         var l = (LaunchSession)Decide(Fx.Card(K.InDevelopment).Task(7, "taskChiuso").Task(8).Last(Fx.Session("dev", "fatto", task: 7))).Actions[0];
         Assert.Equal(("taskSuccessivo", 8), (l.Reason, l.TaskId));
     }
@@ -236,7 +236,7 @@ public class DecisionEngineTests
     public void Tornata_in_development_dopo_il_reviewer_senza_task_ne_decisioni_va_in_attesa()
     {
         var d = Decide(Fx.Card(K.InDevelopment).Last(Fx.Session("collaudatore", "respinta")));
-        Assert.Equal("limite", Assert.IsType<PutOnHold>(Assert.Single(d.Actions)).For);
+        Assert.Equal("limite", Fx.Hold(d).For);
     }
 
     [Fact]
@@ -254,7 +254,7 @@ public class DecisionEngineTests
         Assert.Equal(["SpostaCard", "LanciaSessione"], Kinds(d));
         Assert.Equal(("dev", "rilievi", "file.cs:10"), (((LaunchSession)d.Actions[1]).Role, ((LaunchSession)d.Actions[1]).Reason, ((LaunchSession)d.Actions[1]).Attachment));
         var limite = Decide(Fx.Card(K.InReview).Last(Fx.Session("reviewer", "bloccante")).With(s => s.ReviewRounds = 2));
-        Assert.Equal("limite", Assert.IsType<PutOnHold>(Assert.Single(limite.Actions)).For);
+        Assert.Equal("limite", Fx.Hold(limite).For);
     }
 
     [Fact]
@@ -303,9 +303,9 @@ public class DecisionEngineTests
     [Fact]
     public void Deploying_to_test_senza_scelta_o_con_un_parametro_sconosciuto_va_in_attesa_deploy()
     {
-        Assert.Equal("deploy", Assert.IsType<PutOnHold>(Decide(InTest(K.DeployingToTest)).Actions[0]).For);
+        Assert.Equal("deploy", Fx.Hold(Decide(InTest(K.DeployingToTest))).For);
         var d = Decide(InTest(K.DeployingToTest).Deploy(["deployX"], ["deployStime"]));
-        Assert.Equal("parametroDeploySconosciuto", Assert.IsType<PutOnHold>(d.Actions[0]).WaitKind);
+        Assert.Equal("parametroDeploySconosciuto", Fx.Hold(d).WaitKind);
     }
 
     [Fact]
@@ -326,7 +326,7 @@ public class DecisionEngineTests
     [Fact]
     public void Deploy_fallito_il_motivo_dell_on_hold_porta_il_link_al_run()
     {
-        var h = Assert.IsType<PutOnHold>(Assert.Single(Decide(InTest(K.DeployingToTest).Run("completed", "failed")).Actions));
+        var h = Fx.Hold(Decide(InTest(K.DeployingToTest).Run("completed", "failed")));
         Assert.Equal("deploy", h.For);
         Assert.Contains("[run 70](https://run/70)", h.Reason);
     }
@@ -369,7 +369,7 @@ public class DecisionEngineTests
         var ko = (LaunchSession)Decide(InTest(K.AutomatedTest).Last(Fx.Session("collaudatore", "respinta", minutesAfterT0: 70, text: "manca il totale"))).Actions[0];
         Assert.Equal(("responsabile", "collaudoRespinto", "manca il totale"), (ko.Role, ko.Reason, ko.Attachment));
         var limite = Decide(InTest(K.AutomatedTest).Last(Fx.Session("collaudatore", "respinta", minutesAfterT0: 70)).With(s => s.TestRounds = 2));
-        Assert.Equal("limite", Assert.IsType<PutOnHold>(limite.Actions[0]).For);
+        Assert.Equal("limite", Fx.Hold(limite).For);
     }
 
     [Fact]
@@ -396,7 +396,7 @@ public class DecisionEngineTests
         var c = Assert.IsType<CompletePr>(Assert.Single(Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.Green)).Actions));
         Assert.Equal((10, "HEAD1"), (c.Rev, c.Commit));
         var d = Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.Green).With(s => s.CompletePrKey = "5@10"));
-        Assert.Equal("prNonCompletata", Assert.IsType<PutOnHold>(d.Actions[0]).WaitKind);
+        Assert.Equal("prNonCompletata", Fx.Hold(d).WaitKind);
     }
 
     [Fact]
@@ -405,7 +405,7 @@ public class DecisionEngineTests
         Assert.Equal(K.ReadyToRelease, ((MoveCard)Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.None, PrStatuses.Completed)).Actions[0]).State);
         Assert.Equal(["RiportaIndietro", "LanciaSessione"], Kinds(Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.Conflicts))));
         Assert.Empty(Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.Running)).Actions);
-        Assert.IsType<PutOnHold>(Decide(Fx.Card(K.ReadyToMerge)).Actions[0]);
+        Fx.Hold(Decide(Fx.Card(K.ReadyToMerge)));
     }
 
     [Fact]
@@ -437,7 +437,7 @@ public class DecisionEngineTests
     public void Una_sessione_finita_senza_ESITO_va_in_attesa()
     {
         var d = Decide(Fx.Card(K.InDevelopment).Last(Fx.Session("dev", null)));
-        Assert.Equal("senzaEsito", Assert.IsType<PutOnHold>(Assert.Single(d.Actions)).WaitKind);
+        Assert.Equal("senzaEsito", Fx.Hold(d).WaitKind);
     }
 
     [Fact]

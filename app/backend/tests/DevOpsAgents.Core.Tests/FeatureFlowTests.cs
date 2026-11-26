@@ -167,7 +167,7 @@ public class ClosingCardTests
     {
         var d = D(Fx.Card(K.Ready).InFeature(C(sib: Merged)));
         Assert.Equal("feature/f10-preventivi", Assert.IsType<SetClosingBranch>(Assert.Single(d.Actions)).Branch);
-        Assert.IsType<PutOnHold>(Assert.Single(D(Fx.Card(K.Ready).InFeature(C(branch: null, sib: Merged))).Actions));
+        Fx.Hold(D(Fx.Card(K.Ready).InFeature(C(branch: null, sib: Merged))));
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public class ClosingCardTests
         Assert.Equal([77], d.Reason!.Cards!);
         // la Bug per quella testa c'era ma non c'e piu (rimossa senza unirla): una persona decide
         var gone = Closing(K.Ready, [(43, K.InFeatureBranch)]).Pr(Validations.Conflicts).OldComment("x", "[smistatore] Allinea-develop @HEAD1 -> Bug 77");
-        Assert.True(Assert.IsType<PutOnHold>(Assert.Single(D(gone).Actions)).Direct);
+        Assert.True(Fx.Hold(D(gone)).Direct);
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class ClosingCardTests
         Assert.Contains("Failed Test1", l.Attachment);
         Assert.Empty(D(Closing(K.Ready).Pr(Validations.Red).BuildErrors("x").With(s => s.CiRedHandled = "7")).Actions);
         var after = Closing(K.Ready).Pr(Validations.Red).BuildErrors("x").With(s => s.CiRedHandled = "7").Last(Fx.Session("responsabile", "fatto", reason: "ciRossa"));
-        Assert.True(Assert.IsType<PutOnHold>(Assert.Single(D(after).Actions)).Direct);
+        Assert.True(Fx.Hold(D(after)).Direct);
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public class ClosingCardTests
         var moved = Closing(K.ReadyToMerge).Pr(Validations.Green, head: "NUOVO").Run("completed", "succeeded").With(s => s.RunId = 70);
         var back = Assert.IsType<MoveBack>(Assert.Single(D(moved).Actions));
         Assert.Equal((K.Ready, "NUOVO"), (back.State, back.Commit));
-        Assert.IsType<PutOnHold>(Assert.Single(D(moved.With(s => s.ReturnCommit = "NUOVO")).Actions));
+        Fx.Hold(D(moved.With(s => s.ReturnCommit = "NUOVO")));
     }
 
     [Fact]
@@ -275,7 +275,8 @@ public class FeatureDispatcherTests
         Child(w, 42, K.Ready);
         Child(w, 90, K.Draft, [Fx.Names.ClosingTag!]);
         await w.Dispatcher().RunRoundAsync(whatIf: false);
-        Assert.Equal(["ramo feature/f10-x", "worktree 42 da feature/f10-x", $"stato 10 {Fx.N("featureAttiva")}", $"stato 42 {Fx.N(K.InDevelopment)}"], w.Writes);
+        Assert.Equal(["ramo feature/f10-x", "worktree 42 da feature/f10-x", $"stato 10 {Fx.N("featureAttiva")}", $"stato 42 {Fx.N(K.InDevelopment)}",
+            "commento 42 [smistatore] Sessione s1 avviata: ruolo dev, cartella /wt/42."], w.Writes);
         Assert.Equal("feature/f10-x", w.State[42].Destination);
     }
 

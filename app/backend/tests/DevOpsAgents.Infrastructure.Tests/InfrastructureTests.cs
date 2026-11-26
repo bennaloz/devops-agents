@@ -714,3 +714,61 @@ public class FeatureInfrastructureTests
         Assert.Equal(["bugfix/f10-y"], await Tx.Gh(gh).ListBranchesAsync(Tx.GitHubArea, "bugfix/f10"));
     }
 }
+
+public class AdoptionInfrastructureTests
+{
+    [Fact]
+    public void Una_sessione_con_errore_o_comandi_negati_senza_esito_e_fallita_con_un_esito_no_e_senza_result_e_morta()
+    {
+        var log = Path.GetTempFileName();
+        File.WriteAllLines(log, ["""{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}"""]);
+        Assert.True(ClaudeSessionRunner.ParseResult(log).Failed);
+        File.WriteAllLines(log, ["""{"type":"result","subtype":"success","permission_denials":[{"tool_name":"Bash"}],"result":"niente"}"""]);
+        Assert.True(ClaudeSessionRunner.ParseResult(log).Failed);
+        File.WriteAllLines(log, ["""{"type":"result","subtype":"success","permission_denials":[{"tool_name":"Bash"}],"result":"ok\nESITO=fatto"}"""]);
+        Assert.False(ClaudeSessionRunner.ParseResult(log).Failed);
+        File.WriteAllLines(log, ["""{"type":"assistant"}"""]);
+        Assert.Equal("morta", ClaudeSessionRunner.ParseResult(log).NoResultCause);
+    }
+
+    [Fact]
+    public async Task La_PR_collegata_e_la_piu_recente_fra_quelle_di_Azure_Repos_e_di_GitHub()
+    {
+        var h = new FakeHttp((_, _) => FakeHttp.Ok("""{ "id": 42, "relations": [
+            { "rel": "ArtifactLink", "url": "vstfs:///Git/PullRequestId/p%2Fr%2F15" },
+            { "rel": "Hyperlink", "url": "https://github.com/acme/web/pull/21" },
+            { "rel": "Hyperlink", "url": "https://esempio.invalid/x" } ] }"""));
+        Assert.Equal(21, await new AdoBoard(Tx.Ado(h), "DevOps.Agents", SuiteConfig.Load(Tx.Root).Names).GetLinkedPullRequestIdAsync(42));
+        var none = new FakeHttp((_, _) => FakeHttp.Ok("""{ "id": 42 }"""));
+        Assert.Null(await new AdoBoard(Tx.Ado(none), "DevOps.Agents", SuiteConfig.Load(Tx.Root).Names).GetLinkedPullRequestIdAsync(42));
+    }
+
+    [Fact]
+    public async Task La_presa_in_carico_ricrea_il_worktree_dal_ramo_pubblicato_e_senza_ramo_restituisce_null()
+    {
+        var tmp = Directory.CreateTempSubdirectory("git").FullName;
+        void Git(string dir, params string[] args)
+        {
+            var psi = new ProcessStartInfo("git") { WorkingDirectory = dir, RedirectStandardError = true, RedirectStandardOutput = true };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi)!;
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0, p.StandardError.ReadToEnd());
+        }
+        var origin = Path.Combine(tmp, "origin.git");
+        var main = Path.Combine(tmp, "main");
+        Git(tmp, "init", "--bare", "-b", "develop", origin);
+        Git(tmp, "clone", origin, main);
+        Git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "--allow-empty", "-m", "primo");
+        Git(main, "push", "origin", "HEAD:develop");
+        Git(main, "push", "origin", "HEAD:refs/heads/feature/42-lavoro");
+        var ws = new GitWorkspace(Path.Combine(tmp, "_wt"));
+        var area = Tx.AzureArea with { Folder = main };
+        var r = await ws.CreateWorktreeFromRemoteAsync(area, new Card(42, 1, "x", "In review", [], null));
+        Assert.Equal("feature/42-lavoro", r!.Value.Branch);
+        Assert.True(Directory.Exists(r.Value.Folder));
+        Assert.Equal(r, await ws.CreateWorktreeFromRemoteAsync(area, new Card(42, 1, "x", "In review", [], null)));
+        Assert.Null(await ws.CreateWorktreeFromRemoteAsync(area, new Card(43, 1, "y", "In review", [], null)));
+        Directory.Delete(tmp, true);
+    }
+}
