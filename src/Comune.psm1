@@ -215,6 +215,33 @@ function ConvertTo-TestoCommentoDeploy([string[]]$Parametri, [string]$Perche) {
     "$script:MarcaDeploy $(@($Parametri) -join ', ')`n`nPerche: $($Perche.Trim())"
 }
 
+# D59: gli URL dell'ambiente di collaudo di una card, "nome: url" uno per riga (da una tabella nome -> url, o dal suo salvataggio nello stato). Una
+# riga sola per tutti i punti che li mostrano: il commento sulla card e l'allegato del collaudatore.
+function ConvertTo-ElencoUrlCollaudo($Url) {
+    if ($null -eq $Url) { return '' }
+    $chiavi = if ($Url -is [System.Collections.IDictionary]) { @($Url.Keys) } else { @($Url.PSObject.Properties.Name) }
+    (@($chiavi | ForEach-Object { "- ${_}: $(Get-Campo $Url $_)" })) -join "`n"
+}
+
+# D59: la voce della mappa ha l'ambiente di collaudo: il Test non e un deploy ma un ambiente Docker per card. Una definizione sola, per
+# le decisioni (Decisioni.psm1) e per card.ps1 (che non chiede una scelta di deploy a un componente cosi).
+function Test-AmbienteCollaudo($Voce) { $null -ne (Get-Campo $Voce 'collaudo') }
+
+# D59: il processo e quello che abbiamo lanciato noi: stesso PID e stesso orario di avvio (margine di due secondi per gli arrotondamenti).
+# Un PID da solo non basta: dopo un riavvio del PC puo essere di un altro programma. Chi vuole anche l'eseguibile lo controlla dopo.
+function Test-ProcessoAvviato([int]$ProcessoId, $Avvio) {
+    if ($ProcessoId -le 0 -or "$Avvio" -eq '') { return $false }
+    $atteso = ConvertTo-DataUtc $Avvio
+    if ($null -eq $atteso) { return $false }
+    $p = Get-Process -Id $ProcessoId -ErrorAction SilentlyContinue
+    if (-not $p) { return $false }
+    try {
+        if ($p.HasExited) { return $false }
+        [math]::Abs(($p.StartTime.ToUniversalTime() - $atteso).TotalSeconds) -le 2
+    }
+    catch { $false }   # processo scomparso nel frattempo, o non leggibile: non e il nostro
+}
+
 # I parametri dell'ultimo commento di deploy del responsabile (nell'ordine degli id), niente se non ce n'e o se non ha nomi:
 # chi lo legge lo racchiude in @(). Il testo puo arrivare in html: si toglie, come in Get-UltimoCommentoDiRuolo.
 # Valgono solo i commenti [responsabile] che si aprono con la marca: la scelta e sua, non dello smistatore ne di una persona.
@@ -234,6 +261,33 @@ function Get-SceltaDeploy($Commenti) {
 function ConvertTo-TestoSempliceCommento($Testo) {
     $h = "$Testo" -replace '(?i)<br\s*/?>', "`n" -replace '(?i)</(?:div|p|li|ul|ol|h[1-6]|tr|table|blockquote|pre)\s*>', "`n"
     [System.Net.WebUtility]::HtmlDecode(($h -replace '<[^>]*>', '')).TrimStart()
+}
+
+# ---- la descrizione della PR scritta prima che la PR esista ---------------------------------------------------------
+# card.ps1 descrizione-pr senza una PR attiva salva il testo in un commento sulla card, con la marca; lo smistatore, aprendo
+# la PR, lo mette sotto il link alla card. Il commento e il solo posto in cui il testo vive (come per il deploy).
+$script:MarcaDescrizionePr = 'Descrizione della PR:'
+
+# Il testo del commento, senza prefisso e firma (li mette Add-CardCommento).
+function ConvertTo-TestoCommentoDescrizionePr([string]$Testo) {
+    "$script:MarcaDescrizionePr`n`n$($Testo.Trim())"
+}
+
+# L'ultimo testo salvato (nell'ordine degli id) da dev o responsabile, senza marca ne firma; niente se non ce n'e.
+function Get-DescrizionePrSalvata($Commenti) {
+    $marca = [regex]::Escape($script:MarcaDescrizionePr)
+    $testo = $null
+    foreach ($c in @(@($Commenti) | Where-Object { $null -ne $_ } | Sort-Object { [int](Get-Campo $_ 'Id') })) {
+        $t = ConvertTo-TestoSempliceCommento (Get-Campo $c 'Testo')
+        foreach ($ruolo in 'dev', 'responsabile') {
+            if ($t -notmatch "^\[$ruolo\]\s*$marca\s*\r?\n+") { continue }
+            $corpo = $t.Substring($Matches[0].Length).TrimEnd()
+            $firma = Get-FirmaCommento $ruolo
+            if ($corpo.EndsWith($firma)) { $corpo = $corpo.Substring(0, $corpo.Length - $firma.Length).TrimEnd() }
+            if ($corpo) { $testo = $corpo }
+        }
+    }
+    if ($null -ne $testo) { $testo }
 }
 
 # ---- la correzione scritta dal responsabile della card di chiusura (D52, gruppo 5) -------------------------------------
@@ -330,4 +384,4 @@ function Get-ProcessiSmistatoreRadice([Parameter(Mandatory)][string]$Radice) {
     @(Get-ProcessiScriptRadice -Radice $Radice -Script 'src/Smistatore.ps1')
 }
 
-Export-ModuleMember -Function Add-RigaRegistro, Read-RigheCondivise, ConvertTo-TestoCommentoDeploy, Get-SceltaDeploy, ConvertTo-TestoCommentoCorrezione, Get-CorrezioniScritte, Get-FirmaCommento, ConvertTo-TestoCommentoBugCreata, Get-BugCreate, Get-NatureCorrezione, Get-StatiInTest, Get-StatiConRamo, Get-DestinazioneCard, Get-PrefissiRamoFunzionalita, Get-PrefissoRamoFunzionalita, Get-SiglaFunzionalita, Get-RegexRamoFunzionalita, Get-ComposizioneFunzionalita, Get-FileLog, Get-OperazionePianificata, Get-NomiOperazioniPianificate, Get-TestoPatScaduto, Get-RegexPatRifiutato, Format-RigaLog, Get-RegexRigaLog, Get-NomiModelliRigaLog, Get-CartellaDati, Get-Campo, ConvertTo-DataUtc, Get-ChiaveStato, Get-RuoliFlusso, Read-FilePat, Write-FilePat, Get-NomiFilePat, Get-PercorsoFilePat, Get-ProcessiPwsh, Get-ProcessiScriptRadice, Get-ProcessiVistaRadice, Get-ProcessiSmistatoreRadice
+Export-ModuleMember -Function Test-AmbienteCollaudo, ConvertTo-ElencoUrlCollaudo, Test-ProcessoAvviato, Add-RigaRegistro, Read-RigheCondivise, ConvertTo-TestoCommentoDeploy, Get-SceltaDeploy, ConvertTo-TestoCommentoDescrizionePr, Get-DescrizionePrSalvata, ConvertTo-TestoCommentoCorrezione, Get-CorrezioniScritte, Get-FirmaCommento, ConvertTo-TestoCommentoBugCreata, Get-BugCreate, Get-NatureCorrezione, Get-StatiInTest, Get-StatiConRamo, Get-DestinazioneCard, Get-PrefissiRamoFunzionalita, Get-PrefissoRamoFunzionalita, Get-SiglaFunzionalita, Get-RegexRamoFunzionalita, Get-ComposizioneFunzionalita, Get-FileLog, Get-OperazionePianificata, Get-NomiOperazioniPianificate, Get-TestoPatScaduto, Get-RegexPatRifiutato, Format-RigaLog, Get-RegexRigaLog, Get-NomiModelliRigaLog, Get-CartellaDati, Get-Campo, ConvertTo-DataUtc, Get-ChiaveStato, Get-RuoliFlusso, Read-FilePat, Write-FilePat, Get-NomiFilePat, Get-PercorsoFilePat, Get-ProcessiPwsh, Get-ProcessiScriptRadice, Get-ProcessiVistaRadice, Get-ProcessiSmistatoreRadice

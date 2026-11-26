@@ -281,16 +281,8 @@ function Update-FirmeCard {
 # chiusura della passata D42, lasciano causaAttesa vuota. La sessione senza fine conta dal suo inizio, come in Decisioni.
 function Get-ResocontoBloccato($Sc, [int]$Max = 12) {
     if (Get-Campo $Sc 'causaAttesa') { return $null }
-    $us = Get-Campo $Sc 'ultimaSessione'
-    if ($null -eq $us) { return $null }
-    $ruoli = if ($us -is [System.Collections.IDictionary]) { @($us.Keys) } else { @($us.PSObject.Properties | ForEach-Object { $_.Name }) }
-    $ultima = $null; $quandoUltima = $null; $ultimo = $null
-    foreach ($ruolo in $ruoli) {
-        $s = Get-Campo $us $ruolo
-        $quando = ConvertTo-DataUtc (Get-Campo $s 'fine')
-        if ($null -eq $quando) { $quando = ConvertTo-DataUtc (Get-Campo $s 'inizio') }
-        if ($null -ne $quando -and ($null -eq $quandoUltima -or $quando -gt $quandoUltima)) { $ultima = $s; $quandoUltima = $quando; $ultimo = $ruolo }
-    }
+    $u = Get-UltimaSessioneCard $Sc
+    $ultima = Get-Campo $u 'Sessione'; $ultimo = Get-Campo $u 'Ruolo'
     if ($null -eq $ultima -or $ultimo -notin 'collaudatore', 'responsabile' -or "$(Get-Campo $ultima 'esito')" -ne 'bloccato') { return $null }
     # Via i blocchi di codice recintati (log, stack: non vanno su Telegram) e il markdown di righe e grassetto; il testo fra
     # apici inversi resta intero (nomi di pipeline e parametri sono il cuore dei passi), niente riga ESITO.
@@ -313,6 +305,17 @@ function Get-ProblemiCard {
     if ([bool](Get-Campo $o 'SenzaPat')) { return @() }
     if (-not $c.Letto) { return @(New-Problema 'lettura-card' "Non riesco a leggere le card: $(Get-RigaBreve $c.Errore)" 'controlla l''accesso ad Azure DevOps e il log di oggi') }
     $rilasci = @(); $chiusureInBozza = @{}
+    # D57: per ogni card, le card che la aspettano come predecessore (il motivo 'predecessori'): la voce del suo on-hold le nomina
+    $aspettano = @{}
+    foreach ($r in @($c.Righe | Where-Object { $null -ne $_ })) {
+        $m = Get-Campo $r 'Motivo'
+        if (-not $m -or (Get-Campo $m 'Tipo') -ne 'predecessori') { continue }
+        foreach ($p in @(Get-Campo $m 'Predecessori') | Where-Object { $null -ne $_ }) {
+            $k = "$([int](Get-Campo $p 'Id'))"
+            if (-not $aspettano.ContainsKey($k)) { $aspettano[$k] = @() }
+            $aspettano[$k] += [int]$r.Id
+        }
+    }
     foreach ($r in @($c.Righe | Where-Object { $null -ne $_ })) {
         $att = $r.Attivita
         $titolo = Get-RigaBreve $r.Titolo 70
@@ -334,6 +337,18 @@ function Get-ProblemiCard {
             # on-hold nato da un bloccato del collaudatore o del responsabile: non la regola generica ("togli il tag", che
             # riprende la sessione e la riblocca) ma il suo resoconto; senza resoconto la diagnosi del modello
             $bloccato = Get-Campo $r 'Bloccato'
+            # D57: la sezione "Cosa fare" di Set-InAttesa: il gesto e l'azione, il resto sono le righe, con le card che la aspettano.
+            # Un bloccato con resoconto ma senza le righe "Per Titolare:" del ruolo resta al resoconto, che dice piu del predefinito.
+            $cosaFare = @(Get-Campo $r 'CosaFare' | Where-Object { $_ })
+            $indicazioni = Get-Campo $r 'Indicazioni'
+            $soloResoconto = $bloccato -and @($bloccato.Righe).Count -gt 0 -and (Get-Campo $indicazioni 'Fonte') -ne 'agente'
+            if ($att.Attivita -eq 'sblocca' -and $cosaFare.Count -gt 0 -and -not $soloResoconto) {
+                $righe = @($cosaFare | Select-Object -Skip 1)
+                $dipendenti = @($aspettano["$($r.Id)"])
+                if ($dipendenti.Count -gt 0) { $righe += "Tiene ferme anche: $(($dipendenti | ForEach-Object { "#$_" }) -join ', ')" }
+                New-Problema "card-$($r.Id)-sblocca" "Card #$($r.Id) ($titolo): in on-hold" ([string](Get-Campo $indicazioni 'Gesto')) $r.Url -Righe $righe
+                continue
+            }
             if ($att.Attivita -eq 'sblocca' -and $bloccato) {
                 $chi = [string]$bloccato.Ruolo
                 $righe = @($bloccato.Righe)
@@ -584,6 +599,8 @@ function Get-ProblemiQuota {
         return @(New-Problema 'quota-pausa' "Gli agenti sono fermi per il limite di token fino al $quando." 'niente da fare: riprendono da soli dopo il reset')
     }
     $uso = [math]::Round([double]$b.Uso * 100)
+    # D60: la soglia delle 5 ore e un freno voluto, che passa da solo a ogni reset della finestra: non e un problema da segnalare
+    if ($b.Causa -eq 'cinqueOre') { return @() }
     @(New-Problema 'quota-riserva' "Riserva settimanale raggiunta ($uso% di token usati): gli agenti non partono fino al $quando." 'alza la soglia o ignora la riserva dalla vista')
 }
 

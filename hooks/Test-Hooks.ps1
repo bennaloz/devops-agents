@@ -258,6 +258,11 @@ $cases = @(
        Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'curl -sk formsapi.acme.com:443/api' } } }
     @{ Hook = 'deny-host-collaudo.ps1'; Expected = 2; Env = @{ ATTREZZI_RUOLO = 'collaudatore' }; What = 'WebFetch verso un host non ammesso'
        Input = @{ tool_name = 'WebFetch'; tool_input = @{ url = 'https://sso.acme.com/'; prompt = 'x' } } }
+    # D59: l'host degli ambienti Docker di collaudo e quello di config/collaudo.json (HostCollaudo: una copia dell'hook con un'altra configurazione)
+    @{ Hook = 'deny-host-collaudo.ps1'; Expected = 0; Env = @{ ATTREZZI_RUOLO = 'collaudatore' }; HostCollaudo = 'collaudo.example.invalid'; What = 'host degli ambienti di collaudo (collaudo.json) con la porta dello slot'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'curl -s http://collaudo.example.invalid:21101/api/health' } } }
+    @{ Hook = 'deny-host-collaudo.ps1'; Expected = 2; Env = @{ ATTREZZI_RUOLO = 'collaudatore' }; HostCollaudo = 'localhost'; What = 'un host che collaudo.json non ha e un host di produzione restano bloccati'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'curl -s http://collaudo.example.invalid:21101/api/health' } } }
     @{ Hook = 'deny-host-collaudo.ps1'; Expected = 0; Env = @{ ATTREZZI_RUOLO = 'collaudatore' }; What = 'comando senza URL'
        Input = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'pwsh -NoProfile -File C:/x/src/card.ps1 leggi' } } }
     @{ Hook = 'deny-host-collaudo.ps1'; Expected = 0; Env = @{ ATTREZZI_RUOLO = 'collaudatore' }; What = 'URL in variabile'
@@ -276,7 +281,19 @@ foreach ($case in $cases) {
     $env:ATTREZZI_RUOLO = if ($case.ContainsKey('Env')) { $case.Env.ATTREZZI_RUOLO } else { $null }
     $case.Input | ConvertTo-Json -Depth 5 -Compress | Set-Content -Path $temp -Encoding utf8 -NoNewline
     # PowerShell non ha la redirezione '<': lo stdin si passa dalla pipeline.
-    Get-Content -Path $temp -Raw | & pwsh -NoProfile -File (Join-Path $hooks $case.Hook) > $null 2> $null
+    # HostCollaudo: l'hook gira da una copia della radice con config/collaudo.json che ha quell'host (l'hook cerca la config accanto a se)
+    $radiceProva = $null
+    $fileHook = Join-Path $hooks $case.Hook
+    if ($case.ContainsKey('HostCollaudo')) {
+        $radiceProva = Join-Path ([IO.Path]::GetTempPath()) ('hook-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $radiceProva 'hooks'), (Join-Path $radiceProva 'config') | Out-Null
+        Copy-Item $fileHook (Join-Path $radiceProva 'hooks')
+        Copy-Item (Join-Path (Split-Path $hooks -Parent) 'config/mappa.json') (Join-Path $radiceProva 'config')
+        Set-Content -Path (Join-Path $radiceProva 'config/collaudo.json') -Value (@{ host = $case.HostCollaudo } | ConvertTo-Json) -Encoding utf8
+        $fileHook = Join-Path $radiceProva 'hooks' $case.Hook
+    }
+    Get-Content -Path $temp -Raw | & pwsh -NoProfile -File $fileHook > $null 2> $null
+    if ($radiceProva) { Remove-Item $radiceProva -Recurse -Force }
     $actual = $LASTEXITCODE
     $env:ATTREZZI_RUOLO = $vecchioRuolo
     if ($actual -eq $case.Expected) {

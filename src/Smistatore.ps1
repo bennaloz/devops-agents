@@ -17,7 +17,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if (-not $Radice) { $Radice = Split-Path -Parent $PSScriptRoot }
-foreach ($m in 'Comune', 'Config', 'Ado', 'Stato', 'Decisioni', 'Sessioni', 'Worktree', 'Card') {
+foreach ($m in 'Comune', 'Config', 'Ado', 'Stato', 'Decisioni', 'Collaudo', 'Sessioni', 'Worktree', 'Card') {
     Import-Module (Join-Path $PSScriptRoot "$m.psm1") -Global
 }
 # La stessa cartella dati di card.ps1: le sessioni lanciate la ricevono in ATTREZZI_DATI (la imposta Start-SessioneRuolo).
@@ -59,9 +59,15 @@ function Write-Apprendimento([int]$Id, [string]$Repo, [string]$Tipo, [string]$Ru
 # ritrova l'on-hold dalla card. Per e il valore di inAttesaPer.
 # Causa: perche si e fermata la sessione, per chi deve decidere se l'on-hold si toglie da solo (D51): silenzio, morta,
 # fallita, scritture. Senza Causa (ogni altra attesa) il segno si cancella, cosi non resta quello di un on-hold di prima.
+# D57: il commento finisce con "Cosa fare". Il gesto viene dalle righe "Per Titolare:" dell'ultima sessione (di solito il
+# responsabile, nella passata D42), altrimenti e quello predefinito; si tiene in indicazioniAttesa per vista e supervisore.
 function Set-InAttesa($Cfg, $CardAdo, $Sc, [string]$Titolare, [string]$Motivo, $Per, [string]$Causa = '') {
+    $ultima = Get-UltimaSessioneCard $Sc
+    $indicazioni = Get-IndicazioniAttesa ([string](Get-Campo (Get-Campo $ultima 'Sessione') 'testo')) $Motivo $Per $Causa
+    $cosaFare = Format-CosaFare $indicazioni $Per
     [void](Set-AdoCard -Id $CardAdo.Id -AggiungiTag @([string]$Cfg.Stati.tagAttesa))
-    [void](Add-AdoCommento -Id $CardAdo.Id -Testo "[smistatore] $Motivo" -Menziona $Titolare)
+    [void](Add-AdoCommento -Id $CardAdo.Id -Testo "[smistatore] $Motivo`n`n$cosaFare" -Menziona $Titolare)
+    $Sc['indicazioniAttesa'] = $indicazioni
     $Sc['inAttesaPer'] = $Per
     $Sc['causaAttesa'] = if ($Causa) { $Causa } else { $null }
     $Sc['attesaToltaDaSmistatore'] = $null
@@ -440,6 +446,7 @@ function Invoke-Azione($Cfg, $K, $Az) {
         }
         { $_ -in 'SpostaCard', 'RiportaIndietro' } {
             $nome = Get-NomeStato $Cfg $Az.Stato
+            $prima = Get-ChiaveStato $Cfg.Stati $card.Stato
             $rev = Set-AdoCard -Id $card.Id -Stato $nome
             Add-RevNostra -Id $card.Id -Rev ([int]$rev) -Percorso $script:PercorsoStato
             if ($Az.Stato -eq 'inRevisione') { $sc['rosseDiFila'] = 0 }
@@ -448,7 +455,12 @@ function Invoke-Azione($Cfg, $K, $Az) {
             # due card che vorrebbero entrare nello stesso giro in uno stato a posto singolo: la seconda deve vedere la prima
             $card.Stato = $nome
             if ($Az.Stato -eq 'inSviluppo') { Add-AInTabella $K.Contesto.InSviluppoPerRepo $voce.repo $card.Id }
-            if ($Az.Stato -in (Get-StatiInTest)) { Add-AInTabella $K.Contesto.InTestPerComponente $voce.componente $card.Id }
+            if ($Az.Stato -in (Get-StatiInTest)) { Add-CardAlContestoTest $K.Contesto $voce $card.Id }
+            # D59: l'ambiente di collaudo e pronto (la card esce da Deploying to test per il collaudo): gli URL e dove stanno gli utenti di prova
+            if ($prima -eq 'inDeployTest' -and $Az.Stato -in 'inCollaudo', 'inProvaUmana' -and $sc['collaudoProgetto']) {
+                try { [void](Add-AdoCommento -Id $card.Id -Testo "[smistatore] Ambiente di collaudo pronto:`n$(ConvertTo-ElencoUrlCollaudo $sc['collaudoUrl'])`nUtenti di prova: le chiavi COLLAUDO_* del file ~/.claude/collaudo/$($voce.repo).json (i valori non si scrivono qui).") }
+                catch { Write-Log 'WARN' "card $($card.Id): commento con gli indirizzi dell'ambiente di collaudo non scritto: $($_.Exception.Message)" }
+            }
             if ($Az.Tipo -eq 'RiportaIndietro') {
                 # D52: il commit di testa della PR con cui la card di chiusura e tornata indietro: un secondo ritorno per la stessa testa e un on-hold
                 if (Get-Campo $Az 'Commit') { $sc['ritornoCommit'] = [string]$Az.Commit }
@@ -600,6 +612,43 @@ function Invoke-Azione($Cfg, $K, $Az) {
             # chi guarda la card trova il run da seguire (e un'eventuale approvazione che lo aspetta) e con quali parametri e partito
             [void](Add-AdoCommento -Id $card.Id -Testo "[smistatore] Deploy in Test accodato con $($parametri -join ', '): [run $run]($(Get-AdoUrlBuild -Progetto $voce.progettoAdo -Id ([int]$run)))")
         }
+        # D59: l'ambiente Docker della card al posto del deploy in Test. Lo slot e il primo libero fra quelli delle altre card (una card che ha gia il suo
+        # lo tiene: l'ambiente si ricrea sulle stesse porte). Il compose parte dal worktree della card; per la card di chiusura dal worktree in sola
+        # lettura aggiornato al ramo della funzionalita (come per il collaudatore). Il processo che lo crea e staccato: l'esito si legge ai giri dopo.
+        'CreaAmbienteCollaudo' {
+            if ($Az.Chiusura) {
+                if (-not $sc['ramo']) { throw 'La card di chiusura non ha un ramo salvato: non posso preparare il worktree dell ambiente di collaudo' }
+                $sc['cartella'] = [string](Update-WorktreeChiusura -Voce $voce -Card $card -Ramo ([string]$sc['ramo'])).Cartella
+            }
+            $cartella = [string]$sc['cartella']
+            if (-not $cartella -or -not (Test-Path -LiteralPath $cartella)) { throw "La card non ha un worktree utilizzabile (cartella salvata: '$cartella'): non posso creare l'ambiente di collaudo" }
+            $slot = if ($sc['collaudoSlot']) { [int]$sc['collaudoSlot'] } else {
+                $usati = @($K.Stato.Keys | Where-Object { $_ -ne "$($card.Id)" } | ForEach-Object { Get-Campo $K.Stato[$_] 'collaudoSlot' } | Where-Object { $null -ne $_ })
+                Get-SlotCollaudoLibero -Usati $usati -Massimo ([int]$Cfg.Limiti.ambientiCollaudo)
+            }
+            if (-not $slot) { throw 'Nessuno slot libero per l ambiente di collaudo' }
+            $credenziali = Join-Path $HOME ".claude/collaudo/$($voce.repo).json"
+            $richiesta = New-RichiestaCollaudo -Config $Cfg.Collaudo -Voce $voce -Card ([int]$card.Id) -Slot $slot -Cartella $cartella -FileCollaudo $credenziali -CartellaDati $CartellaDati
+            $avviato = Start-AmbienteCollaudo -Richiesta $richiesta
+            $sc['collaudoSlot'] = [int]$slot
+            $sc['collaudoProgetto'] = [string]$avviato.Progetto
+            $sc['collaudoPid'] = [int]$avviato.Pid
+            $sc['collaudoAvvio'] = [string]$avviato.Avvio
+            $sc['collaudoUrl'] = $avviato.Url
+            $sc['runDopoRev'] = [int]$Az.Rev
+            Write-Log 'INFO' "card $($card.Id): ambiente di collaudo $($avviato.Progetto) in creazione (slot $slot), log $($avviato.Log)"
+            [void](Add-AdoCommento -Id $card.Id -Testo '[smistatore] Ambiente di collaudo in creazione...')
+        }
+        'ButtaAmbienteCollaudo' {
+            $progetto = if ($sc['collaudoProgetto']) { [string]$sc['collaudoProgetto'] } else { "card-$($card.Id)" }
+            if (Remove-AmbienteCard $Cfg ([int]$card.Id) $sc) {
+                Write-Log 'INFO' "card $($card.Id): ambiente di collaudo $progetto buttato"
+                try { [void](Add-AdoCommento -Id $card.Id -Testo "[smistatore] Ambiente di collaudo buttato ($progetto).") }
+                catch { Write-Log 'WARN' "card $($card.Id): commento dell'ambiente buttato non scritto: $($_.Exception.Message)" }
+            }
+            # un docker che non risponde non ferma la card: i campi restano e al giro dopo si riprova
+            else { Write-Log 'WARN' "card $($card.Id): ambiente di collaudo $progetto non buttato (docker non risponde o ha dato un errore, vedi il log del progetto): riprovo al giro dopo" }
+        }
         'CompletaPr' {
             # la PR su cui ha deciso Decisioni (attiva sul ramo); il prId salvato puo essere di una PR abbandonata
             $idPr = Get-Campo $K.Pr 'Id'
@@ -616,8 +665,16 @@ function Invoke-Azione($Cfg, $K, $Az) {
         }
         'ApriPr' {
             if (-not $sc['ramo']) { throw 'La card non ha un ramo salvato: non posso aprire la PR' }
+            # Sotto il link, il testo che dev ha salvato sulla card con descrizione-pr prima che la PR esistesse (se ci sta nel tetto)
+            $descrizionePr = "[Card $($card.Id)]($(Get-AdoUrlCard -Id $card.Id)): $($card.Titolo)"
+            $salvata = Get-DescrizionePrSalvata @(Get-AdoCommenti -Id $card.Id)
+            if ($salvata) {
+                $unita = "$descrizionePr`n`n$salvata"
+                if ($unita.Length -le (Get-AdoLimiteTestoPr)) { $descrizionePr = $unita }
+                else { Write-Log 'WARN' "card $($card.Id): la descrizione salvata sulla card non sta nel tetto della PR, la PR si apre senza" }
+            }
             $id = New-AdoPr -Progetto $voce.progettoAdo -Repo $voce.repo -Ramo ([string]$sc['ramo']) -Titolo (Get-TitoloPr ([string]$sc['ramo']) $card.Titolo) `
-                -Descrizione "[Card $($card.Id)]($(Get-AdoUrlCard -Id $card.Id)): $($card.Titolo)" -CardId $card.Id -Destinazione (Get-DestinazioneCard $sc)
+                -Descrizione $descrizionePr -CardId $card.Id -Destinazione (Get-DestinazioneCard $sc)
             $sc['prId'] = [int]$id
         }
         'MettiInAttesa' {
@@ -713,6 +770,46 @@ function Invoke-Azione($Cfg, $K, $Az) {
         # il run di deploy fallito si dimentica: l'azione dopo (AccodaDeployTest) ne salva uno nuovo
         'AzzeraDeploy' { $sc['runId'] = $null; $sc['runDopoRev'] = $null }
         default { throw "Azione sconosciuta: $($Az.Tipo)" }
+    }
+}
+
+# D59: butta l'ambiente di una card: ferma il processo che lo sta creando (pid e avvio dello stato), poi down -v e i volumi. Solo a riuscita
+# azzera i campi dello stato (lo slot resta suo finche docker non conferma). Vero se e stato buttato.
+function Remove-AmbienteCard($Cfg, [int]$Id, $Sc) {
+    $progetto = if ($Sc['collaudoProgetto']) { [string]$Sc['collaudoProgetto'] } else { "card-$Id" }
+    if (-not (Remove-AmbienteCollaudo -Config $Cfg.Collaudo -Progetto $progetto -CartellaDati $CartellaDati -ProcessoId ([int]$Sc['collaudoPid']) -Avvio $Sc['collaudoAvvio'])) { return $false }
+    Clear-StatoAmbienteCollaudo $Sc
+    $true
+}
+
+# D59: i campi dello stato che dicono che la card ha un ambiente di collaudo; runDopoRev si dimentica con loro (valeva per quell'ambiente)
+function Clear-StatoAmbienteCollaudo($Sc) {
+    foreach ($k in 'collaudoSlot', 'collaudoProgetto', 'collaudoPid', 'collaudoAvvio', 'collaudoUrl', 'runDopoRev') { $Sc[$k] = $null }
+}
+
+# D59: a fine giro si buttano i progetti di collaudo (card-<id>) la cui card non e in uno stato di Test, o non c'e piu fra le attive. I progetti sono
+# quelli che docker conosce (contenitori e volumi) e quelli che lo stato locale ricorda con uno slot (una build fallita e la card chiusa: niente
+# contenitori, ma lo slot resta occupato finche non si libera qui). Gli ambienti sono sulla macchina di chi esegue, ma lo stato della card e quello di
+# Azure DevOps. Senza voci collaudo nella mappa e senza ambienti nello stato non si chiede niente a docker. Un docker che non risponde e un avviso
+# nel log: il giro non fallisce.
+function Remove-AmbientiOrfani($Cfg, $Attive, $Stato) {
+    $conStato = @($Stato.Keys | Where-Object { $null -ne $Stato[$_] -and ($Stato[$_]['collaudoSlot'] -or $Stato[$_]['collaudoProgetto']) })
+    $conVoci = @($Cfg.Mappa.aree | Where-Object { Test-AmbienteCollaudo $_ }).Count -gt 0
+    if (-not $conVoci -and $conStato.Count -eq 0) { return }
+    $progetti = [System.Collections.Generic.SortedSet[string]]::new()
+    if ($conVoci) {
+        try { foreach ($p in @(Get-ProgettiCollaudo -Config $Cfg.Collaudo -CartellaDati $CartellaDati)) { [void]$progetti.Add([string]$p) } }
+        catch { Write-Log 'WARN' "ambienti di collaudo orfani: non so quali ce ne sono in docker, non risponde ($($_.Exception.Message))" }
+    }
+    foreach ($k in $conStato) { [void]$progetti.Add("card-$k") }
+    $inTest = @($Attive | Where-Object { (Get-ChiaveStato $Cfg.Stati $_.Stato) -in (Get-StatiInTest) } | ForEach-Object { [int]$_.Id })
+    foreach ($progetto in $progetti) {
+        $id = [int]($progetto -replace '^card-', '')
+        if ($id -in $inTest) { continue }
+        Write-Log 'INFO' "ambiente di collaudo orfano $progetto (la card $id non e in Test): lo butto"
+        $buttato = if ($Stato.Contains("$id")) { Remove-AmbienteCard $Cfg $id $Stato["$id"] }
+            else { Remove-AmbienteCollaudo -Config $Cfg.Collaudo -Progetto $progetto -CartellaDati $CartellaDati }
+        if (-not $buttato) { Write-Log 'WARN' "ambiente di collaudo orfano $progetto non buttato: riprovo al giro dopo" }
     }
 }
 
@@ -846,6 +943,11 @@ function Invoke-GiroCompleto {
             $chi = $altra.AssegnataA.Nome
             if ($WhatIf) { Write-Prova "card ${chiave}: ora e assegnata a ${chi}: toglierei il worktree e lo stato locale"; continue }
             try {
+                # D59: l'ambiente di collaudo e sulla mia macchina e la card non e piu mia: si butta prima del worktree. Se non si butta il worktree resta e la
+                # voce si segna ceduta (lo slot resta suo: le sue porte sono ancora occupate)
+                if (($voceStato['collaudoSlot'] -or $voceStato['collaudoProgetto']) -and -not (Remove-AmbienteCard $cfg ([int]$chiave) $voceStato)) {
+                    throw "l'ambiente di collaudo non si butta (docker non risponde o ha dato un errore)"
+                }
                 Remove-WorktreeCeduta $cfg $altra $voceStato
                 # un mentore ancora aperto non si ferma (e in sola lettura), ma togliendo la voce i suoi consumi non
                 # arriveranno piu sulla card: il log e l'unica traccia che ne resta
@@ -867,11 +969,21 @@ function Invoke-GiroCompleto {
         Close-FeatureConcluse $cfg $stato $perId
 
         # Le tabelle dei limiti per repo e per componente, su tutte le card attive (anche degli altri: le risorse sono comuni).
-        $ctx = New-ContestoGiro $cfg $attive $titolare $script:PercorsoQuota $script:PercorsoSoglia
+        # D60: le Feature aperte, per la pausa e per l'ordine. Se non si leggono il giro si ferma come per le card: senza, una
+        # Feature in pausa ripartirebbe.
+        $feature = @(Get-AdoFeatureAperte)
+        $ctx = New-ContestoGiro $cfg $attive $titolare $script:PercorsoQuota $script:PercorsoSoglia $feature
 
+        # D60: il sistema in pausa (impostazioni.json, dal pulsante della vista): le sessioni finite si sono chiuse al passo 2, ma non parte
+        # niente e nessuna card si sposta. Lo dice il log a ogni giro.
+        if ((Get-Impostazioni -CartellaDati $CartellaDati).Pausa) {
+            Write-Log 'INFO' 'sistema in pausa (vista o impostazioni.json): nessuna card avanza'
+            return
+        }
         # Passo 3: le card
         # @() fuori dall'if: l'assegnazione di un if srotola l'array, e con zero card $daFare sarebbe $null.
-        $daFare = @(if ($Card) { $attive | Where-Object { $_.Id -eq $Card } } else { $attive })
+        # D60: nell'ordine delle Feature nel backlog, cosi un posto libero va alla card della Feature piu in alto
+        $daFare = @(if ($Card) { $attive | Where-Object { $_.Id -eq $Card } } else { Get-OrdineCard $attive $ctx.Feature })
         if ($Card -and $daFare.Count -eq 0) {
             $una = Get-AdoCard -Id $Card
             if ($una) { $daFare = @($una) }
@@ -917,7 +1029,7 @@ function Invoke-GiroCompleto {
                 $azioni = @($decisione.Azioni)
                 # una card che non parte per i predecessori, per il limite in Test o per quello di sessioni lascia una riga: dice perche
                 # (il motivo quota no: vale per tutte le card e a ogni giro sarebbe rumore, lo dice una volta Close-Sessione)
-                if ($decisione.Motivo -and $decisione.Motivo.Tipo -in 'predecessori', 'limiteTest', 'limiteSessioni', 'funzionalitaIllegibile', 'funzionalitaPerduta', 'inFeatureSenzaPrUnita', 'senzaSorelle', 'conflittiFunzionalita', 'ciRossaFunzionalita', 'chiusuraInBozza') {
+                if ($decisione.Motivo -and $decisione.Motivo.Tipo -in 'predecessori', 'limiteTest', 'limiteAmbienti', 'limiteSessioni', 'funzionalitaIllegibile', 'funzionalitaPerduta', 'inFeatureSenzaPrUnita', 'senzaSorelle', 'conflittiFunzionalita', 'ciRossaFunzionalita', 'chiusuraInBozza') {
                     Write-Log 'INFO' "card $($cardAdo.Id): $(Format-MotivoCoda $decisione.Motivo)"
                 }
             }
@@ -928,7 +1040,7 @@ function Invoke-GiroCompleto {
                 continue
             }
 
-            $k = @{ Card = $cardAdo; Sc = $sc; Voce = $voce; Pr = $snap.Pr; Task = $snap.Task; Contesto = $ctx; Titolare = $titolare; Io = $io; Lanciata = $false }
+            $k = @{ Card = $cardAdo; Sc = $sc; Stato = $stato; Voce = $voce; Pr = $snap.Pr; Task = $snap.Task; Contesto = $ctx; Titolare = $titolare; Io = $io; Lanciata = $false }
             foreach ($a in $azioni) {
                 try { Invoke-Azione $cfg $k $a }
                 catch {
@@ -953,7 +1065,10 @@ function Invoke-GiroCompleto {
             }
             Save-Stato -Stato $stato -Percorso $script:PercorsoStato
         }
-        if (-not $WhatIf) { Save-Stato -Stato $stato -Percorso $script:PercorsoStato }
+        if (-not $WhatIf) {
+            if (-not $Card) { Remove-AmbientiOrfani $cfg $attive $stato }
+            Save-Stato -Stato $stato -Percorso $script:PercorsoStato
+        }
     }
     finally {
         if (-not $WhatIf) { Exit-Giro -Nome $nomeGiro }

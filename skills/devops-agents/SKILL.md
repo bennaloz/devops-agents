@@ -82,8 +82,13 @@ Il file per `card crea` ha quattro sezioni `##`, tutte obbligatorie: `Descrizion
 li riscrive `responsabile`. Il recinto dice quali file si toccano e quali no. Una funzionalità su più repo è più
 card, una per repo.
 
+Ogni card sta in una Feature (D60): `card crea` senza `-Feature` si rifiuta. Chiedi all'utente in quale Feature va. Se non
+c'è, prima si crea la Feature: `-Tipo Feature -Raggruppa` per raggruppare card che vanno in `develop` una per una,
+`-Tipo Feature` per una funzionalità D52 da provare intera. La priorità delle Feature e la loro pausa si gestiscono dalla
+vista, nella sezione Funzionalità.
+
 ```
-pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 crea -Tipo 'User Story' -Titolo '<titolo>' -Area 'DevOps.Agents\<area>' -File <file.md>
+pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 crea -Tipo 'User Story' -Feature <id> -Titolo '<titolo>' -Area 'DevOps.Agents\<area>' -File <file.md>
 ```
 
 Le card di una funzionalità divisa si creano con `-Dopo <id>[,<id>...]` (gli id delle card che devono essere unite

@@ -387,3 +387,26 @@ Describe 'Get-ProcessiSmistatoreRadice (D53): un giro dello smistatore di questa
         @(Get-ProcessiVistaRadice 'C:\develop\GIT\DevOps.Agents' | ForEach-Object ProcessId) | Should -Be @(31)
     }
 }
+
+Describe 'La descrizione della PR salvata sulla card' {
+    BeforeAll {
+        function New-CommDescr($Id, [string]$Ruolo, [string]$Testo) {
+            [pscustomobject]@{ Id = $Id; Autore = 'x'; Quando = 'd'
+                Testo = "[$Ruolo] $(ConvertTo-TestoCommentoDescrizionePr $Testo)`n`n$([char]0x2014) scritto da Claude ($Ruolo)" }
+        }
+    }
+
+    It 'si rilegge come si scrive, senza marca ne firma' {
+        Get-DescrizionePrSalvata @(New-CommDescr 3 'dev' "## Misure`nrighe  e perché") | Should -Be "## Misure`nrighe  e perché"
+    }
+
+    It 'vale l ultimo, nell ordine degli id, e solo di dev e responsabile' {
+        $c = @((New-CommDescr 9 'dev' 'secondo'), (New-CommDescr 4 'responsabile' 'primo'), (New-CommDescr 12 'reviewer' 'intruso'),
+            [pscustomobject]@{ Id = 13; Testo = 'Descrizione della PR: di una persona' })
+        Get-DescrizionePrSalvata $c | Should -Be 'secondo'
+    }
+
+    It 'senza commenti marcati: niente' {
+        Get-DescrizionePrSalvata @([pscustomobject]@{ Id = 1; Testo = '[dev] altro' }) | Should -BeNullOrEmpty
+    }
+}

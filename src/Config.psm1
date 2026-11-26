@@ -31,11 +31,16 @@ function Get-Config {
     # Un valore che viene da impostazioni.json e invalido: l'errore lo dice, perche il file di config del repo e a posto.
     try {
         # D51: la riserva settimanale e il margine dopo il reset della quota. Senza, la pausa per il limite non si calcola.
-        foreach ($n in 'sogliaQuotaSettimanale', 'margineQuotaMinuti') {
+        # D60: la soglia sulla finestra di 5 ore, come la settimanale ma fino al reset della finestra.
+        foreach ($n in 'sogliaQuotaSettimanale', 'sogliaQuota5Ore', 'margineQuotaMinuti') {
             if (-not $limiti.PSObject.Properties[$n] -or $limiti.$n -isnot [ValueType]) { throw "limiti.json: manca '$n' o non e un numero" }
         }
         if ($limiti.sogliaQuotaSettimanale -le 0 -or $limiti.sogliaQuotaSettimanale -gt 1) { throw "limiti.json: 'sogliaQuotaSettimanale' deve essere fra 0 (escluso) e 1" }
+        if ($limiti.sogliaQuota5Ore -le 0 -or $limiti.sogliaQuota5Ore -gt 1) { throw "limiti.json: 'sogliaQuota5Ore' deve essere fra 0 (escluso) e 1" }
         if ($limiti.margineQuotaMinuti -lt 0) { throw "limiti.json: 'margineQuotaMinuti' non puo essere negativo" }
+
+        # D59: quanti ambienti di collaudo Docker possono esistere insieme
+        if (-not $limiti.PSObject.Properties['ambientiCollaudo'] -or $limiti.ambientiCollaudo -isnot [ValueType] -or $limiti.ambientiCollaudo -lt 1) { throw "limiti.json: manca 'ambientiCollaudo' o non e un numero di almeno 1" }
 
         # D52: l'interruttore delle funzionalita. Spento, `card crea -Tipo Feature` e `-Feature` si rifiutano.
         if (-not $limiti.PSObject.Properties['funzionalitaAttive'] -or $limiti.funzionalitaAttive -isnot [bool]) { throw "limiti.json: manca 'funzionalitaAttive' o non e vero/falso" }
@@ -43,6 +48,14 @@ function Get-Config {
     catch {
         if ($chiaviOverride.Count -gt 0) { throw "$($_.Exception.Message) (override in impostazioni.json: $($chiaviOverride -join ', '))" }
         throw
+    }
+
+    # D59: come si raggiunge docker e dove stanno gli ambienti di collaudo
+    $collaudo = & $leggi 'collaudo'
+    if (@($collaudo.comandoDocker | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0) { throw "collaudo.json: 'comandoDocker' manca o e vuoto" }
+    if ([string]::IsNullOrWhiteSpace([string]$collaudo.host)) { throw "collaudo.json: manca 'host'" }
+    foreach ($n in 'portaBase', 'minutiCreazione', 'minutiComandi') {
+        if (-not $collaudo.PSObject.Properties[$n] -or $collaudo.$n -isnot [ValueType] -or $collaudo.$n -le 0) { throw "collaudo.json: manca '$n' o non e un numero positivo" }
     }
 
     # D52: gli stati della Feature (il processo li ha diversi dalle card): chi scrive o legge lo stato di una Feature li prende da qui.
@@ -76,7 +89,7 @@ function Get-Config {
         }
     }
 
-    [pscustomobject]@{ Stati = $stati; Ruoli = $ruoli; Limiti = $limiti; Mappa = $mappa }
+    [pscustomobject]@{ Stati = $stati; Ruoli = $ruoli; Limiti = $limiti; Mappa = $mappa; Collaudo = $collaudo }
 }
 
 # La riga della mappa per un'area, dalla mappa gia letta; null se l'area non c'e.

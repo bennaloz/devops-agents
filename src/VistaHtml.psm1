@@ -166,6 +166,17 @@ pre.azioni { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background:
 .funzionalita h2 .pillola { margin-left: 6px; background: color-mix(in srgb, var(--verde) 18%, transparent); color: var(--verde); }
 .funzionalita h2 .nota { margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--attenuato); }
 .funzionalita-lista { display: grid; gap: 10px; margin-top: 10px; }
+.funzionalita-voce[draggable=true] { cursor: grab; }
+.funzionalita-voce.trascinata { opacity: 0.4; }
+.funzionalita-voce.sopra { border-color: var(--accento); box-shadow: 0 0 0 2px var(--accento-sfondo); }
+.funzionalita-voce.in-pausa { opacity: 0.6; }
+.funzionalita-voce h3 { display: flex; align-items: center; gap: 8px; }
+.funzionalita-voce .posizione { min-width: 1.4em; font-weight: 700; color: var(--attenuato); }
+.funzionalita-voce .pausa-segno { font-size: 12px; font-weight: 700; color: var(--accento); }
+.funzionalita-voce .vuota { font-size: 12.5px; color: var(--attenuato); }
+button.pausa { margin-left: auto; padding: 2px 10px; border-radius: 8px; border: 1px solid var(--accento); background: var(--accento-sfondo); color: var(--accento); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+button.pausa:disabled, button#pausa-sistema:disabled { opacity: 0.6; cursor: default; }
+.banner-pausa { margin: 8px 0; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--accento); background: var(--accento-sfondo); font-weight: 600; }
 .funzionalita-voce { padding: 10px 14px; background: var(--superficie); border: 1px solid var(--bordo); border-radius: 10px; font-size: 13px; }
 .funzionalita-voce h3 { margin: 0 0 6px; font-size: 14px; }
 .funzionalita-voce h3 .stato, .funzionalita-voce .campo { font-size: 12.5px; font-weight: 600; color: var(--attenuato); }
@@ -232,6 +243,7 @@ details.falliti summary { cursor: pointer; font-size: 13px; text-transform: uppe
 .pannelli[data-disposizione="affiancate"] > .divisore::after { left: 5px; top: 120px; width: 6px; height: 44px; }
 .pannelli[data-disposizione="colonna"] > .divisore { display: block; height: 16px; margin: 14px 0; cursor: row-resize; }
 .pannelli[data-disposizione="colonna"] > .divisore.secondo { display: none; }
+.pannelli[data-disposizione="colonna"] > .divisore.terzo { display: none; }
 .pannelli[data-disposizione="colonna"] > .divisore::before { top: 7px; left: 0; right: 0; height: 2px; }
 .pannelli[data-disposizione="colonna"] > .divisore::after { top: 5px; left: calc(50% - 22px); width: 44px; height: 6px; }
 body.trascina { user-select: none; }
@@ -336,7 +348,7 @@ $script:ScriptGiro = @'
     var e = esito(p); if (e) { e.textContent = t; }
     if (ricorda) { try { sessionStorage.setItem('esito:' + p.id, t); } catch (x) {} }
   };
-  ['giro', 'aggiorna', 'aggiorna-pipeline', 'quota-applica', 'quota-ignora', 'quota-ripristina', 'suite-aggiorna', 'suite-automatico'].forEach(function (id) {
+  ['giro', 'aggiorna', 'aggiorna-pipeline', 'quota-applica', 'quota-applica-5', 'quota-ignora', 'quota-ripristina', 'suite-aggiorna', 'suite-automatico', 'funzionalita-esito', 'pausa-sistema'].forEach(function (id) {
     var p = document.getElementById(id); if (!p) return;
     try { var m = sessionStorage.getItem('esito:' + id); if (m) { dire(p, m); sessionStorage.removeItem('esito:' + id); } } catch (x) {}
   });
@@ -360,7 +372,16 @@ $script:ScriptGiro = @'
     var finito = function () { p.disabled = false; window.vistaAttesaAggiorna = false; };
     var fallito = function () { finito(); if (alErrore) alErrore(); };
     p.disabled = true; window.vistaAttesaAggiorna = true; dire(p, inCorso || 'rilettura in corso...');
-    fetch(indirizzo, { method: 'POST', headers: intestazioni })
+    // D60: la vista serve le richieste fra un disegno e l'altro; mentre rilegge Azure DevOps una richiesta puo cadere per strada
+    // (Failed to fetch). Allora si riprova, fino a 5 volte a 10 secondi: i comandi sono idempotenti, rifarli non cambia l'esito.
+    var invia = function (tentativo) {
+      return fetch(indirizzo, { method: 'POST', headers: intestazioni }).catch(function (x) {
+        if (tentativo >= 5) throw x;
+        dire(p, 'la vista e occupata a rileggere, riprovo...');
+        return new Promise(function (ok) { setTimeout(ok, 10000); }).then(function () { return invia(tentativo + 1); });
+      });
+    };
+    invia(1)
       .then(function (r) { return r.json(); })
       .then(function (j) {
         dire(p, j.messaggio);
@@ -390,6 +411,56 @@ $script:ScriptGiro = @'
     var v = parseFloat(String(campo.value).replace(',', '.'));
     if (!(v >= min && v <= max)) { dire(qa, 'la soglia deve stare fra ' + min + ' e ' + max); return; }
     rileggi(qa, '/soglia?soglia=' + encodeURIComponent((v / 100).toFixed(4)), 'soglia aggiornata');
+  });
+  // D60: la soglia delle 5 ore, come la settimanale ma fino al reset della finestra
+  var q5 = document.getElementById('quota-applica-5');
+  if (q5) q5.addEventListener('click', function () {
+    var campo = document.getElementById('quota-soglia-5'), min = parseFloat(campo.min), max = parseFloat(campo.max);
+    var v = parseFloat(String(campo.value).replace(',', '.'));
+    if (!(v >= min && v <= max)) { dire(q5, 'la soglia deve stare fra ' + min + ' e ' + max); return; }
+    rileggi(q5, '/soglia?soglia5Ore=' + encodeURIComponent((v / 100).toFixed(4)), 'soglia delle 5 ore aggiornata');
+  });
+  // D60: le funzionalita in ordine di priorita. Si trascina una scheda (POST /ordine?id=&dopo=, dopo = la Feature sopra, 0 = in cima) e il
+  // pulsante della scheda mette o toglie la pausa (POST /pausa?id=&attiva=). Mentre una richiesta e in corso non se ne parte un'altra; se
+  // fallisce la pagina si ricarica, cosi non resta un ordine che non e stato salvato.
+  var lista = document.querySelector('.funzionalita-lista'), pe = document.getElementById('funzionalita-esito');
+  if (lista && pe) {
+    var trascinata = null, occupata = false;
+    var ricarica = function () { location.reload(); };
+    var chiedi = function (indirizzo, fatto, inCorso) {
+      if (occupata) return;
+      occupata = true;
+      Array.prototype.forEach.call(lista.querySelectorAll('button.pausa'), function (b) { b.disabled = true; });
+      rileggi(pe, indirizzo, fatto, inCorso, ricarica);
+    };
+    Array.prototype.forEach.call(lista.querySelectorAll('.funzionalita-voce[draggable=true]'), function (v) {
+      v.addEventListener('dragstart', function (e) { if (occupata) { e.preventDefault(); return; } trascinata = v; v.classList.add('trascinata'); try { e.dataTransfer.setData('text/plain', v.dataset.feature); } catch (x) {} });
+      v.addEventListener('dragend', function () { v.classList.remove('trascinata'); Array.prototype.forEach.call(lista.children, function (x) { x.classList.remove('sopra'); }); });
+      v.addEventListener('dragover', function (e) { if (!trascinata || trascinata === v) return; e.preventDefault(); v.classList.add('sopra'); });
+      v.addEventListener('dragleave', function () { v.classList.remove('sopra'); });
+      v.addEventListener('drop', function (e) {
+        e.preventDefault(); v.classList.remove('sopra');
+        if (!trascinata || trascinata === v) return;
+        var schede = Array.prototype.slice.call(lista.children);
+        var sotto = schede.indexOf(trascinata) < schede.indexOf(v);
+        lista.insertBefore(trascinata, sotto ? v.nextSibling : v);
+        var prima = trascinata.previousElementSibling;
+        chiedi('/ordine?id=' + encodeURIComponent(trascinata.dataset.feature) + '&dopo=' + (prima ? encodeURIComponent(prima.dataset.feature) : '0'), 'priorita salvata', 'salvo la priorita...');
+      });
+    });
+    Array.prototype.forEach.call(lista.querySelectorAll('button.pausa'), function (bt) {
+      bt.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var attiva = bt.dataset.pausa === '1' ? '0' : '1';
+        chiedi('/pausa?id=' + encodeURIComponent(bt.dataset.id) + '&attiva=' + attiva, attiva === '1' ? 'Feature ' + bt.dataset.id + ' in pausa' : 'Feature ' + bt.dataset.id + ' ripartita', 'scrivo su Azure DevOps...');
+      });
+    });
+  }
+  // D60: la pausa di tutto il sistema (POST /pausa-sistema?attivo=0|1)
+  var ps = document.getElementById('pausa-sistema');
+  if (ps) ps.addEventListener('click', function () {
+    var attivo = ps.dataset.pausa === '1' ? '0' : '1';
+    rileggi(ps, '/pausa-sistema?attivo=' + attivo, attivo === '1' ? 'sistema in pausa' : 'sistema ripartito');
   });
   if (qi) qi.addEventListener('change', function () { rileggi(qi, '/soglia?ignoraRiserva=' + (qi.checked ? '1' : '0'), qi.checked ? 'riserva ignorata fino al reset' : 'riserva di nuovo attiva', null, function () { qi.checked = !qi.checked; }); });
   if (qr) qr.addEventListener('click', function () { rileggi(qr, '/soglia?ripristina=1', 'soglia ripristinata'); });
@@ -444,6 +515,7 @@ $script:ScriptSchede = @'
   var fuori = function (n) { var p = document.querySelector('[data-pannello="' + n + '"]'); return !!(p && p.hasAttribute('data-fuori')); };
   var nomi = function () { var l = []; bottoni.forEach(function (b) { if (!fuori(b.dataset.scheda)) { l.push(b.dataset.scheda); } }); return l; };
   var divAgenti = document.querySelector('.divisore[data-divisore="agenti"]'), divPipeline = document.querySelector('.divisore[data-divisore="pipeline"]');
+  var divUfficio = document.querySelector('.divisore[data-divisore="ufficio"]');
   // le colonne della griglia seguono i pannelli visibili. Il primo divisore sta fra Agenti e il pannello che segue (c'e se Agenti e almeno
   // un altro sono visibili); il secondo fra Pipeline e Apprendimento (c'e se sono visibili tutti e due). La larghezza di Agenti e quella di
   // Pipeline (quando Apprendimento le sta accanto) sono le misure dei divisori; il resto e di Apprendimento.
@@ -452,15 +524,19 @@ $script:ScriptSchede = @'
     var vis = nomi().filter(function (n) { return nascosti.indexOf(n) < 0; });
     var d1 = vis[0] === 'agenti' && vis.length > 1;
     var d2 = vis.indexOf('pipeline') >= 0 && vis.indexOf('apprendimento') >= 0;
+    // il terzo, fra l'Ufficio e il pannello visibile prima di lui, se quello non e Agenti (fra Agenti e il seguente c'e gia il primo)
+    var iu = vis.indexOf('ufficio'), d3 = iu > 0 && vis[iu - 1] !== 'agenti';
     var t = [];
     vis.forEach(function (n) {
       if (n === 'agenti') { t.push(d1 ? 'minmax(0, var(--quota, 50%))' : 'minmax(0, 1fr)'); if (d1) { t.push('16px'); } }
       else if (n === 'pipeline') { t.push(d2 ? 'minmax(0, var(--quota-pipeline, 1fr))' : 'minmax(0, 1fr)'); if (d2) { t.push('16px'); } }
+      else if (n === 'ufficio' && d3) { t.push('16px'); t.push('minmax(0, var(--quota-ufficio, 1fr))'); }
       else { t.push('minmax(0, 1fr)'); }
     });
     pannelli.style.gridTemplateColumns = disposizione === 'affiancate' ? t.join(' ') : '';
     if (divAgenti) { divAgenti.style.display = d1 || disposizione === 'schede' ? '' : 'none'; }
     if (divPipeline) { divPipeline.style.display = d2 || disposizione === 'schede' ? '' : 'none'; }
+    if (divUfficio) { divUfficio.style.display = d3 || disposizione === 'schede' ? '' : 'none'; }
   };
   var mostra = function (nome) {
     var insieme = disposizione !== 'schede';
@@ -492,10 +568,15 @@ $script:ScriptSchede = @'
   var applicaMisure = function () {
     var q = parseFloat(leggiMisura('quota-affiancate')); pannelli.style.setProperty('--quota', (q >= 15 && q <= 85 ? q : 50) + '%');
     var q2 = parseFloat(leggiMisura('quota-pipeline')); if (q2 >= 10 && q2 <= 60) { pannelli.style.setProperty('--quota-pipeline', q2 + '%'); } else { pannelli.style.removeProperty('--quota-pipeline'); }
+    var q3 = parseFloat(leggiMisura('quota-ufficio')); if (q3 >= 15 && q3 <= 70) { pannelli.style.setProperty('--quota-ufficio', q3 + '%'); } else { pannelli.style.removeProperty('--quota-ufficio'); }
     var a = parseInt(leggiMisura('alto-colonna'), 10); if (a >= 120) { pannelli.style.setProperty('--alto', a + 'px'); } else { pannelli.style.removeProperty('--alto'); }
   };
   var misura = function (x, y, quale) {
-    if (quale === 'pipeline') {
+    if (quale === 'ufficio') {
+      // la larghezza dell'Ufficio, in % della griglia: dalla posizione del divisore al bordo destro
+      var ru = pannelli.getBoundingClientRect();
+      salvaMisura('quota-ufficio', Math.min(70, Math.max(15, (ru.right - x) / ru.width * 100)).toFixed(1));
+    } else if (quale === 'pipeline') {
       // la larghezza di Pipeline, in % della griglia: dal suo bordo sinistro alla posizione del divisore
       var rp = pannelli.getBoundingClientRect(), sx = pannelli.querySelector('[data-pannello="pipeline"]').getBoundingClientRect().left;
       salvaMisura('quota-pipeline', Math.min(60, Math.max(10, (x - sx) / rp.width * 100)).toFixed(1));
@@ -510,7 +591,7 @@ $script:ScriptSchede = @'
   };
   var collega = function (divisore) {
     var quale = divisore.dataset.divisore;
-    var chiave = function () { return quale === 'pipeline' ? 'quota-pipeline' : (disposizione === 'affiancate' ? 'quota-affiancate' : 'alto-colonna'); };
+    var chiave = function () { return quale === 'ufficio' ? 'quota-ufficio' : (quale === 'pipeline' ? 'quota-pipeline' : (disposizione === 'affiancate' ? 'quota-affiancate' : 'alto-colonna')); };
     divisore.addEventListener('pointerdown', function (ev) {
       ev.preventDefault(); divisore.setPointerCapture(ev.pointerId); document.body.classList.add('trascina');
       var muovi = function (e) { misura(e.clientX, e.clientY, quale); };
@@ -763,6 +844,9 @@ function Format-VoceOperatore($V) {
     # D37: una card col tag on-hold porta il segno data-on-hold e, con il server, il pulsante "Togli on-hold" (il motivo resta visibile sopra)
     $inAttesa = $V.PSObject.Properties['InAttesa'] -and [bool]$V.InAttesa
     $segno = if ($inAttesa) { ' data-on-hold="1"' } else { '' }
+    # D57: la sezione "Cosa fare" dell'on-hold (Get-RigheCosaFare), sopra il pulsante
+    $cf = @(if ($V.PSObject.Properties['CosaFare']) { @($V.CosaFare) | Where-Object { $_ } })
+    if ($cf.Count -gt 0) { $gesto += "<div class=`"aspetta persona cosa-fare`"><b>Cosa fare</b>$(($cf | ForEach-Object { "<div>$(E $_)</div>" }) -join '')</div>" }
     $togli = if ($inAttesa -and $script:PaginaConServer) { "<span class=`"azione`"><button type=`"button`" class=`"togli-attesa`" id=`"togli-attesa-$($V.Id)`" data-id=`"$($V.Id)`" data-token=`"$(E $script:TokenPagina)`">Togli on-hold</button><span class=`"esito-ado`" role=`"status`"></span></span>" } else { '' }
     "<div class=`"voce att-$(E $V.Attivita)`" data-attivita=`"$(E $V.Attivita)`" data-id=`"$($V.Id)`"$segno><span class=`"etichetta att-$(E $V.Attivita)`">$(E $V.Verbo)</span>$fase<br>$(Format-CardLink $V)$(if ($V.PSObject.Properties['Stato']) { Format-RigaStato ([string]$V.Stato) (Get-ChiaveVoce $V) })$(Format-MotivoVoce $V $testo ([string]$V.Testo))$gesto$(Format-RigaPr $V)$togli</div>"
 }
@@ -1066,16 +1150,28 @@ function Format-Catena($Catena) {
 
 # D52: una funzionalita come una scheda: la Feature con il suo stato, la card di chiusura con il suo stato e dove sta, poi le altre card,
 # ognuna con il suo stato sulla board e dove sta nella kanban (lo dice il modello, come per le catene).
-function Format-Funzionalita($F) {
+# D60: la scheda ha la sua posizione nella priorita e dice se e in pausa; con il server (Token) si trascina e ha il pulsante pausa/riprendi.
+# Una Feature senza card di chiusura (raggruppa soltanto) mostra solo le sue card.
+function Format-Funzionalita($F, [string]$Token = '', [int]$Posizione = 0) {
     $dove = { param($V) if ($V.Dove) { "<span class=`"dove`">$(E $V.Dove)</span>" } else { '' } }
     $chiusura = $F.Chiusura
     $righe = foreach ($c in @($F.Card | Where-Object { -not $_.EChiusura })) {
         "<li data-id=`"$($c.Id)`">$(Format-CardLink $c) $(Format-StatoBoard $c)$(& $dove $c)</li>"
     }
+    $pausa = [bool]$(if ($F.PSObject.Properties['Pausa']) { $F.Pausa } else { $false })
+    $classe = if ($pausa) { 'funzionalita-voce in-pausa' } else { 'funzionalita-voce' }
+    $trascina = if ($Token) { ' draggable="true"' } else { '' }
+    $numero = if ($Posizione -gt 0) { "<span class=`"posizione`">$Posizione</span>" } else { '' }
+    $segno = if ($pausa) { '<span class="pausa-segno">in pausa</span>' } else { '' }
+    $pulsante = if ($Token) {
+        $titolo = if ($pausa) { 'Riprendi: le card della Feature ripartono' } else { 'Metti in pausa: nessuna card della Feature avanza, le sessioni in corso finiscono' }
+        "<button type=`"button`" class=`"pausa`" data-id=`"$($F.Feature)`" data-pausa=`"$(if ($pausa) { '1' } else { '0' })`" title=`"$titolo`" aria-label=`"$titolo`">$(if ($pausa) { '&#9654;' } else { '&#10074;&#10074;' })</button>"
+    } else { '' }
     $feature = [pscustomobject]@{ Id = $F.Feature; UrlCard = $F.UrlCard; Titolo = $F.Titolo }
-    "<div class=`"funzionalita-voce`" data-feature=`"$($F.Feature)`"><h3>Feature $(Format-CardLink $feature) <span class=`"stato`">$(E $F.StatoFeature)</span></h3>" +
-        "<div class=`"chiusura`" data-id=`"$($chiusura.Id)`"><span class=`"campo`">Card di chiusura:</span> $(Format-CardLink $chiusura) $(Format-StatoBoard $chiusura)$(& $dove $chiusura)</div>" +
-        "<ul>$(@($righe) -join '')</ul></div>"
+    $testaChiusura = if ($chiusura) { "<div class=`"chiusura`" data-id=`"$($chiusura.Id)`"><span class=`"campo`">Card di chiusura:</span> $(Format-CardLink $chiusura) $(Format-StatoBoard $chiusura)$(& $dove $chiusura)</div>" } else { '' }
+    $elenco = if (@($righe).Count -gt 0) { "<ul>$(@($righe) -join '')</ul>" } else { '<span class="vuota">nessuna card aperta</span>' }
+    "<div class=`"$classe`" data-feature=`"$($F.Feature)`"$trascina><h3>$numero<span>Feature $(Format-CardLink $feature) <span class=`"stato`">$(E $F.StatoFeature)</span></span>$segno$pulsante</h3>" +
+        $testaChiusura + $elenco + '</div>'
 }
 
 # Oltre questo numero di lezioni stabili le sezioni per ruolo partono chiuse: sono lunghe e si aprono quando servono.
@@ -1176,7 +1272,15 @@ function Format-RigaQuota($Q) {
     $reset = if ($Q.Reset) { "reset $(Format-QuandoQuota $Q.Reset)" } else { 'reset non noto' }
     # un override che c'e ma non vale (scaduto, illeggibile, fuori range) non deve restare invisibile: la soglia e quella di limiti.json
     $ignorato = if ($Q.Override -in 'scaduto', 'illeggibile', 'fuoriRange') { " &middot; override ignorato: $(E $Q.Override)" } else { '' }
-    "<p class=`"quota-riga`">Quota settimanale: <b>$(E (Format-PercentoQuota $Q.Uso))</b> usata &middot; $(E $soglia) &middot; $(E $reset) &middot; $(E $ignora)$ignorato</p>"
+    $riga5 = ''
+    # D60: la finestra di 5 ore, con la sua soglia (alzata o no) e il suo reset; un modello senza il campo non la ha
+    if ($Q.PSObject.Properties['Soglia5Ore']) {
+        $soglia5 = "soglia $(Format-PercentoQuota $Q.Soglia5Ore)"
+        if ($Q.DaOverride5Ore) { $soglia5 += " (alzata fino alle $(Format-QuandoQuota $Q.Reset5Ore))" }
+        $reset5 = if ($Q.Reset5Ore) { "reset $(Format-QuandoQuota $Q.Reset5Ore)" } else { 'reset non noto' }
+        $riga5 = "<p class=`"quota-riga`">Quota 5 ore: <b>$(E (Format-PercentoQuota $Q.Uso5Ore))</b> usata &middot; $(E $soglia5) &middot; $(E $reset5)</p>"
+    }
+    "<p class=`"quota-riga`">Quota settimanale: <b>$(E (Format-PercentoQuota $Q.Uso))</b> usata &middot; $(E $soglia) &middot; $(E $reset) &middot; $(E $ignora)$ignorato</p>$riga5"
 }
 
 # I comandi, solo con il server (Token): alzare la soglia (in %, max 95), ignorare la riserva, ripristinare. Parlano con POST /soglia.
@@ -1188,7 +1292,16 @@ function Format-ComandiQuota($Q, [string]$Token) {
     "<span class=`"quota-comandi`"><label for=`"quota-soglia`">Soglia %</label><input type=`"number`" id=`"quota-soglia`" min=`"$minimo`" max=`"$massimo`" step=`"1`" value=`"$valore`">" +
         "<button type=`"button`" id=`"quota-applica`" data-token=`"$t`">Applica</button>" +
         "<input type=`"checkbox`" id=`"quota-ignora`" data-token=`"$t`"$spunta><label for=`"quota-ignora`">Ignora la riserva fino al reset</label>" +
-        "<button type=`"button`" id=`"quota-ripristina`" data-token=`"$t`">Ripristina</button><span class=`"esito-ado`" role=`"status`"></span></span>"
+        "<button type=`"button`" id=`"quota-ripristina`" data-token=`"$t`">Ripristina</button>" + (Format-ComandiQuota5Ore $Q $t) + "<span class=`"esito-ado`" role=`"status`"></span></span>"
+}
+
+# D60: il campo e il pulsante della soglia delle 5 ore, solo con un reset della finestra noto e futuro. $T e il token gia escapato.
+function Format-ComandiQuota5Ore($Q, [string]$T) {
+    if (-not $Q.PSObject.Properties['PuoImpostare5Ore'] -or -not $Q.PuoImpostare5Ore) { return '' }
+    $valore = [math]::Round([double]$Q.Soglia5Ore * 100)
+    $minimo = [math]::Round([double]$Q.SogliaMin * 100); $massimo = [math]::Round([double]$Q.SogliaMax * 100)
+    "<label for=`"quota-soglia-5`">Soglia 5 ore %</label><input type=`"number`" id=`"quota-soglia-5`" min=`"$minimo`" max=`"$massimo`" step=`"1`" value=`"$valore`">" +
+        "<button type=`"button`" id=`"quota-applica-5`" data-token=`"$T`">Applica</button>"
 }
 
 # Il banner a tutta larghezza in cima, solo quando gli agenti sono fermi per la quota (Blocco), col colore suo e i comandi accanto.
@@ -1196,6 +1309,7 @@ function Format-BannerQuota($Q, [string]$Token) {
     $b = $Q.Blocco
     $fino = Format-QuandoQuota $b.Fino
     $causa = if ($b.Causa -eq 'limite') { "Gli agenti sono fermi: limite di token raggiunto, riprendono il $fino." }
+             elseif ($b.Causa -eq 'cinqueOre') { "Gli agenti sono fermi: soglia delle 5 ore. L'uso e al $(Format-PercentoQuota $b.Uso), la soglia e $(Format-PercentoQuota $b.Soglia): ripartono al reset della finestra, il $fino." }
              else { "Gli agenti sono fermi: riserva settimanale. L'uso e al $(Format-PercentoQuota $b.Uso), la soglia e $(Format-PercentoQuota $b.Soglia): ripartono al reset, il $fino." }
     $dettaglio = if ($b.Causa -eq 'limite') { "Uso settimanale $(Format-PercentoQuota $Q.Uso), soglia $(Format-PercentoQuota $Q.Soglia). La pausa dopo il limite di token non si salta: le sessioni fallirebbero." } else { '' }
     $comandi = if ($Token -and $Q.PuoImpostare) { Format-ComandiQuota $Q $Token } else { '' }
@@ -1276,6 +1390,8 @@ function New-PaginaVista($Modello, [int]$Secondi = 10, [string]$Token = '') {
     [void]$h.AppendLine("<main data-generata=`"$(E $Modello.Generata.ToString('o'))`"$ricarica>")
     $quota = Get-DatiQuota $Modello
     if ($quota -and $quota.Blocco) { [void]$h.AppendLine((Format-BannerQuota $quota $Token)) }
+    # D60: il sistema in pausa si vede subito, sopra tutto
+    if ($Modello.PSObject.Properties['SistemaInPausa'] -and $Modello.SistemaInPausa) { [void]$h.AppendLine('<div class="banner-pausa" role="status">Sistema in pausa: lo smistatore chiude le sessioni che finiscono, ma non lancia niente e non sposta card.</div>') }
     # Due schede: Agenti (kanban e catene) e Pipeline (i run di tutti i progetti). Senza lettura delle pipeline niente schede.
     # Senza JavaScript i due pannelli si vedono uno sotto l'altro; con lo script se ne vede uno, ricordato in sessionStorage.
     $build = if ($Modello.PSObject.Properties['BuildAdo']) { $Modello.BuildAdo } else { $null }
@@ -1311,7 +1427,9 @@ function New-PaginaVista($Modello, [int]$Secondi = 10, [string]$Token = '') {
     }
     if ($Token) {
         $t = E $Token
-        [void]$h.AppendLine("<p class=`"giro`"><button type=`"button`" id=`"giro`" data-token=`"$t`">Avvia smistatore</button><button type=`"button`" id=`"aggiorna`" data-token=`"$t`">Aggiorna agenti e card</button><span id=`"giro-esito`" class=`"esito-ado`" role=`"status`"></span></p>")
+        $inPausa = $Modello.PSObject.Properties['SistemaInPausa'] -and $Modello.SistemaInPausa
+        $tastoPausa = "<button type=`"button`" id=`"pausa-sistema`" data-token=`"$t`" data-pausa=`"$(if ($inPausa) { '1' } else { '0' })`">$(if ($inPausa) { '&#9654; Riprendi il sistema' } else { '&#10074;&#10074; Metti in pausa il sistema' })</button>"
+        [void]$h.AppendLine("<p class=`"giro`">$tastoPausa<button type=`"button`" id=`"giro`" data-token=`"$t`">Avvia smistatore</button><button type=`"button`" id=`"aggiorna`" data-token=`"$t`">Aggiorna agenti e card</button><span id=`"giro-esito`" class=`"esito-ado`" role=`"status`"></span></p>")
     }
 
     # D53: il riquadro Suite sta nella testata (Format-SuiteCompatta), visibile da ogni scheda
@@ -1334,8 +1452,10 @@ function New-PaginaVista($Modello, [int]$Secondi = 10, [string]$Token = '') {
     }
     # D52: le funzionalita, aperte di default (poche) ma comprimibili con un clic, e fuori dai details delle catene; lo script delle schede ricorda se sono aperte. Un modello senza il campo non le ha.
     if (-not $Modello.ErroreAdo -and $Modello.PSObject.Properties['Funzionalita'] -and @($Modello.Funzionalita).Count -gt 0) {
-        [void]$h.AppendLine("<details class=`"funzionalita`" data-ricorda=`"funzionalita`" open><summary><h2>Funzionalita<span class=`"pillola`">$(@($Modello.Funzionalita).Count)</span><span class=`"nota`">le card sotto la loro Feature, con lo stato della card di chiusura: clic per chiudere</span></h2></summary><div class=`"funzionalita-lista`">")
-        foreach ($f in @($Modello.Funzionalita)) { [void]$h.AppendLine((Format-Funzionalita $f)) }
+        $nota = if ($Token) { 'in ordine di priorita: trascina una scheda per spostarla, il pulsante la mette in pausa' } else { 'in ordine di priorita (l ordine del backlog in Azure DevOps)' }
+        [void]$h.AppendLine("<details class=`"funzionalita`" data-ricorda=`"funzionalita`" open><summary><h2>Funzionalita<span class=`"pillola`">$(@($Modello.Funzionalita).Count)</span><span class=`"nota`">$nota</span></h2></summary><span id=`"funzionalita-esito`" class=`"esito-ado`" role=`"status`" data-token=`"$(E $Token)`"></span><div class=`"funzionalita-lista`">")
+        $posizione = 0
+        foreach ($f in @($Modello.Funzionalita)) { $posizione++; [void]$h.AppendLine((Format-Funzionalita $f $Token $posizione)) }
         [void]$h.AppendLine('</div></details>')
     }
     # La pagina disegna solo le colonne che ha: senza Azure DevOps restano gli agenti (e la pipeline se ha qualcosa).
@@ -1372,6 +1492,8 @@ function New-PaginaVista($Modello, [int]$Secondi = 10, [string]$Token = '') {
         else { [void]$h.AppendLine('<h2>Apprendimento</h2><p class="libero" data-sezione="apprendimento-vuota">nessun dato: la lettura dell''apprendimento non e ancora stata fatta</p>') }
         [void]$h.AppendLine('</div>')
         # La scheda Ufficio (VistaUfficioPannello.psm1): un pannello come gli altri, che solo lei puo agganciare sopra o sotto le altre schede.
+        # Il terzo divisore, fra il pannello che precede e l'Ufficio: affiancate lo allarga o lo stringe come gli altri (in colonna non serve).
+        [void]$h.AppendLine('<div class="divisore terzo" role="separator" tabindex="0" data-divisore="ufficio" aria-label="Allarga o stringi l&#39;Ufficio" title="Trascina per allargare o stringere; doppio clic per tornare com&#39;era"></div>')
         [void]$h.AppendLine((Get-SchedaUfficio))
         [void]$h.AppendLine('</div>')
         [void]$h.AppendLine($script:ScriptSchede)

@@ -22,10 +22,13 @@ Set-StrictMode -Version Latest
 #             ErroriBuild (solo card di chiusura): il testo degli errori della build rossa (la validazione della PR, o il run del deploy
 #             in Test fallito); assente o vuoto se non ci sono passi falliti da leggere.
 # Contesto:   Stati, Limiti, SessioniAttive (numero) e ConSessione (gli id di quelle card), InSviluppoPerRepo e InTestPerComponente (tabelle repo/componente ->
-#             elenco di id delle card oggi in quello stato, anche quella in esame), Titolare (id utente), Adesso (l'ora
+#             elenco di id delle card oggi in quello stato, anche quella in esame), AmbientiCollaudo (D59: gli id delle card in uno stato di Test il cui
+#             componente ha la voce collaudo, anche quella in esame; assente = nessuna), Titolare (id utente), Adesso (l'ora
 #             del giro, UTC; senza, i controlli sul tempo non scattano).
 
 Import-Module (Join-Path $PSScriptRoot 'Comune.psm1') -Global
+# D57: il testo "Cosa fare" di un on-hold, per chi importa Decisioni (smistatore, supervisore, vista)
+Import-Module (Join-Path $PSScriptRoot 'CosaFare.psm1') -Global
 
 $script:RuoliAgente = 'responsabile|dev|reviewer|collaudatore|mentore|smistatore'
 # Davanti al [ruolo] di un commento di agente puo esserci un involucro html e la menzione: l'ancora con dentro la sola
@@ -153,9 +156,12 @@ function Test-RevisioneSuperata($a) {
 # Il run vale se e stato accodato dopo l'ultimo ingresso in inDeployTest: runDopoRev e la revisione di quell'ingresso.
 function Test-RunValido($a) { Test-RunValidoDa $a.SC $a.Ingresso }
 
+# D59: la card ha un run da seguire: quello del deploy in Test, o l'ambiente di collaudo che si sta creando (stessa forma, stesso runDopoRev).
+function Test-RunSalvato($SC) { $null -ne (Get-Campo $SC 'runId') -or $null -ne (Get-Campo $SC 'collaudoProgetto') }
+
 function Test-RunValidoDa($SC, $Ingresso) {
     $r = Get-Campo $SC 'runDopoRev'
-    $null -ne (Get-Campo $SC 'runId') -and $null -ne $r -and $null -ne $Ingresso -and [int]$r -eq [int](Get-Campo $Ingresso 'Rev')
+    (Test-RunSalvato $SC) -and $null -ne $r -and $null -ne $Ingresso -and [int]$r -eq [int](Get-Campo $Ingresso 'Rev')
 }
 
 # L'ultimo ingresso della card nello stato in cui si trova, dalla storia dei cambi di stato; null se non c'e.
@@ -270,8 +276,19 @@ function Test-ProvaUmana($a) {
 # sul ramo della funzionalita). Dalla revisione superata va dritta in Ready to merge.
 function Test-SenzaTest($a) {
     $tag = Get-Campo $a.Stati 'tagSenzaTest'
-    ($tag -and @($a.Tag) -contains $tag) -or -not (Get-Campo $a.Voce 'pipelineDeploy') -or (Test-CardFunzionalita $a)
+    ($tag -and @($a.Tag) -contains $tag) -or -not (Test-HaTest $a.Voce) -or (Test-CardFunzionalita $a)
 }
+
+# D59: il componente ha un Test: o il deploy in Test (pipelineDeploy) o l'ambiente Docker della card (collaudo).
+function Test-HaTest($Voce) { [bool](Get-Campo $Voce 'pipelineDeploy') -or (Test-AmbienteCollaudo $Voce) }
+
+# D59: lo slot di un ambiente nuovo, il piu piccolo da 1 a Massimo che le altre card non usano; 0 se sono tutti presi. Lo slot decide le porte.
+function Get-SlotCollaudoLibero($Usati, [int]$Massimo) {
+    $presi = @(@($Usati) | Where-Object { $null -ne $_ } | ForEach-Object { [int]$_ })
+    foreach ($n in 1..$Massimo) { if ($n -notin $presi) { return $n } }
+    0
+}
+
 
 # Una card In review con la revisione superata passa da sola In Deploying to test. Se un'altra card dello stesso componente
 # e gia in uno dei tre stati di Test (l'ambiente e uno) resta In review: e il blocco, con le card che tengono il posto. Null se la card non e pronta
@@ -285,9 +302,16 @@ function Get-BloccoIngressoInTest($a) {
     Get-BloccoLimiteTest $a $(if (Test-ProvaUmana $a) { $null } else { 'collaudatore' })
 }
 
-# Il posto in Test e uno per componente (cardInTestPerComponente): il blocco se le altre card dello stesso componente lo occupano, null
+# Il posto in Test e uno per componente (cardInTestPerComponente), o uno degli ambienti di collaudo (D59): il blocco se le altre card dello stesso componente lo occupano, null
 # se e libero. E la sola definizione: la usano l'ingresso in Test di una card isolata e quello della card di chiusura.
 function Get-BloccoLimiteTest($a, $Ruolo) {
+    # D59: con l'ambiente di collaudo il posto non e del componente ma di uno degli ambienti (ambientiCollaudo), comuni a tutti i componenti
+    if (Test-AmbienteCollaudo $a.Voce) {
+        $l = [int](Get-Campo $a.Limiti 'ambientiCollaudo')
+        $altre = @(@(Get-Campo $a.Contesto 'AmbientiCollaudo') | Where-Object { $null -ne $_ -and [int]$_ -ne $a.Id } | ForEach-Object { [int]$_ })
+        if ($altre.Count -ge $l) { return @{ Tipo = 'limiteAmbienti'; Ruolo = $Ruolo; Limite = $l; Card = $altre } }
+        return $null
+    }
     $l = [int](Get-Campo $a.Limiti 'cardInTestPerComponente')
     $componente = Get-Campo $a.Voce 'componente'
     $altre = @(Get-AltreCard $a.Contesto.InTestPerComponente $componente $a.Id)
@@ -743,11 +767,15 @@ function Get-AzioniInDeployTest($a) {
     $comuni = Get-AzioniComuniInTest $a
     if ($comuni) { return $comuni.Azioni }
     if (-not (Test-RunValido $a)) {
-        $l = [int](Get-Campo $a.Limiti 'cardInTestPerComponente')
-        if ((Get-Altre $a.Contesto.InTestPerComponente (Get-Campo $a.Voce 'componente') $a.Id) -ge $l) {
+        $blocco = Get-BloccoLimiteTest $a $null
+        if ($blocco) {
             # la card di chiusura non e passata da In review: aspetta in Ready to develop
-            return New-Azione 'RiportaIndietro' @{ Stato = $(if (Test-CardChiusura $a) { 'pronto' } else { 'inRevisione' }); Motivo = 'Un altra card dello stesso componente e gia in test' }
+            $motivo = if ($blocco.Tipo -eq 'limiteAmbienti') { 'Gli ambienti di collaudo sono tutti occupati' } else { 'Un altra card dello stesso componente e gia in test' }
+            return New-Azione 'RiportaIndietro' @{ Stato = $(if (Test-CardChiusura $a) { 'pronto' } else { 'inRevisione' }); Motivo = $motivo }
         }
+        # D59: l'ambiente Docker della card al posto del deploy: nessun parametro da scegliere. Chiusura: l'ambiente si crea dal worktree
+        # della card di chiusura, aggiornato al ramo della funzionalita (come per il collaudatore).
+        if (Test-AmbienteCollaudo $a.Voce) { return New-Azione 'CreaAmbienteCollaudo' @{ Rev = $a.RevIngresso; Chiusura = [bool](Test-CardChiusura $a) } }
         $scelta = Get-SceltaDeployValida $a
         if ($scelta.Attesa) { return $scelta.Attesa }
         # Rev: la revisione d'ingresso in Deploying to test, che il giro salva come runDopoRev (vale per Test-RunValido)
@@ -760,6 +788,9 @@ function Get-AzioniInDeployTest($a) {
         if (Test-CardChiusura $a) {
             $blocco = Get-BloccoCiChiusura $a
             if ($blocco) { return Get-AzioneBloccoChiusura $a $blocco }
+        }
+        if (Test-AmbienteCollaudo $a.Voce) {
+            return New-Attesa "ambiente di collaudo non creato, log: $(Get-Campo $a.Run 'Log'): sistemata la causa, togli il tag e l ambiente si ricrea" 'deploy' -Tipo 'deployFallito'
         }
         $url = Get-Campo $a.Run 'Url'
         $run = if ($url) { "[run $(Get-Campo $a.SC 'runId')]($url)" } else { "run $(Get-Campo $a.SC 'runId')" }
@@ -823,6 +854,15 @@ function Get-AzioniCollaudo($a) {
             'bloccato' { return New-Attesa 'il collaudatore non riesce a provare: il suo resoconto e nel commento sulla card' 'sessione' }
             default { return New-Attesa "il collaudatore ha chiuso con un esito che non conosco ('$esito')" 'sessione' -Tipo 'esitoCollaudoSconosciuto' }
         }
+    }
+    if (Test-AmbienteCollaudo $a.Voce) {
+        # D59: l'ambiente e quello della card, creato in Deploying to test: gli URL stanno nello stato
+        $elenco = ConvertTo-ElencoUrlCollaudo (Get-Campo $a.SC 'collaudoUrl')
+        $allegato = if ($elenco) { "Ambiente di collaudo della card:`n$elenco" } else {
+            "Nello stato della card non ci sono gli indirizzi dell'ambiente di collaudo. Non provare a ricavarli: chiudi con ESITO=bloccato e scrivi che mancano gli indirizzi dell'ambiente di collaudo della card." }
+        $lancio = New-Lancia 'collaudatore' 'collaudo' $allegato
+        if (Test-CardChiusura $a) { $lancio['WorktreeChiusura'] = $true }
+        return $lancio
     }
     $url = Get-Campo $a.Voce 'urlTest'
     # senza indirizzo il collaudatore si ferma: cercarlo nei file di configurazione del repo vuol dire leggere file che in
@@ -1251,14 +1291,33 @@ function Get-AttesaSciolta {
 # Cosa fare di una card e, se non parte, perche. Azioni sono quelle di Get-Azioni. Motivo e null se la card parte, se la
 # sessione e gia in corso o se aspetta soltanto un evento (PR, build, revisione); altrimenti un blocco con Tipo:
 #   onHold (InAttesaPer), predecessori (Predecessori), limiteRepo (Repo, Limite, Card),
-#   limiteTest (Componente, Limite, Card), limiteSessioni (Attive, Limite, Card),
+#   limiteTest (Componente, Limite, Card), limiteAmbienti (Limite, Card: D59), limiteSessioni (Attive, Limite, Card),
 #   quota (Fino, Causa 'limite' = pausa dopo il limite di token, 'riserva' = riserva settimanale per Titolare; Uso e la
 #   utilization di seven_day letta). La quota e una sola per tutti i ruoli: blocca ogni lancio, su ogni card (D51).
 # Tutti, tranne onHold, portano anche Ruolo: il ruolo a cui andra la card quando il blocco cade (null se nessun agente).
 # Contesto.ConSessione: gli id delle card che hanno una sessione aperta (SessioniAttive ne e il numero).
 # Una card in on-hold esce con il motivo onHold, tranne i tre casi di Get-AttesaSciolta (D51): l'azione e TogliAttesa
 # (Causa, Per), senza motivo; al giro dopo il tag non c'e piu e la card riparte dalla strada di sempre.
+# D59: l'ambiente Docker di collaudo di una card che non e piu in uno stato di Test (qualunque altro stato, card chiusa o rimossa) si butta,
+# prima di tutto il resto e anche se la card e in on-hold, ha una sessione o ha perso il tag: l'ambiente occupa un posto e porte.
+function Get-AzioneButtaAmbiente($Istantanea, $Contesto) {
+    $sc = Get-Campo $Istantanea 'StatoCard'
+    if ($null -eq (Get-Campo $sc 'collaudoProgetto') -and $null -eq (Get-Campo $sc 'collaudoSlot')) { return $null }
+    $chiave = Get-ChiaveStato (Get-Campo $Contesto 'Stati') (Get-Campo (Get-Campo $Istantanea 'Card') 'Stato')
+    if ($null -eq $chiave -or $chiave -in (Get-StatiInTest)) { return $null }
+    New-Azione 'ButtaAmbienteCollaudo'
+}
+
 function Get-Decisione {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Istantanea, [Parameter(Mandatory)]$Contesto)
+    $d = Get-DecisioneCard -Istantanea $Istantanea -Contesto $Contesto
+    $butta = Get-AzioneButtaAmbiente $Istantanea $Contesto
+    if ($butta) { $d.Azioni = @($butta) + @($d.Azioni) }
+    $d
+}
+
+function Get-DecisioneCard {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Istantanea, [Parameter(Mandatory)]$Contesto)
 
@@ -1276,6 +1335,10 @@ function Get-Decisione {
         return @{ Azioni = @(); Motivo = @{ Tipo = 'onHold'; InAttesaPer = Get-Campo $sc 'inAttesaPer' } }
     }
     if ($null -ne (Get-Campo $sc 'sessione')) { return $niente }
+    # D60: una card in pausa (tag sulla card o sulla sua Feature) e una card nuova senza Feature restano ferme. La sessione in corso
+    # finisce (la chiude il passo 2 dello smistatore), ma non ne parte un'altra e la card non si sposta.
+    $ferma = Get-FermoPriorita $card $Contesto
+    if ($ferma) { return @{ Azioni = @(); Motivo = $ferma } }
     # D52: la funzionalita della card non si e letta. Non e una card isolata (partirebbe dal ramo sbagliato): non fa niente finche
     # una lettura non riesce, e il motivo dice perche.
     $erroreFunzionalita = Get-Campo (Get-Campo $Istantanea 'Funzionalita') 'Errore'
@@ -1374,7 +1437,7 @@ function Get-Decisione {
             # Dopo un deploy fallito chi toglie il tag ha sistemato la causa: si dimentica il run, cosi si riaccoda il deploy.
             # Conta il run fallito e non solo inAttesaPer: le card messe in on-hold prima di 'deploy' hanno 'limite'.
             $run = Get-Campo $Istantanea 'Run'
-            if ($null -ne (Get-Campo $sc 'runId') -and $null -ne $run -and (Get-Campo $run 'Stato') -eq 'completed' -and (Get-Campo $run 'Esito') -ne 'succeeded') {
+            if ((Test-RunSalvato $sc) -and $null -ne $run -and (Get-Campo $run 'Stato') -eq 'completed' -and (Get-Campo $run 'Esito') -ne 'succeeded') {
                 $copia['runId'] = $null; $copia['runDopoRev'] = $null
                 $azzeraDeploy = $true
             }
@@ -1461,9 +1524,40 @@ function Get-SogliaQuotaEffettiva($Limiti, $Override, $Adesso) {
     $r
 }
 
+# D60: la soglia sulla finestra di 5 ore che vale adesso. L'override della vista (soglia5Ore, valido fino a fino5Ore, il reset della
+# finestra letto quando e stato impostato) o, se manca, e scaduto o non vale, sogliaQuota5Ore di limiti.json. Lo stesso range della settimanale.
+function Get-Soglia5OreEffettiva($Limiti, $Override, $Adesso) {
+    $base = Get-Campo $Limiti 'sogliaQuota5Ore'
+    $r = @{ Soglia = $(if ($null -ne $base) { [double]$base } else { $null }); DaOverride = $false; Fino = $null }
+    if ($null -eq $Override -or $null -ne (Get-Campo $Override 'errore')) { return $r }
+    $s = Get-Campo $Override 'soglia5Ore'
+    $fino = ConvertTo-DataUtc (Get-Campo $Override 'fino5Ore')
+    $adesso = ConvertTo-DataUtc $Adesso
+    if ($null -eq $s -or $null -eq $fino -or $null -eq $adesso -or $adesso -ge $fino) { return $r }
+    if ($s -isnot [double] -and $s -isnot [int] -and $s -isnot [long] -and $s -isnot [decimal]) { return $r }
+    $v = [double]$s
+    if ([double]::IsNaN($v) -or $v -lt $script:SogliaQuotaMin -or $v -gt $script:SogliaQuotaMax) { return $r }
+    $r.Soglia = $v; $r.DaOverride = $true; $r.Fino = $fino.ToString('o')
+    $r
+}
+
+# Una soglia scritta dalla vista (stringa, frazione): @{ Valore }, o @{ Errore } se non e un numero dentro il range.
+function ConvertFrom-TestoSoglia([string]$Testo) {
+    $t = $Testo.Trim()
+    $v = 0.0
+    if (-not [double]::TryParse($t, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v) -or [double]::IsNaN($v)) {
+        return @{ Errore = "soglia non valida: '$t'" }
+    }
+    if ($v -lt $script:SogliaQuotaMin -or $v -gt $script:SogliaQuotaMax) {
+        return @{ Errore = "la soglia deve stare fra $([math]::Round($script:SogliaQuotaMin * 100))% e $([math]::Round($script:SogliaQuotaMax * 100))%" }
+    }
+    @{ Valore = $v }
+}
+
 # Il comando della vista (POST /soglia): da cosa ha chiesto Titolare e dall'override di adesso, il nuovo override. Funzione pura, niente
 # file: chi la chiama legge quota.json e soglia-quota.json e scrive il risultato. $Parametri (stringhe, dalla query): soglia ('' o 'null'
-# = nessuna soglia alzata, altrimenti una frazione dentro il range), ignoraRiserva ('1'/'0'/'true'/'false'), ripristina ('1').
+# = nessuna soglia alzata, altrimenti una frazione dentro il range), ignoraRiserva ('1'/'0'/'true'/'false'), ripristina ('1'),
+# soglia5Ore (D60: come soglia, per la finestra di 5 ore; vale fino al fiveHour.resetsAt di $Quota, che deve essere nel futuro).
 # Un parametro assente lascia com'e quello dell'override ancora valido (stesso `fino`). L'override vale fino al sevenDay.resetsAt di
 # $Quota: senza (o gia passato) si rifiuta, perche non si saprebbe quando farlo scadere.
 # Ritorna @{ Esito = 'ok'|'errore'; Messaggio; Override } (Override $null con ripristina: il file si cancella).
@@ -1471,7 +1565,7 @@ function Get-OverrideSogliaQuota($Parametri, $Quota, $Corrente, $Adesso) {
     $errore = { param($m) @{ Esito = 'errore'; Messaggio = $m; Override = $null } }
     $p = if ($Parametri -is [System.Collections.IDictionary]) { $Parametri } else { @{} }
     if ("$($p['ripristina'])" -eq '1') { return @{ Esito = 'ok'; Messaggio = 'soglia ripristinata a limiti.json'; Override = $null } }
-    if (-not $p.Contains('soglia') -and -not $p.Contains('ignoraRiserva')) { return (& $errore 'niente da impostare: serve soglia o ignoraRiserva') }
+    if (-not $p.Contains('soglia') -and -not $p.Contains('ignoraRiserva') -and -not $p.Contains('soglia5Ore')) { return (& $errore 'niente da impostare: serve soglia, soglia5Ore o ignoraRiserva') }
     $adesso = ConvertTo-DataUtc $Adesso
     $sette = Get-Campo $Quota 'sevenDay'
     $reset = if ($sette) { ConvertTo-DataUtc (Get-Campo $sette 'resetsAt') } else { $null }
@@ -1482,18 +1576,31 @@ function Get-OverrideSogliaQuota($Parametri, $Quota, $Corrente, $Adesso) {
     $valido = $null -ne $fino -and $fino -eq $reset
     $soglia = if ($valido) { Get-Campo $Corrente 'soglia' } else { $null }
     $ignora = if ($valido) { [bool](Get-Campo $Corrente 'ignoraRiserva') } else { $false }
+    # D60: la soglia delle 5 ore resta finche vale (stesso fino5Ore del reset di adesso), qualunque cosa si cambi della settimanale
+    $cinque = Get-Campo $Quota 'fiveHour'
+    $reset5 = if ($cinque) { ConvertTo-DataUtc (Get-Campo $cinque 'resetsAt') } else { $null }
+    $fino5 = ConvertTo-DataUtc (Get-Campo $Corrente 'fino5Ore')
+    $valido5 = $null -ne $fino5 -and $null -ne $reset5 -and $fino5 -eq $reset5 -and $reset5 -gt $adesso
+    $soglia5 = if ($valido5) { Get-Campo $Corrente 'soglia5Ore' } else { $null }
     if ($p.Contains('soglia')) {
         $t = "$($p['soglia'])".Trim()
         if ($t -eq '' -or $t -eq 'null') { $soglia = $null }
         else {
-            $v = 0.0
-            if (-not [double]::TryParse($t, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v) -or [double]::IsNaN($v)) {
-                return (& $errore "soglia non valida: '$t'")
+            $v = ConvertFrom-TestoSoglia $t
+            if ($v.ContainsKey('Errore')) { return (& $errore $v.Errore) }
+            $soglia = $v.Valore
+        }
+    }
+    if ($p.Contains('soglia5Ore')) {
+        $t = "$($p['soglia5Ore'])".Trim()
+        if ($t -eq '' -or $t -eq 'null') { $soglia5 = $null }
+        else {
+            if ($null -eq $reset5 -or $reset5 -le $adesso) {
+                return (& $errore 'il reset della finestra di 5 ore non e noto (o e gia passato) in quota.json: riprova dopo la prossima sessione')
             }
-            if ($v -lt $script:SogliaQuotaMin -or $v -gt $script:SogliaQuotaMax) {
-                return (& $errore "la soglia deve stare fra $([math]::Round($script:SogliaQuotaMin * 100))% e $([math]::Round($script:SogliaQuotaMax * 100))%")
-            }
-            $soglia = $v
+            $v = ConvertFrom-TestoSoglia $t
+            if ($v.ContainsKey('Errore')) { return (& $errore $v.Errore) }
+            $soglia5 = $v.Valore
         }
     }
     if ($p.Contains('ignoraRiserva')) {
@@ -1502,8 +1609,11 @@ function Get-OverrideSogliaQuota($Parametri, $Quota, $Corrente, $Adesso) {
         elseif ($t -in '0', 'false') { $ignora = $false }
         else { return (& $errore "ignoraRiserva non valido: '$t'") }
     }
-    @{ Esito = 'ok'; Messaggio = 'soglia aggiornata, vale fino al reset settimanale'
-       Override = @{ soglia = $soglia; ignoraRiserva = $ignora; fino = $reset.ToString('o'); impostata = $adesso.ToString('o') } }
+    $override = @{ soglia = $soglia; ignoraRiserva = $ignora; fino = $reset.ToString('o'); impostata = $adesso.ToString('o') }
+    if ($null -ne $soglia5) { $override['soglia5Ore'] = $soglia5; $override['fino5Ore'] = $reset5.ToString('o') }
+    $messaggio = if ($p.Contains('soglia5Ore') -and -not $p.Contains('soglia') -and -not $p.Contains('ignoraRiserva')) { 'soglia delle 5 ore aggiornata, vale fino al reset della finestra' }
+                 else { 'soglia aggiornata, vale fino al reset settimanale' }
+    @{ Esito = 'ok'; Messaggio = $messaggio; Override = $override }
 }
 
 # La situazione della quota per la vista: uso settimanale, reset, soglia e bypass effettivi, il range della soglia e il blocco
@@ -1515,7 +1625,16 @@ function Get-RiepilogoQuota($Contesto) {
     $reset = if ($sette) { ConvertTo-DataUtc (Get-Campo $sette 'resetsAt') } else { $null }
     $adesso = ConvertTo-DataUtc (Get-Campo $Contesto 'Adesso')
     $eff = Get-SogliaQuotaEffettiva (Get-Campo $Contesto 'Limiti') (Get-Campo $Contesto 'OverrideQuota') $adesso
+    # D60: la finestra di 5 ore. Un uso letto prima di un reset gia passato non vale piu: la finestra e ripartita da zero.
+    $cinque = Get-Campo $quota 'fiveHour'
+    $reset5 = if ($cinque) { ConvertTo-DataUtc (Get-Campo $cinque 'resetsAt') } else { $null }
+    $uso5 = if ($cinque -and $null -ne (Get-Campo $cinque 'utilization')) { [double](Get-Campo $cinque 'utilization') } else { $null }
+    if ($null -ne $uso5 -and $null -ne $reset5 -and $null -ne $adesso -and $reset5 -le $adesso) { $uso5 = 0.0; $reset5 = $null }
+    $eff5 = Get-Soglia5OreEffettiva (Get-Campo $Contesto 'Limiti') (Get-Campo $Contesto 'OverrideQuota') $adesso
     @{
+        Uso5Ore = $uso5; Soglia5Ore = $eff5.Soglia; DaOverride5Ore = $eff5.DaOverride
+        Reset5Ore = $(if ($null -ne $reset5) { $reset5.ToString('o') } else { $null })
+        PuoImpostare5Ore = ($null -ne $reset5 -and $null -ne $adesso -and $reset5 -gt $adesso)
         Uso = $uso; Soglia = $eff.Soglia; DaOverride = $eff.DaOverride; IgnoraRiserva = $eff.IgnoraRiserva; Override = $eff.Override
         SogliaMin = $script:SogliaQuotaMin; SogliaMax = $script:SogliaQuotaMax
         Reset = $(if ($null -ne $reset) { $reset.ToString('o') } else { $null })
@@ -1536,6 +1655,14 @@ function Get-BloccoQuota($Contesto, $Effettiva = $null) {
     $sette = Get-Campo $quota 'sevenDay'
     $uso = if ($sette -and $null -ne (Get-Campo $sette 'utilization')) { [double](Get-Campo $sette 'utilization') } else { $null }
     if ($null -ne $pausa -and $pausa -gt $adesso) { return @{ Tipo = 'quota'; Ruolo = $null; Fino = $pausa.ToString('o'); Causa = 'limite'; Uso = $uso } }
+    # D60: la finestra di 5 ore oltre la sua soglia ferma i lanci fino al suo reset. Ignorare la riserva settimanale non la salta.
+    $cinque = Get-Campo $quota 'fiveHour'
+    $uso5 = if ($cinque -and $null -ne (Get-Campo $cinque 'utilization')) { [double](Get-Campo $cinque 'utilization') } else { $null }
+    $reset5 = if ($cinque) { ConvertTo-DataUtc (Get-Campo $cinque 'resetsAt') } else { $null }
+    $soglia5 = (Get-Soglia5OreEffettiva (Get-Campo $Contesto 'Limiti') (Get-Campo $Contesto 'OverrideQuota') $adesso).Soglia
+    if ($null -ne $soglia5 -and $null -ne $uso5 -and $uso5 -ge [double]$soglia5 -and $null -ne $reset5 -and $reset5 -gt $adesso) {
+        return @{ Tipo = 'quota'; Ruolo = $null; Fino = $reset5.ToString('o'); Causa = 'cinqueOre'; Uso = $uso5; Soglia = [double]$soglia5 }
+    }
     # la soglia e il bypass che valgono adesso (l'override della vista fino al reset, altrimenti limiti.json): il bypass salta solo la riserva, mai la pausa
     $eff = if ($null -ne $Effettiva) { $Effettiva } else { Get-SogliaQuotaEffettiva (Get-Campo $Contesto 'Limiti') (Get-Campo $Contesto 'OverrideQuota') $adesso }
     $soglia = $eff.Soglia
@@ -1544,6 +1671,90 @@ function Get-BloccoQuota($Contesto, $Effettiva = $null) {
         return @{ Tipo = 'quota'; Ruolo = $null; Fino = $reset.ToString('o'); Causa = 'riserva'; Uso = $uso; Soglia = [double]$soglia }
     }
     $null
+}
+
+# D60: perche una card resta ferma per la priorita, o $null. 'pausa': il tag di pausa sulla card, o sulla Feature padre ($Contesto.Feature,
+# la mappa id -> @{ Rank; Pausa; Titolo } delle Feature aperte, Get-MappaFeature). 'senzaFeature': una card in New senza Feature padre non
+# parte: d'ora in poi ogni card sta in una funzionalita. Le card senza Feature gia oltre New finiscono il loro giro.
+function Get-FermoPriorita($Card, $Contesto) {
+    $stati = Get-Campo $Contesto 'Stati'
+    $tagPausa = Get-Campo $stati 'tagPausa'
+    if ($tagPausa -and @(Get-Campo $Card 'Tag') -contains $tagPausa) { return @{ Tipo = 'pausa'; Feature = $null; Titolo = $null } }
+    $padre = Get-Campo $Card 'PadreId'
+    $f = if ($null -ne $padre) { Get-Campo (Get-Campo $Contesto 'Feature') "$padre" } else { $null }
+    if ($f -and (Get-Campo $f 'Pausa')) { return @{ Tipo = 'pausa'; Feature = [int]$padre; Titolo = (Get-Campo $f 'Titolo') } }
+    # in New serve una Feature aperta: un padre che non lo e (Epic, Feature chiusa o fuori dalle aree della mappa) e come nessun padre
+    if ($null -eq $f -and (Get-ChiaveStato $stati (Get-Campo $Card 'Stato')) -eq 'nuova') { return @{ Tipo = 'senzaFeature' } }
+    $null
+}
+
+# D60: vero se la card e in pausa (sua o della Feature). Una card in pausa non tiene il posto in sviluppo del suo repo.
+function Test-CardInPausa($Card, $Contesto) {
+    $f = Get-FermoPriorita $Card $Contesto
+    $null -ne $f -and $f.Tipo -eq 'pausa'
+}
+
+# D60: le Feature aperte come mappa id (stringa) -> @{ Rank; Pausa; Titolo }, per Get-FermoPriorita e Get-OrdineCard.
+function Get-MappaFeature($Feature, $Stati) {
+    $m = @{}
+    $tag = Get-Campo $Stati 'tagPausa'
+    foreach ($f in @($Feature | Where-Object { $null -ne $_ })) {
+        $m["$($f.Id)"] = @{ Rank = (Get-Campo $f 'Rank'); Pausa = [bool]($tag -and @(Get-Campo $f 'Tag') -contains $tag); Titolo = (Get-Campo $f 'Titolo') }
+    }
+    $m
+}
+
+# D60: le Feature nell'ordine del backlog di Azure DevOps (Stack Rank crescente); quelle mai ordinate vanno in fondo, per id.
+function Get-OrdineFeature($Feature) {
+    @(@($Feature | Where-Object { $null -ne $_ }) | Sort-Object @{ Expression = { $null -eq (Get-Campo $_ 'Rank') } }, @{ Expression = { [double](Get-Campo $_ 'Rank') } }, @{ Expression = { [int]$_.Id } })
+}
+
+# D60: l'ordine in cui lo smistatore guarda le card, che decide chi prende un posto libero (sessioni, repo, Test): prima le card della
+# Feature piu in alto, poi quelle delle Feature mai ordinate, poi le card senza Feature; a parita, per id. $Mappa e Get-MappaFeature.
+function Get-OrdineCard($Card, $Mappa) {
+    $posizione = @{}
+    $i = 0
+    foreach ($f in (Get-OrdineFeature @(foreach ($k in @($Mappa.Keys)) { [pscustomobject]@{ Id = [int]$k; Rank = $Mappa[$k].Rank } }))) { $posizione["$($f.Id)"] = $i++ }
+    @(@($Card | Where-Object { $null -ne $_ }) | Sort-Object @{ Expression = {
+            $p = Get-Campo $_ 'PadreId'
+            if ($null -ne $p -and $posizione.ContainsKey("$p")) { $posizione["$p"] } else { [int]::MaxValue }
+        } }, @{ Expression = { [int]$_.Id } })
+}
+
+# D60: lo spostamento di una Feature dalla vista: $Id va subito dopo $Dopo (0 = in cima). Se tutte hanno un rank si scrive solo la Feature
+# spostata, a meta fra le due vicine (in cima o in fondo: 1000 oltre la vicina). Se qualcuna non e mai stata ordinata, o fra le vicine non c'e
+# spazio, si rinumerano tutte 1000, 2000, ... e si scrivono solo quelle che cambiano. Ritorna @(@{ Id; Rank }). Errore se $Id o $Dopo non sono fra le Feature.
+function Get-RankRiordino($Feature, [int]$Id, [int]$Dopo) {
+    $ordine = [System.Collections.Generic.List[object]]::new()
+    foreach ($f in (Get-OrdineFeature $Feature)) { $ordine.Add($f) }
+    $mossa = @($ordine | Where-Object { [int]$_.Id -eq $Id }) | Select-Object -First 1
+    if ($null -eq $mossa) { throw "la Feature $Id non e fra quelle aperte" }
+    if ($Dopo -eq $Id) { throw 'una Feature non va dopo se stessa' }
+    [void]$ordine.Remove($mossa)
+    $indice = 0
+    if ($Dopo -ne 0) {
+        $prima = -1
+        for ($j = 0; $j -lt $ordine.Count; $j++) { if ([int]$ordine[$j].Id -eq $Dopo) { $prima = $j } }
+        if ($prima -lt 0) { throw "la Feature $Dopo non e fra quelle aperte" }
+        $indice = $prima + 1
+    }
+    $ordine.Insert($indice, $mossa)
+    $conRank = @($ordine | Where-Object { $null -ne (Get-Campo $_ 'Rank') }).Count -eq $ordine.Count
+    if ($conRank) {
+        $rankPrima = if ($indice -gt 0) { [double](Get-Campo $ordine[$indice - 1] 'Rank') } else { $null }
+        $rankDopo = if ($indice -lt $ordine.Count - 1) { [double](Get-Campo $ordine[$indice + 1] 'Rank') } else { $null }
+        $nuovo = if ($null -eq $rankPrima -and $null -eq $rankDopo) { [double](Get-Campo $mossa 'Rank') }
+                 elseif ($null -eq $rankPrima) { $rankDopo - 1000 } elseif ($null -eq $rankDopo) { $rankPrima + 1000 } else { ($rankPrima + $rankDopo) / 2 }
+        if (($null -eq $rankPrima -or $nuovo -gt $rankPrima) -and ($null -eq $rankDopo -or $nuovo -lt $rankDopo)) {
+            if ([double](Get-Campo $mossa 'Rank') -eq $nuovo) { return @() }
+            return @(@{ Id = [int]$mossa.Id; Rank = $nuovo })
+        }
+    }
+    @(for ($j = 0; $j -lt $ordine.Count; $j++) {
+        $nuovo = [double](($j + 1) * 1000)
+        $vecchio = Get-Campo $ordine[$j] 'Rank'
+        if ($null -eq $vecchio -or [double]$vecchio -ne $nuovo) { @{ Id = [int]$ordine[$j].Id; Rank = $nuovo } }
+    })
 }
 
 function Get-Azioni {
@@ -1591,6 +1802,9 @@ function Format-MotivoCoda($Motivo) {
         'quota' {
             $fino = (ConvertTo-DataUtc (Get-Campo $Motivo 'Fino')).ToLocalTime().ToString('HH:mm')
             if ((Get-Campo $Motivo 'Causa') -eq 'limite') { "in coda, pausa per il limite di token fino alle $fino" }
+            elseif ((Get-Campo $Motivo 'Causa') -eq 'cinqueOre') {
+                "in coda, soglia delle 5 ore raggiunta: uso $([math]::Round([double](Get-Campo $Motivo 'Uso') * 100))%, soglia $([math]::Round([double](Get-Campo $Motivo 'Soglia') * 100))%, fino alle $fino"
+            }
             else {
                 $soglia = Get-Campo $Motivo 'Soglia'
                 "in coda, riserva settimanale raggiunta: uso $([math]::Round([double](Get-Campo $Motivo 'Uso') * 100))%, soglia $([math]::Round([double]$soglia * 100))%, fino a $fino"
@@ -1599,6 +1813,10 @@ function Format-MotivoCoda($Motivo) {
         'limiteTest' {
             $card = @(Get-Campo $Motivo 'Card')
             "in coda, un altra card dello stesso componente e in Test ($(Get-Campo $Motivo 'Componente'), $($card.Count)/$(Get-Campo $Motivo 'Limite'): card $($card -join ', '))"
+        }
+        'limiteAmbienti' {
+            $card = @(Get-Campo $Motivo 'Card')
+            "in coda, gli ambienti di collaudo sono tutti occupati ($($card.Count)/$(Get-Campo $Motivo 'Limite'): card $($card -join ', '))"
         }
         'funzionalitaPerduta' {
             "ferma, la card e $(Get-Campo $Motivo 'Stato') con la PR verso $(Get-Campo $Motivo 'Destinazione') ma non risulta piu della funzionalita (Feature rimossa, card di chiusura tolta o senza tag): una persona la rimette nella funzionalita o decide cosa farne"
@@ -1613,6 +1831,11 @@ function Format-MotivoCoda($Motivo) {
         'attesaCollaudoFunzionalita' {
             "aspetta il collaudo della funzionalita: la card di chiusura #$(Get-Campo $Motivo 'Chiusura') e in $(Get-Campo $Motivo 'Stato'), la PR non si completa finche il ramo e in prova"
         }
+        'pausa' {
+            if ($null -ne (Get-Campo $Motivo 'Feature')) { "in pausa con la sua funzionalita (Feature #$(Get-Campo $Motivo 'Feature')): togliendo il tag dalla Feature riparte" }
+            else { 'in pausa (tag sulla card): togliendo il tag riparte' }
+        }
+        'senzaFeature' { 'ferma, non e figlia di una Feature: ogni card nuova sta in una funzionalita, collegala a una Feature dalla board' }
         'limiteRepo' {
             $card = @(Get-Campo $Motivo 'Card')
             "in coda, un altra card e in sviluppo su $(Get-Campo $Motivo 'Repo') ($($card.Count)/$(Get-Campo $Motivo 'Limite'): card $($card -join ', '))"
@@ -1788,4 +2011,4 @@ function Get-GestoAtteso {
     @{ Tipo = $g.Tipo; Testo = $g.Testo }
 }
 
-Export-ModuleMember -Function Get-CampiContatori, Test-OnHoldPerLimite, Get-AttesaSciolta, Test-DeployDaLeggere, Get-TitoloPr, Format-DomandaOperatore, Get-AttivitaOperatore, Get-Azioni, Get-Decisione, Get-BloccoQuota, Get-SogliaQuotaEffettiva, Get-OverrideSogliaQuota, Get-RiepilogoQuota, Format-MotivoCoda, Get-GestoAtteso, Get-UltimoCommentoDiRuolo, Test-CommentoDiPersona, Get-PredecessoriInAttesa, Test-PredecessoreUnito
+Export-ModuleMember -Function Get-FermoPriorita, Test-CardInPausa, Get-MappaFeature, Get-OrdineFeature, Get-OrdineCard, Get-RankRiordino, Get-Soglia5OreEffettiva, Get-SlotCollaudoLibero, Get-CampiContatori, Test-OnHoldPerLimite, Get-AttesaSciolta, Test-DeployDaLeggere, Get-TitoloPr, Format-DomandaOperatore, Get-AttivitaOperatore, Get-Azioni, Get-Decisione, Get-BloccoQuota, Get-SogliaQuotaEffettiva, Get-OverrideSogliaQuota, Get-RiepilogoQuota, Format-MotivoCoda, Get-GestoAtteso, Get-UltimoCommentoDiRuolo, Test-CommentoDiPersona, Get-PredecessoriInAttesa, Test-PredecessoreUnito

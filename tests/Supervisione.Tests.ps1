@@ -410,6 +410,29 @@ Describe 'Controllo 4: le card' {
         $o.Card.Righe = @($r, (New-RigaCard 16 @{ Attivita = 'sblocca'; Ferma = $true; Testo = 'in on-hold' }))
         (Get-Chiavi (Get-ProblemiCard $o $script:Cfg)) | Should -Be @('card-16-sblocca')
     }
+    It 'D57: on-hold con Cosa fare: il gesto e l azione, le righe il resto, con le card che la aspettano' {
+        $o = New-Oss
+        $r = New-RigaCard 86 @{ Attivita = 'sblocca'; Ferma = $true; Testo = 'in on-hold' }
+        $r | Add-Member Indicazioni @{ Gesto = 'rilancia la validazione del gateway sulla PR 1146'; Fonte = 'agente' }
+        $r | Add-Member CosaFare @('1. rilancia la validazione del gateway sulla PR 1146', "2. Togli l'on-hold: x.", 'Perche: y', 'Non riportarla in Draft o in New: z')
+        $r | Add-Member Bloccato @{ Ruolo = 'responsabile'; Righe = @('diagnosi lunga') }
+        $d = New-RigaCard 74 $null; $d | Add-Member Motivo @{ Tipo = 'predecessori'; Predecessori = @(@{ Id = 86; Stato = 'In development' }) } -Force
+        $o.Card.Righe = @($r, $d)
+        $p = @(Get-ProblemiCard $o $script:Cfg | Where-Object { $_.Chiave -like 'card-86-*' })
+        (Get-Chiavi $p) | Should -Be @('card-86-sblocca')
+        $p[0].Testo | Should -Match 'Card #86 .*: in on-hold$'
+        $p[0].Azione | Should -Be 'rilancia la validazione del gateway sulla PR 1146'
+        $p[0].Righe | Should -Be @("2. Togli l'on-hold: x.", 'Perche: y', 'Non riportarla in Draft o in New: z', 'Tiene ferme anche: #74')
+    }
+    It 'D57: un bloccato con resoconto e solo il Cosa fare predefinito resta al resoconto' {
+        $o = New-Oss
+        $r = New-RigaCard 56 @{ Attivita = 'sblocca'; Ferma = $true; Testo = 'in on-hold' }
+        $r | Add-Member Indicazioni @{ Gesto = 'generico'; Fonte = 'predefinita' }
+        $r | Add-Member CosaFare @('1. generico', '2. x')
+        $r | Add-Member Bloccato @{ Ruolo = 'responsabile'; Righe = @('passo 1') }
+        $o.Card.Righe = @($r)
+        (Get-Chiavi (Get-ProblemiCard $o $script:Cfg)) | Should -Be @('card-56-bloccato')
+    }
     It 'on-hold nato da un bloccato con resoconto: voce sua con le righe del resoconto, niente diagnosi, il tag solo dopo' {
         $o = New-Oss
         $r = New-RigaCard 56 @{ Attivita = 'sblocca'; Ferma = $true; Testo = 'in on-hold, togliendo il tag si riprende la sessione' }

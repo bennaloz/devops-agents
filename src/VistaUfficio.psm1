@@ -130,13 +130,16 @@ function Get-QuotaUfficio($Quota) {
     # la soglia alzata dalla vista e la riserva ignorata fino al reset: la pagina li dice, non li deduce
     $alzata = [bool](Get-Campo $Quota 'DaOverride'); $ignorata = [bool](Get-Campo $Quota 'IgnoraRiserva')
     if ($null -ne $b) {
-        $stato = if ([string](Get-Campo $b 'Causa') -eq 'riserva') { 'riserva' } else { 'limite' }
+        $causa = [string](Get-Campo $b 'Causa')
+        $stato = if ($causa -eq 'riserva') { 'riserva' } else { 'limite' }
         $fino = Get-Campo $b 'Fino'
         if ($null -ne (Get-Campo $b 'Uso')) { $uso = Get-Campo $b 'Uso' }
         if ($null -ne (Get-Campo $b 'Soglia')) { $soglia = Get-Campo $b 'Soglia' }
         # la pausa per il limite: di quale finestra (quota.json, finestraPausa) e quanto e usata. Senza il dato non si inventa: null.
         $finestra = $null; $usoFinestra = $null
-        if ($stato -eq 'limite') {
+        # D60: la soglia delle 5 ore ferma come una pausa della finestra di 5 ore, con l'uso della finestra
+        if ($causa -eq 'cinqueOre') { $finestra = 'cinqueOre'; $usoFinestra = Get-Campo $b 'Uso' }
+        elseif ($stato -eq 'limite') {
             $letta = Get-Campo $Quota 'Letta'
             $f = switch ([string](Get-Campo $letta 'finestraPausa')) { 'five_hour' { 'cinqueOre' } 'seven_day' { 'settimana' } default { $null } }
             if ($f) {

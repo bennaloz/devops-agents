@@ -21,6 +21,7 @@ pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 chiudi-task
 @'
 feat: titolo della PR
 '@ | pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 titolo-pr
+pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 descrizione-pr -File <file markdown>
 ```
 
 Il testo di `commenta` e `criteri` si dà solo così, con una here-string tra apici singoli (`@'` su una riga, `'@` a
@@ -196,6 +197,12 @@ L'ultima riga della risposta è `ESITO=<valore>`, e lo smistatore la legge per d
 - `ESITO=rilancia`: solo con il motivo `rossa`, per un test instabile che non riproduci (vedi sopra). Hai scritto
   nel commento il test e perché lo ritieni instabile.
 - `ESITO=bivio`: c'è una scelta che non è tua. Hai scritto il bivio e le ipotesi in un commento.
+- La descrizione della PR la scrivi tu con `descrizione-pr -File <file>`: un file markdown UTF-8 che metti nel worktree
+  (non committarlo), per le misure e i passi da fare dopo il merge quando la card li chiede. Il link alla card in testa
+  resta, e il testo con quel link e la firma sta in 4000 caratteri: oltre, il comando rifiuta e non scrive. Si può
+  riscrivere, ogni volta sostituisce il testo precedente. Se la PR non c'è ancora (la apre lo smistatore dopo il tuo
+  `ESITO=fatto`), il comando salva il testo in un commento sulla card e lo smistatore lo mette nella PR quando la apre:
+  lo scrivi quindi prima di chiudere, e vale l'ultimo salvato.
 - Il titolo della PR lo puoi cambiare tu con `titolo-pr`, che rilancia anche la validazione: se la validazione è rossa
   per il titolo (per esempio manca il tipo conventional-commit richiesto dal ramo), correggilo e chiudi con
   `ESITO=fatto`, non con `bloccato`.

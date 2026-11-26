@@ -85,7 +85,7 @@ Describe 'Vista: cosa fanno gli agenti' {
         $global:Mondo = @{ Cards = @(); Commenti = @{}; Storia = @{}; Pr = @{}; Task = @{}; Predecessori = @{} }
         Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
         # come la query vera (Get-AdoCardAttive): le card in Draft non ci sono
-        Mock Get-AdoCardAttive { @($global:Mondo.Cards | Where-Object { $_.Stato -ne 'Draft' }) }
+        Mock Get-AdoCardAttive { @($global:Mondo.Cards | Where-Object { $_.Stato -ne 'Draft' } | ForEach-Object { if (-not $_.PSObject.Properties['PadreId']) { $_ | Add-Member -NotePropertyName PadreId -NotePropertyValue 1 }; $_ }) }; Mock Get-AdoFeatureAperte { @(@($global:Mondo.Cards) | ForEach-Object { if ($_.PSObject.Properties['PadreId']) { $_.PadreId } } | Where-Object { $null -ne $_ } | Sort-Object -Unique | ForEach-Object { [pscustomobject]@{ Id = [int]$_; Titolo = "Feature $_"; Stato = 'Active'; Tag = @(); Area = 'x'; Rank = [double]$_ } }) }; Mock Get-AdoFeature { [pscustomobject]@{ Id = 1; Tipo = 'Feature'; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; FigliIds = @() } } -ParameterFilter { $Id -eq 1 }; Mock Get-AdoFigliFeature { @() } -ParameterFilter { @($FigliIds).Count -eq 0 }
         Mock Get-AdoCard { param($Id) $global:Mondo.Cards | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
         Mock Get-AdoCommenti { param($Id, $DopoId = 0) @() }
         Mock Get-AdoStoriaStato { param($Id) @($global:Mondo.Storia["$Id"]) }
@@ -1224,7 +1224,8 @@ Describe 'Vista: cosa fanno gli agenti' {
             (Get-Colonna $h 'operatore') | Should -Match ([regex]::Escape((& $lk 14)))
             # la funzionalita: sotto la sua Feature, e la chiusura in Draft aspetta il gesto dall operatore
             # la sezione si comprime con un clic (aperta di default) e ricorda come l'ha lasciata chi legge
-            $h | Should -Match '<details class="funzionalita" data-ricorda="funzionalita" open><summary><h2>Funzionalita<span class="pillola">1</span>'
+            # D60: la D52 e la Feature che raggruppa le altre card
+            $h | Should -Match '<details class="funzionalita" data-ricorda="funzionalita" open><summary><h2>Funzionalita<span class="pillola">2</span>'
             $h | Should -Match '(?s)<div class="funzionalita-lista">.*</div></details>'
             $h | Should -Match '(?s)<div class="funzionalita-voce" data-feature="70">.*Esportare le stime in PDF.*<div class="chiusura" data-id="62">.*<li data-id="60">.*<li data-id="61">'
             (Get-Colonna $h 'operatore') | Should -Match '(?s)data-id="62".*<span class="gesto">sposta la card #62 in New</span>'
@@ -1422,8 +1423,8 @@ Describe 'Vista: cosa fanno gli agenti' {
             $h | Should -Match '<li data-id="31">'
             $h | Should -Match '(?s)<li data-id="30">.*?<span class="stato-board unione">In feature branch</span>'
             $h | Should -Match '(?s)<div class="chiusura" data-id="32">.*?tocca a te: Sblocca'
-            # la card isolata non e sotto nessuna Feature
-            $h | Should -Not -Match '<li data-id="40">'
+            # D60: la card senza funzionalita D52 sta sotto la sua Feature che raggruppa (la 1, sopra la 7 per priorita)
+            $h | Should -Match '(?s)data-feature="1".*<li data-id="40">.*data-feature="7"'
         }
 
         It 'una card In feature branch in on-hold, dall operatore, ha la fase feature branch' {
@@ -1447,10 +1448,12 @@ Describe 'Vista: cosa fanno gli agenti' {
             $h | Should -Not -Match '<div data-id="30" class="nodo stato-unita">'
         }
 
-        It 'senza card di una funzionalita la pagina non ha la sezione' {
+        It 'D60: senza funzionalita D52 la sezione ha solo la Feature che raggruppa, senza card di chiusura' {
             $global:Mondo.Cards = @(New-FintaCard 40 'nuova'); $global:Mondo.Storia['40'] = New-FintaStoria 'nuova'
             Invoke-Vista $script:Dati @{ Html = $true } | Out-Null
-            (Get-Content $script:Pagina -Raw -Encoding UTF8) | Should -Not -Match 'class="funzionalita-voce"'
+            $h = Get-Content $script:Pagina -Raw -Encoding UTF8
+            $h | Should -Match '(?s)class="funzionalita-voce" data-feature="1".*<li data-id="40">'
+            $h | Should -Not -Match 'class="chiusura"'
         }
 
         It 'una predecessora In feature branch della stessa Feature e unita nella catena, una di un altra Feature no' {
@@ -1842,7 +1845,7 @@ Describe 'Vista: la PR letta dai dati' {
         $global:Mondo = @{ Cards = @(); Commenti = @{}; Storia = @{}; Pr = @{}; Task = @{}; Predecessori = @{} }
         Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
         # come la query vera (Get-AdoCardAttive): le card in Draft non ci sono
-        Mock Get-AdoCardAttive { @($global:Mondo.Cards | Where-Object { $_.Stato -ne 'Draft' }) }
+        Mock Get-AdoCardAttive { @($global:Mondo.Cards | Where-Object { $_.Stato -ne 'Draft' } | ForEach-Object { if (-not $_.PSObject.Properties['PadreId']) { $_ | Add-Member -NotePropertyName PadreId -NotePropertyValue 1 }; $_ }) }; Mock Get-AdoFeatureAperte { @(@($global:Mondo.Cards) | ForEach-Object { if ($_.PSObject.Properties['PadreId']) { $_.PadreId } } | Where-Object { $null -ne $_ } | Sort-Object -Unique | ForEach-Object { [pscustomobject]@{ Id = [int]$_; Titolo = "Feature $_"; Stato = 'Active'; Tag = @(); Area = 'x'; Rank = [double]$_ } }) }; Mock Get-AdoFeature { [pscustomobject]@{ Id = 1; Tipo = 'Feature'; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; FigliIds = @() } } -ParameterFilter { $Id -eq 1 }; Mock Get-AdoFigliFeature { @() } -ParameterFilter { @($FigliIds).Count -eq 0 }
         Mock Get-AdoCard { param($Id) $global:Mondo.Cards | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
         Mock Get-AdoCommenti { param($Id, $DopoId = 0) @() }
         Mock Get-AdoStoriaStato { param($Id) @($global:Mondo.Storia["$Id"]) }
@@ -2157,6 +2160,16 @@ Describe 'La sezione Pipeline di build nella pagina' {
         $h | Should -Match 'data-fuori'
         $h | Should -Match 'window\.vistaRidisponi'
     }
+    It 'affiancate l Ufficio si allarga e si stringe come le altre: un divisore suo prima del pannello, misura ricordata in localStorage' {
+        $b = [pscustomobject]@{ Ore = 24; InCorso = 0; InCoda = 0; InAttesa = 0; NumFalliti = 0; Errori = @(); Attivi = @(); Falliti = @() }
+        $h = New-PaginaVista (New-ModelloBuild $b) 10 'tok'
+        $h | Should -Match '(?s)<div data-pannello="apprendimento".*<div class="divisore terzo" role="separator" tabindex="0" data-divisore="ufficio"[^>]*></div>\s*<div data-pannello="ufficio"'
+        $h | Should -Match "salvaMisura\('quota-ufficio'"
+        $h | Should -Match "leggiMisura\('quota-ufficio'\)"
+        $h | Should -Match '--quota-ufficio'
+        # in colonna i pannelli sono impilati: il divisore dell Ufficio non serve
+        $h | Should -Match '\.pannelli\[data-disposizione="colonna"\] > \.divisore\.terzo \{ display: none; \}'
+    }
     It 'il riquadro degli agenti: per pool, quanti run aspettano, ogni agente con stato e lavoro' {
         $q = New-RunFinto 'inCoda'; $q | Add-Member PoolCoda 'acme-internal'
         $pool = [pscustomobject]@{ Pool = 'acme-internal'; Agenti = @(
@@ -2276,8 +2289,8 @@ Describe 'La sezione Apprendimento nella pagina (solo HTML)' {
         $b = [pscustomobject]@{ Ore = 24; InCorso = 0; InCoda = 0; InAttesa = 0; NumFalliti = 0; Errori = @(); Attivi = @(); Falliti = @() }
         $m = New-ModelloApprendimento (New-Appr); $m.BuildAdo = $b
         $h = New-PaginaVista $m
-        # il pannello sta dentro .pannelli, dopo la Pipeline; dopo di lui viene solo la scheda Ufficio, poi si chiude .pannelli e viene lo script
-        $h | Should -Match '(?s)<div class="pannelli".*data-pannello="pipeline".*data-pannello="apprendimento".*</section>\s*</div>\s*<div data-pannello="ufficio".*</style>\s*</div>\s*<script>'
+        # il pannello sta dentro .pannelli, dopo la Pipeline; dopo di lui vengono solo il divisore e la scheda Ufficio, poi si chiude .pannelli e viene lo script
+        $h | Should -Match '(?s)<div class="pannelli".*data-pannello="pipeline".*data-pannello="apprendimento".*</section>\s*</div>\s*<div class="divisore terzo"[^>]*></div>\s*<div data-pannello="ufficio".*</style>\s*</div>\s*<script>'
         # le schede non spariscono nelle altre disposizioni: l elenco dei pannelli nascosti e una preferenza in localStorage
         $h | Should -Not -Match 'b\.hidden = disposizione'
         $h | Should -Match "localStorage\.getItem\('nascosti'\)"

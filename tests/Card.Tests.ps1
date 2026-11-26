@@ -133,6 +133,16 @@ Describe 'Card' {
             $t | Should -Match "DEPLOY IN TEST\r?\ndeployDatabases, deployStime"
         }
 
+        It 'D59: con la voce collaudo dice che si prova nell.ambiente Docker della card, non che manca la scelta' {
+            $global:FxConfig.Mappa.aree[0] | Add-Member -NotePropertyName collaudo -NotePropertyValue ([pscustomobject]@{ compose = 'c.yaml'; porte = @('WEB') }) -Force
+            try {
+                $t = Read-Card -Id 5
+                $t | Should -Match "DEPLOY IN TEST\r?\nsi prova nell.ambiente Docker della card \(D59\)"
+                $t | Should -Not -Match 'nessuna scelta'
+            }
+            finally { $global:FxConfig.Mappa.aree[0].PSObject.Properties.Remove('collaudo') }
+        }
+
         It 'senza scelta lo dice' {
             $t = Read-Card -Id 5
             $t | Should -Match "DEPLOY IN TEST\r?\nnessuna scelta"
@@ -240,6 +250,18 @@ Describe 'Card' {
             Mock Get-AdoParametriDeploy -ModuleName Card { @('deployStime', 'deployDatabases') }
         }
 
+        It 'D59: su un componente con la voce collaudo non c e niente da scegliere: risponde senza errore e non scrive il commento' {
+            $global:FxConfig.Mappa.aree[0] | Add-Member -NotePropertyName collaudo -NotePropertyValue ([pscustomobject]@{ compose = 'c.yaml'; porte = @('WEB') }) -Force
+            try {
+                $r = Set-CardDeploy -Id 5 -Ruolo 'responsabile' -Testo "deployStime`nperche"
+                $r | Should -Match 'nell.ambiente Docker della card \(D59\)'
+                $r | Should -Match 'non e un motivo per senza-test'
+                Should -Invoke Add-AdoCommento -ModuleName Card -Times 0 -Exactly
+                Should -Invoke Get-AdoParametriDeploy -ModuleName Card -Times 0 -Exactly
+            }
+            finally { $global:FxConfig.Mappa.aree[0].PSObject.Properties.Remove('collaudo') }
+        }
+
         It 'rifiuta un ruolo che non e responsabile' {
             { Set-CardDeploy -Id 5 -Ruolo 'dev' -Testo "deployStime`nperche" } | Should -Throw '*solo responsabile*'
             Should -Invoke Add-AdoCommento -ModuleName Card -Times 0 -Exactly
@@ -344,6 +366,77 @@ Describe 'Card' {
         }
     }
 
+    Context 'Set-CardDescrizionePr' {
+        BeforeEach {
+            $script:file = Join-Path $TestDrive 'descrizione.md'
+            [System.IO.File]::WriteAllText($script:file, "## Misure`nTempo: 12 minuti, perché più veloce`n", [System.Text.UTF8Encoding]::new($false))
+            Mock Get-AdoPrCollegata -ModuleName Card { [pscustomobject]@{ Id = 1019; Stato = 'active'; Titolo = 'Base'; Progetto = 'P'; Repo = 'R'; Ramo = 'feature/5-x' } }
+            Mock Get-AdoDescrizionePr -ModuleName Card { "[Card 5](http://x/5): Titolo`n`n🤖 Generated with [Claude Code](https://claude.com/claude-code)" }
+            Mock Set-AdoDescrizionePr -ModuleName Card { }
+        }
+
+        It 'scrive il file dopo il link alla card, con gli accenti' {
+            $r = Set-CardDescrizionePr -Id 5 -Ruolo 'dev' -File $script:file
+            Should -Invoke Set-AdoDescrizionePr -ModuleName Card -Times 1 -Exactly -ParameterFilter {
+                $Id -eq 1019 -and $Progetto -eq 'P' -and $Repo -eq 'R' -and $Descrizione -eq "[Card 5](http://x/5): Titolo`n`n## Misure`nTempo: 12 minuti, perché più veloce" }
+            $r | Should -Match '1019'
+        }
+
+        It 'con una descrizione senza il link lo rifà dalla card' {
+            Mock Get-AdoDescrizionePr -ModuleName Card { 'testo scritto a mano' }
+            Mock Get-AdoUrlCard -ModuleName Card { "http://x/$Id" }
+            Set-CardDescrizionePr -Id 5 -Ruolo 'responsabile' -File $script:file | Out-Null
+            Should -Invoke Set-AdoDescrizionePr -ModuleName Card -Times 1 -Exactly -ParameterFilter { $Descrizione.StartsWith("[Card 5](http://x/5)`n`n## Misure") }
+        }
+
+        It 'rifiuta un testo oltre il tetto e non scrive' {
+            [System.IO.File]::WriteAllText($script:file, ('a' * 4000), [System.Text.UTF8Encoding]::new($false))
+            { Set-CardDescrizionePr -Id 5 -Ruolo 'dev' -File $script:file } | Should -Throw '*al massimo*'
+            Should -Invoke Set-AdoDescrizionePr -ModuleName Card -Times 0 -Exactly
+        }
+
+        It 'il reviewer non puo' {
+            { Set-CardDescrizionePr -Id 5 -Ruolo 'reviewer' -File $script:file } | Should -Throw '*solo dev e responsabile*'
+            Should -Invoke Set-AdoDescrizionePr -ModuleName Card -Times 0 -Exactly
+        }
+
+        It 'file mancante o vuoto non scrive' {
+            { Set-CardDescrizionePr -Id 5 -Ruolo 'dev' -File (Join-Path $TestDrive 'no.md') } | Should -Throw '*non trovato*'
+            Set-Content -LiteralPath $script:file -Value '  '
+            { Set-CardDescrizionePr -Id 5 -Ruolo 'dev' -File $script:file } | Should -Throw '*vuoto*'
+            Should -Invoke Set-AdoDescrizionePr -ModuleName Card -Times 0 -Exactly
+        }
+
+        Context 'senza una PR attiva' {
+            BeforeEach {
+                Mock Get-AdoPrCollegata -ModuleName Card { $null }
+                Mock Get-AdoUrlCard -ModuleName Card { "http://x/$Id" }
+                Mock Add-CardCommento -ModuleName Card { 1 }
+            }
+
+            It 'salva il testo in un commento marcato e non tocca la PR' {
+                $r = Set-CardDescrizionePr -Id 5 -Ruolo 'dev' -File $script:file
+                Should -Invoke Add-CardCommento -ModuleName Card -Times 1 -Exactly -ParameterFilter {
+                    $Id -eq 5 -and $Ruolo -eq 'dev' -and $Testo -eq "Descrizione della PR:`n`n## Misure`nTempo: 12 minuti, perché più veloce" }
+                Should -Invoke Set-AdoDescrizionePr -ModuleName Card -Times 0 -Exactly
+                $r | Should -Match 'non ha ancora una PR'
+            }
+
+            It 'una PR gia completata vale come nessuna PR' {
+                Mock Get-AdoPrCollegata -ModuleName Card { [pscustomobject]@{ Id = 9; Stato = 'completed'; Progetto = 'P'; Repo = 'R'; Ramo = 'x' } }
+                Set-CardDescrizionePr -Id 5 -Ruolo 'dev' -File $script:file | Out-Null
+                Should -Invoke Add-CardCommento -ModuleName Card -Times 1 -Exactly
+                Should -Invoke Set-AdoDescrizionePr -ModuleName Card -Times 0 -Exactly
+            }
+
+            It 'rifiuta un testo che nella PR non starebbe' {
+                [System.IO.File]::WriteAllText($script:file, ('a' * 4000), [System.Text.UTF8Encoding]::new($false))
+                { Set-CardDescrizionePr -Id 5 -Ruolo 'dev' -File $script:file } | Should -Throw '*al massimo*'
+                Should -Invoke Add-CardCommento -ModuleName Card -Times 0 -Exactly
+            }
+        }
+    }
+
     Context 'Set-CardTitoloPr' {
         BeforeEach {
             Mock Get-AdoPrCollegata -ModuleName Card { [pscustomobject]@{ Id = 1019; Stato = 'active'; Titolo = 'Base'; Progetto = 'P'; Repo = 'R'; Ramo = 'feature/5-x' } }
@@ -392,12 +485,15 @@ Describe 'Card' {
             Mock New-AdoCard -ModuleName Card {
                 [pscustomobject]@{ Id = 77; Stato = $global:FxConfig.Stati.bozza; Tipo = $Tipo; Titolo = $Titolo; Area = $Area; Tag = @() } }
             Mock Get-AdoUtenteCorrente -ModuleName Card { [pscustomobject]@{ Id = 'u-9'; Nome = 'Titolare'; Email = 'titolare@example.invalid' } }
+            # D60: ogni card sta in una Feature; questa raggruppa soltanto (nessuna card di chiusura), come la maggior parte
+            Mock Get-AdoFeature -ModuleName Card { [pscustomobject]@{ Id = 50; Tipo = 'Feature'; Titolo = 'F'; Stato = 'Active'; Tag = @(); Area = 'altra'; FigliIds = @() } }
+            Mock Get-AdoFigliFeature -ModuleName Card { @() }
         }
         AfterEach { $env:ATTREZZI_RUOLO = $script:RuoloVecchio }
 
         It 'D52, gruppo 5: New-Card non fa mai nascere in New: nessuna chiamata a Set-AdoCard con uno stato, per nessun tipo ne opzione' {
             foreach ($tipo in 'User Story', 'Bug') {
-                New-Card -Tipo $tipo -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -SenzaTest -ProvaUmana | Out-Null
+                New-Card -Tipo $tipo -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 -SenzaTest -ProvaUmana | Out-Null
             }
             Should -Invoke Set-AdoCard -ModuleName Card -Times 2 -Exactly -ParameterFilter { $AggiungiTag }
             Should -Invoke Set-AdoCard -ModuleName Card -Times 0 -Exactly -ParameterFilter { $PSBoundParameters.ContainsKey('Stato') }
@@ -407,7 +503,7 @@ Describe 'Card' {
         }
 
         It 'crea la card, poi le da il tag agenti, criteri e descrizione composta' {
-            $r = New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo)
+            $r = New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50
             $r.Id | Should -Be 77
             Should -Invoke Set-AdoCard -ModuleName Card -Times 1 -Exactly -ParameterFilter {
                 $Id -eq 77 -and $AggiungiTag -contains $global:FxConfig.Stati.tagAgenti }
@@ -420,45 +516,45 @@ Describe 'Card' {
 
         It 'senza l indirizzo dell utente non crea la card: nascerebbe senza padrone e nessuno smistatore la prenderebbe' {
             Mock Get-AdoUtenteCorrente -ModuleName Card { [pscustomobject]@{ Id = 'u-9'; Nome = 'Titolare'; Email = $null } }
-            { New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) } | Should -Throw '*indirizzo*'
+            { New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 } | Should -Throw '*indirizzo*'
             Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
         }
 
         It 'con -SenzaTest la card nasce con il tag no-test-deploy accanto ad agents' {
-            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -SenzaTest | Out-Null
+            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 -SenzaTest | Out-Null
             Should -Invoke Set-AdoCard -ModuleName Card -Times 1 -Exactly -ParameterFilter {
                 $AggiungiTag -contains $global:FxConfig.Stati.tagAgenti -and $AggiungiTag -contains $global:FxConfig.Stati.tagSenzaTest }
         }
 
         It 'con -ProvaUmana la card nasce con il tag human-test: in Test la prova una persona' {
-            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -ProvaUmana | Out-Null
+            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 -ProvaUmana | Out-Null
             Should -Invoke Set-AdoCard -ModuleName Card -Times 1 -Exactly -ParameterFilter { $AggiungiTag -contains $global:FxConfig.Stati.tagProvaUmana }
         }
 
         It 'assegna la card a chi la crea: il suo smistatore la fara avanzare' {
-            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) | Out-Null
+            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 | Out-Null
             Should -Invoke New-AdoCard -ModuleName Card -Times 1 -Exactly -ParameterFilter { $AssegnataA -eq 'titolare@example.invalid' }
         }
 
         It 'con -Dopo passa le card precedenti a New-AdoCard' {
-            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Dopo 11, 12 | Out-Null
+            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 -Dopo 11, 12 | Out-Null
             Should -Invoke New-AdoCard -ModuleName Card -Times 1 -Exactly -ParameterFilter { @($Dopo).Count -eq 2 -and $Dopo[0] -eq 11 -and $Dopo[1] -eq 12 }
         }
 
         It 'senza -Dopo non passa predecessori' {
-            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) | Out-Null
+            New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 | Out-Null
             Should -Invoke New-AdoCard -ModuleName Card -Times 1 -Exactly -ParameterFilter { -not $Dopo }
         }
 
         It 'rifiuta una sezione mancante dicendo quale' {
             $t = $script:Completo -replace '(?s)## Recinto.*?(?=## Riferimenti)', ''
-            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $t) } | Should -Throw '*Recinto*'
+            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $t) -Feature 50 } | Should -Throw '*Recinto*'
             Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
         }
 
         It 'rifiuta una sezione vuota dicendo quale' {
             $t = $script:Completo -replace '(?s)## Riferimenti.*', "## Riferimenti`n   `n"
-            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $t) } | Should -Throw '*Riferimenti*'
+            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $t) -Feature 50 } | Should -Throw '*Riferimenti*'
             Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
         }
 
@@ -471,21 +567,21 @@ Describe 'Card' {
         }
 
         It 'rifiuta un area assente da mappa.json' {
-            { New-Card -Tipo 'Bug' -Titolo 'T' -Area 'Altro\Area' -File (Nuovo-FileCard $script:Completo) } | Should -Throw '*Altro*'
+            { New-Card -Tipo 'Bug' -Titolo 'T' -Area 'Altro\Area' -File (Nuovo-FileCard $script:Completo) -Feature 50 } | Should -Throw '*Altro*'
             Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
         }
 
         It 'e vietato dentro una sessione di ruolo' {
             $env:ATTREZZI_RUOLO = 'dev'
-            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) } | Should -Throw '*ruolo*'
-            $msg = try { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo); '' } catch { $_.Exception.Message }
+            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 } | Should -Throw '*ruolo*'
+            $msg = try { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50; '' } catch { $_.Exception.Message }
             $msg | Should -Not -BeLike '*ATTREZZI*'
             Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
         }
 
         It 'da errore se la card non nasce in bozza, senza spostarla' {
             Mock New-AdoCard -ModuleName Card { [pscustomobject]@{ Id = 78; Stato = $global:FxConfig.Stati.nuova; Tag = @() } }
-            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) } | Should -Throw "*$($global:FxConfig.Stati.bozza)*"
+            { New-Card -Tipo 'Bug' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 } | Should -Throw "*$($global:FxConfig.Stati.bozza)*"
             # nessuna chiamata che dia il tag agenti alla card nata nello stato sbagliato
             Should -Invoke Set-AdoCard -ModuleName Card -Times 0 -Exactly
             Should -Invoke New-AdoCard -ModuleName Card -Times 1 -Exactly -ParameterFilter { -not $Tag }
@@ -625,20 +721,22 @@ Describe 'Card' {
                 Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
             }
 
-            It '-Feature rifiuta una Feature senza card di chiusura, e rimanda alla creazione senza -Feature' {
+            It 'D60: -Feature accetta una Feature senza card di chiusura (raggruppa soltanto), anche in un area diversa' {
                 $global:FxFigli = @([pscustomobject]@{ Id = 4; Stato = 'Active'; Tag = @(); Tipo = 'User Story' })
-                { New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 } | Should -Throw '*senza -Feature*'
-                Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
+                New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 | Out-Null
+                Should -Invoke New-AdoCard -ModuleName Card -Times 1 -Exactly
             }
 
-            It '-Feature con la sola chiusura Removed e come senza chiusura' {
+            It 'D60: con la sola chiusura Removed la Feature raggruppa soltanto, e la card nasce' {
                 $global:FxFigli = @([pscustomobject]@{ Id = 5; Stato = 'Removed'; Tag = @('collaudo-funzionalita'); Tipo = 'User Story' })
-                { New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 } | Should -Throw '*senza -Feature*'
+                New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) -Feature 50 | Out-Null
+                Should -Invoke New-AdoCard -ModuleName Card -Times 1 -Exactly
             }
 
-            It 'la card senza -Feature non legge nessuna Feature' {
-                New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) | Out-Null
+            It 'D60: una card senza -Feature si rifiuta, senza leggere Feature e senza creare niente' {
+                { New-Card -Tipo 'User Story' -Titolo 'T' -Area $script:AreaOk -File (Nuovo-FileCard $script:Completo) } | Should -Throw '*-Feature*'
                 Should -Invoke Get-AdoFeature -ModuleName Card -Times 0 -Exactly
+                Should -Invoke New-AdoCard -ModuleName Card -Times 0 -Exactly
             }
         }
     }

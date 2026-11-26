@@ -62,7 +62,8 @@ function New-RispostaGiro([int]$Codice, [string]$Esito, [string]$Messaggio) {
 function Get-RispostaVista {
     [CmdletBinding()]
     param([string]$Metodo, [string]$Percorso, [string]$TokenRicevuto, [string]$Token, [string]$Cartella,
-          [scriptblock]$AvviaGiro, [scriptblock]$Aggiorna, [string]$HostHeader, [int]$Porta, [bool]$Locale, [scriptblock]$AggiornaPipeline, [scriptblock]$TogliAttesa, [int[]]$InAttesa, [scriptblock]$ImpostaSoglia, [scriptblock]$AggiornaSuite, [scriptblock]$ImpostaAutomatico)
+          [scriptblock]$AvviaGiro, [scriptblock]$Aggiorna, [string]$HostHeader, [int]$Porta, [bool]$Locale, [scriptblock]$AggiornaPipeline, [scriptblock]$TogliAttesa, [int[]]$InAttesa, [scriptblock]$ImpostaSoglia, [scriptblock]$AggiornaSuite, [scriptblock]$ImpostaAutomatico,
+          [scriptblock]$ImpostaOrdine, [scriptblock]$ImpostaPausa, [int[]]$Feature, [scriptblock]$ImpostaPausaSistema)
     # http.sys con il prefisso localhost puo accettare connessioni da altre interfacce: chi non e locale non ha risposta (default: rifiuta)
     if (-not $Locale) { return New-RispostaTesto 403 'solo richieste locali' }
     # con il prefisso localhost http.sys rifiuta gia Host 127.0.0.1 e [::1]: l'unico Host ammesso e localhost sulla nostra porta
@@ -94,13 +95,41 @@ function Get-RispostaVista {
         $query = if ($Percorso -match '\?(.*)$') { $Matches[1] } else { '' }
         foreach ($coppia in ($query -split '&')) {
             $kv = $coppia -split '=', 2
-            if ($kv[0] -in 'soglia', 'ignoraRiserva', 'ripristina') { $q[$kv[0]] = $(if ($kv.Count -gt 1) { [Uri]::UnescapeDataString($kv[1]) } else { '' }) }
+            if ($kv[0] -in 'soglia', 'ignoraRiserva', 'ripristina', 'soglia5Ore') { $q[$kv[0]] = $(if ($kv.Count -gt 1) { [Uri]::UnescapeDataString($kv[1]) } else { '' }) }
         }
         try { $r = & $ImpostaSoglia $q }
         catch { $r = @{ Esito = 'errore'; Messaggio = "errore: $($_.Exception.Message)" } }
         if ($null -eq $r -or "$(Get-Campo $r 'Esito')" -ne 'ok') {
             $m = if ($null -eq $r) { 'errore: nessuna risposta' } else { "$(Get-Campo $r 'Messaggio')" }
             return New-RispostaGiro 400 'errore' $m
+        }
+        if ($Aggiorna) { & $Aggiorna }
+        return New-RispostaGiro 202 'accodato' "$(Get-Campo $r 'Messaggio')"
+    }
+    # D60: POST /ordine?id=<feature>&dopo=<feature|0> sposta una Feature subito dopo un'altra (0 = in cima); POST /pausa?id=<feature>&attiva=0|1
+    # mette o toglie il tag di pausa. Gli id sono interi e devono stare fra le Feature aperte dell'ultima lettura ($Feature, lista bianca).
+    if ($solo -in '/ordine', '/pausa' -and (($solo -eq '/ordine' -and $ImpostaOrdine) -or ($solo -eq '/pausa' -and $ImpostaPausa))) {
+        if ($Metodo -ne 'POST') { return New-RispostaTesto 405 'metodo non ammesso' }
+        if (-not (Test-TokenVista $Token $TokenRicevuto)) { return New-RispostaGiro 403 'errore' 'token non valido: ricarica la pagina' }
+        $q = @{}
+        $query = if ($Percorso -match '\?(.*)$') { $Matches[1] } else { '' }
+        foreach ($coppia in ($query -split '&')) { $kv = $coppia -split '=', 2; if ($kv.Count -eq 2) { $q[$kv[0]] = $kv[1] } }
+        $id = 0; $altro = 0
+        if (-not [int]::TryParse("$($q['id'])", [ref]$id) -or @($Feature) -notcontains $id) { return New-RispostaGiro 400 'errore' 'Feature non valida: ricarica la pagina' }
+        try {
+            if ($solo -eq '/ordine') {
+                if (-not [int]::TryParse("$($q['dopo'])", [ref]$altro) -or ($altro -ne 0 -and @($Feature) -notcontains $altro)) { return New-RispostaGiro 400 'errore' 'posizione non valida: ricarica la pagina' }
+                $r = & $ImpostaOrdine $id $altro
+            }
+            else {
+                if ("$($q['attiva'])" -notin '0', '1') { return New-RispostaGiro 400 'errore' "attiva vale 0 o 1" }
+                $r = & $ImpostaPausa $id ("$($q['attiva'])" -eq '1')
+            }
+        }
+        catch { $r = @{ Esito = 'errore'; Messaggio = "errore: $($_.Exception.Message)" } }
+        if ($null -eq $r -or "$(Get-Campo $r 'Esito')" -ne 'ok') {
+            $m = if ($null -eq $r) { 'errore: nessuna risposta' } else { "$(Get-Campo $r 'Messaggio')" }
+            return New-RispostaGiro 500 'errore' $m
         }
         if ($Aggiorna) { & $Aggiorna }
         return New-RispostaGiro 202 'accodato' "$(Get-Campo $r 'Messaggio')"
@@ -118,14 +147,16 @@ function Get-RispostaVista {
         }
         return New-RispostaGiro 202 'accodato' "$(Get-Campo $r 'Messaggio')"
     }
-    # POST /automatico?attivo=0|1 (D53): l'unico dato e attivo, 0 o 1; $ImpostaAutomatico (param $Attivo, bool) scrive impostazioni.json; poi rilegge come /aggiorna
-    if ($solo -eq '/automatico' -and $ImpostaAutomatico) {
+    # POST /automatico?attivo=0|1 (D53): l'unico dato e attivo, 0 o 1; $ImpostaAutomatico (param $Attivo, bool) scrive impostazioni.json; poi rilegge come /aggiorna.
+    # POST /pausa-sistema?attivo=0|1 (D60) e lo stesso per la pausa di tutto il sistema ($ImpostaPausaSistema).
+    $comandoSiNo = if ($solo -eq '/automatico') { $ImpostaAutomatico } elseif ($solo -eq '/pausa-sistema') { $ImpostaPausaSistema } else { $null }
+    if ($solo -in '/automatico', '/pausa-sistema' -and $comandoSiNo) {
         if ($Metodo -ne 'POST') { return New-RispostaTesto 405 'metodo non ammesso' }
         if (-not (Test-TokenVista $Token $TokenRicevuto)) { return New-RispostaGiro 403 'errore' 'token non valido: ricarica la pagina' }
         $query = if ($Percorso -match '\?(.*)$') { $Matches[1] } else { '' }
         if ($query -notmatch '\Aattivo=([01])\z') { return New-RispostaGiro 400 'errore' 'serve un solo parametro attivo, 0 o 1' }
         $attivo = $Matches[1] -eq '1'
-        try { $r = & $ImpostaAutomatico $attivo }
+        try { $r = & $comandoSiNo $attivo }
         catch { $r = @{ Esito = 'errore'; Messaggio = "errore: $($_.Exception.Message)" } }
         if ($null -eq $r -or "$(Get-Campo $r 'Esito')" -ne 'ok') {
             $m = if ($null -eq $r) { 'errore: nessuna risposta' } else { "$(Get-Campo $r 'Messaggio')" }
@@ -197,13 +228,14 @@ function Test-ClienteAndato([Exception]$Errore) {
 
 # Una richiesta di HttpListener: la passa alla logica pura e scrive la risposta. Separata da Start-ServerVista per provarla con un
 # contesto finto, senza porta. Un errore non si inghiotte: va in console e il client riceve 500 con un testo.
-function Invoke-GestioneRichiesta($Ctx, [string]$Token, [string]$Cartella, [scriptblock]$AvviaGiro, [int]$Porta, [scriptblock]$Aggiorna = $null, [scriptblock]$AggiornaPipeline = $null, [scriptblock]$TogliAttesa = $null, $Segnali = $null, [scriptblock]$ImpostaSoglia = $null, [scriptblock]$AggiornaSuite = $null, [scriptblock]$ImpostaAutomatico = $null) {
+function Invoke-GestioneRichiesta($Ctx, [string]$Token, [string]$Cartella, [scriptblock]$AvviaGiro, [int]$Porta, [scriptblock]$Aggiorna = $null, [scriptblock]$AggiornaPipeline = $null, [scriptblock]$TogliAttesa = $null, $Segnali = $null, [scriptblock]$ImpostaSoglia = $null, [scriptblock]$AggiornaSuite = $null, [scriptblock]$ImpostaAutomatico = $null, [scriptblock]$ImpostaOrdine = $null, [scriptblock]$ImpostaPausa = $null, [scriptblock]$ImpostaPausaSistema = $null) {
     try {
         try {
             $rq = $Ctx.Request
             $r = Get-RispostaVista -Metodo $rq.HttpMethod -Percorso $rq.RawUrl -TokenRicevuto $rq.Headers['X-Vista-Token'] -Token $Token `
                 -Cartella $Cartella -AvviaGiro $AvviaGiro -Aggiorna $Aggiorna -HostHeader $rq.Headers['Host'] -Porta $Porta -Locale ([bool]$rq.IsLocal) -AggiornaPipeline $AggiornaPipeline `
-                -TogliAttesa $TogliAttesa -InAttesa $(if ($Segnali -and $Segnali.PSObject.Properties['InAttesa']) { [int[]]@($Segnali.InAttesa) } else { [int[]]@() }) -ImpostaSoglia $ImpostaSoglia -AggiornaSuite $AggiornaSuite -ImpostaAutomatico $ImpostaAutomatico
+                -TogliAttesa $TogliAttesa -InAttesa $(if ($Segnali -and $Segnali.PSObject.Properties['InAttesa']) { [int[]]@($Segnali.InAttesa) } else { [int[]]@() }) -ImpostaSoglia $ImpostaSoglia -AggiornaSuite $AggiornaSuite -ImpostaAutomatico $ImpostaAutomatico `
+                -ImpostaOrdine $ImpostaOrdine -ImpostaPausa $ImpostaPausa -ImpostaPausaSistema $ImpostaPausaSistema -Feature $(if ($Segnali -and $Segnali.PSObject.Properties['Feature']) { [int[]]@($Segnali.Feature) } else { [int[]]@() })
         }
         catch {
             Write-Host "vista: errore nella richiesta: $($_.Exception.Message)"
@@ -223,17 +255,18 @@ function Invoke-GestioneRichiesta($Ctx, [string]$Token, [string]$Cartella, [scri
 }
 # Apre il listener su http://localhost:<porta>/. Ritorna l'oggetto del server; se la porta e occupata lancia.
 # Prendi e Gestisci sono i due scriptblock che Invoke-RichiesteVista usa: cosi il ciclo si prova senza una porta vera.
-function Start-ServerVista([int]$Porta, [string]$Cartella, [string]$Token, [scriptblock]$AvviaGiro, [scriptblock]$TogliAttesa = $null, [scriptblock]$ImpostaSoglia = $null, [scriptblock]$AggiornaSuite = $null, [scriptblock]$ImpostaAutomatico = $null) {
+function Start-ServerVista([int]$Porta, [string]$Cartella, [string]$Token, [scriptblock]$AvviaGiro, [scriptblock]$TogliAttesa = $null, [scriptblock]$ImpostaSoglia = $null, [scriptblock]$AggiornaSuite = $null, [scriptblock]$ImpostaAutomatico = $null, [scriptblock]$ImpostaOrdine = $null, [scriptblock]$ImpostaPausa = $null, [scriptblock]$ImpostaPausaSistema = $null) {
     $l = [System.Net.HttpListener]::new()
     $l.Prefixes.Add("http://localhost:$Porta/")
     $l.Start()
     # Segnali.Aggiorna: POST /aggiorna lo accende, Invoke-RichiesteVista ritorna subito e la vista rilegge Azure DevOps e lo spegne.
     # Segnali.AggiornaPipeline: lo stesso per POST /aggiorna-pipeline, che fa rileggere solo le pipeline.
     # Segnali.InAttesa: gli id delle card che la vista mostra in on-hold, la lista bianca di POST /togli-attesa; la vista la riscrive a ogni lettura di Azure DevOps.
-    $segnali = [pscustomobject]@{ Aggiorna = $false; AggiornaPipeline = $false; InAttesa = @() }
+    # Segnali.Feature (D60): gli id delle Feature aperte dell'ultima lettura, la lista bianca di POST /ordine e /pausa.
+    $segnali = [pscustomobject]@{ Aggiorna = $false; AggiornaPipeline = $false; InAttesa = @(); Feature = @() }
     $aggiorna = { $segnali.Aggiorna = $true }.GetNewClosure()
     $aggiornaPipeline = { $segnali.AggiornaPipeline = $true }.GetNewClosure()
-    $gestisci = { param($Ctx) Invoke-GestioneRichiesta $Ctx $Token $Cartella $AvviaGiro $Porta $aggiorna $aggiornaPipeline $TogliAttesa $segnali $ImpostaSoglia $AggiornaSuite $ImpostaAutomatico }.GetNewClosure()
+    $gestisci = { param($Ctx) Invoke-GestioneRichiesta $Ctx $Token $Cartella $AvviaGiro $Porta $aggiorna $aggiornaPipeline $TogliAttesa $segnali $ImpostaSoglia $AggiornaSuite $ImpostaAutomatico $ImpostaOrdine $ImpostaPausa $ImpostaPausaSistema }.GetNewClosure()
     [pscustomobject]@{ Listener = $l; Porta = $Porta; Attesa = $null; Segnali = $segnali; Prendi = { $l.GetContextAsync() }.GetNewClosure(); Gestisci = $gestisci }
 }
 

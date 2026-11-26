@@ -84,7 +84,8 @@ function Read-Card($Cfg, $Stato) {
         $io = Get-AdoUtenteCorrente
         $idUtente = [string]$io.Id
         $attive = @(Get-AdoCardAttive)
-        $ctx = New-ContestoGiro $Cfg $attive $idUtente $script:PercorsoQuota $script:PercorsoSoglia
+        # D60: le Feature aperte, perche le card in pausa risultino ferme come le vede lo smistatore
+        $ctx = New-ContestoGiro $Cfg $attive $idUtente $script:PercorsoQuota $script:PercorsoSoglia @(Get-AdoFeatureAperte)
         Update-SessioniContesto $ctx $Stato
         $righe = [System.Collections.Generic.List[object]]::new()
         foreach ($c in $attive) {

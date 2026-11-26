@@ -236,7 +236,8 @@ Test una volta sola, dal ramo della funzionalità, e poi entra in `develop` con 
    funzionalità intera, che prova il `collaudatore`. Il comando stampa gli id della Feature e della card di chiusura.
 2. Si creano le card della funzionalità, una per volta: `card crea -Tipo <User Story|Bug> -Feature <id> -Titolo ... -Area ... -File ...`.
    L'area deve essere quella della Feature (una funzionalità sta in un repo solo), e la Feature non può essere già Resolved o Closed.
-   Una Feature senza card di chiusura non è una funzionalità D52: le sue card si creano senza `-Feature`.
+   Una Feature senza card di chiusura non è una funzionalità D52: raggruppa le card per priorità e pausa, e le sue card vanno in
+   `develop` una per una (D60). Si crea con `card crea -Tipo Feature -Raggruppa`. Ogni card nuova sta in una Feature.
 3. Le card nascono in Draft, la card di chiusura compresa. Si portano in New dopo averle lette. La card di chiusura aspetta che tutte le
    sorelle siano In feature branch; se resta in Draft con tutte le sorelle pronte, una sorella In feature branch lo dice e la vista
    mette la card di chiusura fra le cose da fare, con il gesto «sposta la card #<id> in New» (le card in Draft non le legge nessuno).
@@ -267,7 +268,9 @@ sessione chiusa per silenzio o morta senza risultato, la prima volta per card, n
 con un commento senza menzione; al secondo fermo l'on-hold c'e'.
 
 Ogni on-hold lascia il commento con la menzione sulla card e una riga `on-hold: ...` nel log; lo smistatore non manda
-Telegram (lo fa il supervisore, vedi "Il supervisore").
+Telegram (lo fa il supervisore, vedi "Il supervisore"). Il commento finisce con **Cosa fare** (D57): il gesto, togliere
+l'on-hold e cosa succede dopo, perché serve e perché non l'hanno fatto gli agenti. La stessa sezione è nella vista e
+su Telegram. Non riportare la card in Draft o in New: lo smistatore la tratterebbe come nuova.
 
 **Un giro a mano** (dalla working copy principale, `C:\develop\GIT\DevOps.Agents`):
 

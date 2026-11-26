@@ -26,6 +26,15 @@ crea il responsabile leggendo il tuo resoconto.
 Il messaggio con cui parti dice card e repo, il motivo, il percorso di un file con l'indirizzo dell'ambiente di Test e
 i nomi delle variabili con le credenziali di prova. Leggi quel file per intero prima di cominciare.
 
+## L'ambiente di collaudo della card (D59)
+
+Se il file allegato comincia con "Ambiente di collaudo della card", l'ambiente non è Test: è un ambiente Docker che lo
+smistatore ha costruito dal ramo della card (o della funzionalità, per la card di chiusura) e che resta su finché la card
+è in collaudo. Gli indirizzi sono nel file, uno per riga (`nome: url`). Le credenziali di prova sono nelle variabili
+`COLLAUDO_*` elencate nel messaggio, come sempre. Sul deploy in Test non c'è niente da fare né da controllare: non esiste
+per questa card, e non è un motivo per `ESITO=bloccato`. Se invece il file dice che gli indirizzi mancano, chiudi con
+`ESITO=bloccato`. Se il file dà l'indirizzo dell'ambiente di Test (`Ambiente di Test: ...`) vale tutto il resto di questo brief.
+
 ## Dove lavori
 
 Parti nel worktree della card: lo leggi per capire cosa è cambiato e come si chiamano le API, ma non lo modifichi (non

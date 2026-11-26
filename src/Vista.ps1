@@ -106,7 +106,9 @@ function Get-DatiAdo($Cfg, $Stato) {
     $io = Get-AdoUtenteCorrente
     $idUtente = [string]$io.Id
     $attive = @(Get-AdoCardAttive)
-    $ctx = New-ContestoGiro $Cfg $attive $idUtente $script:PercorsoQuota $script:PercorsoSoglia
+    # D60: le Feature aperte, per la sezione delle priorita e perche la coda dica le card in pausa come le vede lo smistatore
+    $feature = @(Get-AdoFeatureAperte)
+    $ctx = New-ContestoGiro $Cfg $attive $idUtente $script:PercorsoQuota $script:PercorsoSoglia $feature
     Update-SessioniContesto $ctx $Stato
     $titoli = @{}; $titoliTask = @{}; $stati = @{}; $avanzamento = @{}; $prSessioni = @{}; $coda = @(); $collegamenti = [System.Collections.Generic.List[object]]::new(); $funzionalita = @{}
     foreach ($c in $attive) {
@@ -146,9 +148,40 @@ function Get-DatiAdo($Cfg, $Stato) {
         if ($null -eq $Stato[$k] -or $null -eq $Stato[$k]['sessione'] -or $titoli.ContainsKey($k)) { continue }
         try { $titoli[$k] = [string](Get-AdoCard -Id ([int]$k)).Titolo } catch { }
     }
-    [pscustomobject]@{ Titoli = $titoli; TitoliTask = $titoliTask; Stati = $stati; Avanzamento = $avanzamento; Prs = $prSessioni; Coda = $coda; Collegamenti = @($collegamenti); Funzionalita = @($funzionalita.Values | Sort-Object Feature); Repo = (Get-RepoPerCard $Cfg $attive)
+    $priorita = @(Get-PrioritaVista $feature $attive $Cfg.Stati)
+    [pscustomobject]@{ Titoli = $titoli; TitoliTask = $titoliTask; Stati = $stati; Avanzamento = $avanzamento; Prs = $prSessioni; Coda = $coda; Collegamenti = @($collegamenti); Funzionalita = @(Get-FunzionalitaInOrdine $funzionalita $priorita); Repo = (Get-RepoPerCard $Cfg $attive)
         # le card col tag on-hold in questa lettura: la lista bianca di POST /togli-attesa (D37) e il segno sulla voce
-        InAttesa = @($attive | Where-Object { @($_.Tag) -contains [string]$Cfg.Stati.tagAttesa } | ForEach-Object { [int]$_.Id }) }
+        InAttesa = @($attive | Where-Object { @($_.Tag) -contains [string]$Cfg.Stati.tagAttesa } | ForEach-Object { [int]$_.Id })
+        # D60: le Feature aperte in ordine di priorita, con le card attive di ognuna; anche la lista bianca di POST /ordine e /pausa
+        Priorita = $priorita }
+}
+
+# D60: le funzionalita della vista, una per Feature aperta, nell'ordine di priorita: le D52 come le legge Get-FunzionalitaCard, le altre
+# (senza card di chiusura) con le card attive figlie. Ognuna dice se e in pausa. Le D52 che non sono fra le aperte lette vanno in fondo, per id.
+function Get-FunzionalitaInOrdine($D52, $Priorita) {
+    $fatte = @{}
+    $elenco = foreach ($p in @($Priorita)) {
+        $f = if ($D52.ContainsKey("$($p.Id)")) { $D52["$($p.Id)"] }
+             else { [pscustomobject]@{ Feature = [int]$p.Id; Titolo = [string]$p.Titolo; StatoFeature = [string]$p.Stato; Chiusura = $null; TitoloChiusura = $null; StatoChiusura = $null; EChiusura = $false; Sorelle = @($p.Figlie) } }
+        $f | Add-Member -NotePropertyName Pausa -NotePropertyValue ([bool]$p.Pausa) -Force
+        $fatte["$($p.Id)"] = $true
+        $f
+    }
+    @($elenco) + @($D52.Values | Where-Object { -not $fatte.ContainsKey("$($_.Feature)") } | Sort-Object Feature)
+}
+
+# D60: le Feature aperte nell'ordine del backlog (Get-OrdineFeature), ognuna con stato, pausa e quante card attive ha (e quante in pausa da sole).
+function Get-PrioritaVista($Feature, $Attive, $Stati) {
+    $tag = [string]$Stati.tagPausa
+    @(foreach ($f in (Get-OrdineFeature $Feature)) {
+        $figlie = @($Attive | Where-Object { "$(Get-Campo $_ 'PadreId')" -eq "$($f.Id)" })
+        [pscustomobject]@{
+            Id = [int]$f.Id; Titolo = [string]$f.Titolo; Stato = [string]$f.Stato; UrlCard = (Get-UrlCardVista $f.Id)
+            Pausa = [bool]($tag -and @($f.Tag) -contains $tag); Card = $figlie.Count
+            CardInPausa = @($figlie | Where-Object { $tag -and @($_.Tag) -contains $tag }).Count
+            Figlie = @($figlie | ForEach-Object { [pscustomobject]@{ Id = [int]$_.Id; Titolo = [string]$_.Titolo; Stato = [string]$_.Stato; Tag = @($_.Tag) } })
+        }
+    })
 }
 
 # Le lezioni in prova di ogni ruolo, per comune e per ogni repo della mappa: Get-MemoriaDelRuolo legge git e la PR della memoria e
@@ -269,6 +302,8 @@ function Get-TestoCoda($R) {
 # nemmeno, e una rimossa tiene ferma la dipendente finche non si toglie il link (Test-PredecessoreUnito).
 function Get-GestoPredecessore($Stati, $P, [int]$Dipendente) {
     $tag = @(Get-Campo $P 'Tag')
+    # D57: una predecessora in on-hold aspetta una persona come la dipendente: il suo gesto, da indicazioniAttesa
+    if ($Stati.tagAttesa -and [string]$Stati.tagAttesa -in $tag) { return Format-GestoPredecessoreInAttesa (Get-Campo $P 'IndicazioniAttesa') }
     switch (Get-ChiaveStato $Stati ([string]$P.Stato)) {
         'bozza' { return 'spostala in New' }
         'nuova' { if ($Stati.tagAgenti -notin $tag) { return "dalle il tag $($Stati.tagAgenti)" } }
@@ -367,12 +402,14 @@ function Get-FunzionalitaVista($Funzionalita, $Dati, $Stati, $Dove) {
             Dove = $(if ($Dove.ContainsKey($k)) { $Dove[$k] } else { $null })
         }
     }
-    foreach ($f in @($Funzionalita | Where-Object { $null -ne $_ } | Sort-Object Feature)) {
+    # D60: nell'ordine in cui arrivano (quello di priorita); una Feature senza card di chiusura ha solo le sue card
+    foreach ($f in @($Funzionalita | Where-Object { $null -ne $_ })) {
         $sorelle = @(foreach ($s in @($f.Sorelle | Sort-Object Id)) { & $voce $s.Id $s.Titolo $s.Stato $false })
-        $chiusura = & $voce $f.Chiusura $null $f.StatoChiusura $true
+        $chiusura = if ($f.Chiusura) { & $voce $f.Chiusura $null $f.StatoChiusura $true } else { $null }
         [pscustomobject]@{
             Feature = [int]$f.Feature; UrlCard = (Get-UrlCardVista $f.Feature); Titolo = [string]$f.Titolo; StatoFeature = [string]$f.StatoFeature
-            Chiusura = $chiusura; Card = @($chiusura) + $sorelle
+            Chiusura = $chiusura; Card = @(@($chiusura) + $sorelle | Where-Object { $null -ne $_ })
+            Pausa = [bool]$(if ($f.PSObject.Properties['Pausa']) { $f.Pausa } else { $false })
         }
     }
 }
@@ -513,7 +550,7 @@ function Get-ModelloVista($Stato, $Dati, $ErroreAdo, $Stati, $Build = $null, [st
             if ($att) {
                 $verbo = $script:VerbiAttivita["$($att.Attivita)"]
                 $testo = if ($att.Attivita -eq 'rispondi' -and $r.Domanda) { $r.Domanda } else { $att.Testo }
-                $voce = [pscustomobject]@{ Id = $r.Id; UrlCard = (Get-UrlCardVista $r.Id); Titolo = $r.Titolo; Attivita = $att.Attivita; Verbo = $verbo; Fase = (Get-FaseFlusso $Stati $r); Stato = $r.Stato; Chiave = (Get-ChiaveStato $Stati ([string]$r.Stato)); Testo = $testo; Pr = $r.Pr; Aspetta = $attese; Gesto = $null; InAttesa = (@($Dati.InAttesa) -contains [int]$r.Id) }
+                $voce = [pscustomobject]@{ Id = $r.Id; UrlCard = (Get-UrlCardVista $r.Id); Titolo = $r.Titolo; Attivita = $att.Attivita; Verbo = $verbo; Fase = (Get-FaseFlusso $Stati $r); Stato = $r.Stato; Chiave = (Get-ChiaveStato $Stati ([string]$r.Stato)); Testo = $testo; Pr = $r.Pr; Aspetta = $attese; Gesto = $null; InAttesa = (@($Dati.InAttesa) -contains [int]$r.Id); CosaFare = @(Get-Campo $r 'CosaFare') }
                 if ($att.Ferma) { $fermano += $voce } else { $nonFermano += $voce }
                 $dove["$($r.Id)"] = "tocca a te: $verbo"
             }
@@ -555,8 +592,11 @@ function Get-ModelloVista($Stato, $Dati, $ErroreAdo, $Stati, $Build = $null, [st
     $giro = Get-DatiGiro
     [pscustomobject]@{
         Generata = Get-Date; ErroreAdo = $ErroreAdo; InCorso = $inCorso; Coda = $coda; Catene = $catene; Funzionalita = $funzionalita
+        Priorita = @(if ($Dati -and $Dati.PSObject.Properties['Priorita']) { $Dati.Priorita })
         Agenti = $agenti; Operatore = [pscustomobject]@{ Fermano = $fermano; NonFermano = $nonFermano }; Pipeline = $pipeline
         Supervisore = (Get-DatiSupervisore); Suite = (Get-DatiSuite)
+        # D60: la pausa di tutto il sistema (impostazioni.json); se il file non si legge la pagina non la dice
+        SistemaInPausa = $(try { [bool](Get-Impostazioni $CartellaDati).Pausa } catch { $false })
         UltimoGiro = $giro.Ultimo; ProssimoGiro = $giro.Prossimo; ProssimoGiroIso = $giro.ProssimoIso
         BuildAdo = $Build; ErroreBuild = $ErroreBuild; UrlPullRequest = ((Get-AdoUrlOrganizzazione) + '/_pulls'); Apprendimento = $apprendimento
     }
@@ -703,6 +743,7 @@ if ($Html -and $Segui) {
         try {
             $tokenVista = New-TokenVista
             $tagAttesa = [string]$cfg.Stati.tagAttesa
+            $tagPausa = [string]$cfg.Stati.tagPausa
             $server = Start-ServerVista $Porta (Split-Path -Parent $PercorsoHtml) $tokenVista { Start-GiroPianificato } -TogliAttesa { param($Id) [void](Set-AdoCard -Id $Id -TogliTag @($tagAttesa)) }.GetNewClosure() -ImpostaSoglia {
                 # POST /soglia: la regola e in Decisioni (Get-OverrideSogliaQuota), qui solo i file
                 param($Parametri)
@@ -718,6 +759,23 @@ if ($Html -and $Segui) {
                 if ($s.Esito -eq 'errore') { @{ Esito = 'errore'; Messaggio = "richiesta scritta, ma il supervisore non parte: $($s.Messaggio)" } }
                 elseif ($s.Esito -eq 'inEsecuzione') { @{ Esito = 'ok'; Messaggio = 'richiesta inviata: il supervisore sta girando, la legge al giro dopo' } }
                 else { @{ Esito = 'ok'; Messaggio = 'richiesta inviata: il supervisore parte adesso' } }
+            } -ImpostaOrdine {
+                # POST /ordine (D60): la regola dell'ordine e in Decisioni (Get-RankRiordino), qui le scritture. Si rilegge la lista: la pagina
+                # puo essere vecchia, e l'ordine si calcola su quello di adesso.
+                param($Id, $Dopo)
+                $scritte = @(Get-RankRiordino @(Get-AdoFeatureAperte) $Id $Dopo)
+                foreach ($w in $scritte) { Set-AdoRank -Id $w.Id -Rank $w.Rank }
+                @{ Esito = 'ok'; Messaggio = $(if ($Dopo -eq 0) { "Feature $Id in cima" } else { "Feature $Id spostata dopo la $Dopo" }) }
+            } -ImpostaPausa {
+                # POST /pausa (D60): il tag di pausa sulla Feature; lo smistatore lo legge al giro dopo
+                param($Id, $Attiva)
+                if ($Attiva) { [void](Set-AdoCard -Id $Id -AggiungiTag @($tagPausa)); @{ Esito = 'ok'; Messaggio = "Feature $Id in pausa" } }
+                else { [void](Set-AdoCard -Id $Id -TogliTag @($tagPausa)); @{ Esito = 'ok'; Messaggio = "Feature $Id ripresa" } }
+            }.GetNewClosure() -ImpostaPausaSistema {
+                # POST /pausa-sistema (D60): impostazioni.json, fuori dal repo; lo smistatore la legge a ogni giro
+                param($Attivo)
+                Set-Impostazione -Nome 'pausaSistema' -Valore ([bool]$Attivo) -CartellaDati $script:CartellaDati
+                @{ Esito = 'ok'; Messaggio = $(if ($Attivo) { 'sistema in pausa: nessuna card avanza, le sessioni in corso finiscono' } else { 'sistema ripartito' }) }
             } -ImpostaAutomatico {
                 # POST /automatico?attivo=0|1 (D53): impostazioni.json, fuori dal repo
                 param($Attivo)
@@ -758,6 +816,7 @@ do {
         $letturaAdo = Get-Adesso
         # la lista bianca di POST /togli-attesa e l'ultima lettura: se ADO non risponde e vuota
         if ($server) { $server.Segnali.InAttesa = @(if ($dati) { $dati.InAttesa }) }
+        if ($server) { $server.Segnali.Feature = @(if ($dati) { $dati.Priorita | ForEach-Object { [int]$_.Id } }) }
     }
     # le pipeline di tutti i progetti hanno la loro lettura, con lo stesso ritmo ma il proprio pulsante: se fallisce restano gli agenti,
     # e viceversa; l'ultima buona resta

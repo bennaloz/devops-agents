@@ -546,4 +546,63 @@ Describe 'Get-RigaCoda: AspettaFunzionalita (D52, correzioni)' {
     }
 }
 
+Describe 'D59: l ambiente di collaudo nel contesto e nell istantanea' {
+    BeforeAll {
+        $script:VoceColl = [pscustomobject]@{ area = 'DevOps.Agents\AI\Stime'; repo = 'Repo.Prova'; cartella = 'C:\principale'; progettoAdo = 'P'; componente = 'stime'
+            collaudo = [pscustomobject]@{ compose = 'c.yaml'; porte = @('WEB'); url = [pscustomobject]@{ Web = 'WEB' } } }
+        $script:VoceSenza = [pscustomobject]@{ area = 'DevOps.Agents\AI\Ordini'; repo = 'Repo.Prova'; cartella = 'C:\principale'; progettoAdo = 'P'; componente = 'dico'; pipelineDeploy = 5 }
+        $script:CfgColl = @{ Stati = $script:Cfg.Stati; Limiti = $script:Cfg.Limiti; Ruoli = $script:Cfg.Ruoli; Mappa = [pscustomobject]@{ aree = @($script:VoceColl, $script:VoceSenza) } }
+        function script:Card-In([int]$Id, [string]$Chiave, [string]$Area) {
+            $c = script:Nuova-Card $Id $Chiave; $c.Area = $Area; $c
+        }
+    }
+
+    It 'AmbientiCollaudo conta le card in uno stato di Test il cui componente ha la voce collaudo, di qualunque componente' {
+        $attive = @((script:Card-In 1 'inDeployTest' $script:VoceColl.area), (script:Card-In 2 'inCollaudo' $script:VoceColl.area), (script:Card-In 3 'inProvaUmana' $script:VoceColl.area),
+            (script:Card-In 4 'inRevisione' $script:VoceColl.area), (script:Card-In 5 'inCollaudo' $script:VoceSenza.area))
+        $ctx = New-ContestoGiro $script:CfgColl $attive 'u-ric' (Join-Path $TestDrive 'quota-inesistente.json')
+        @($ctx.AmbientiCollaudo | Sort-Object) | Should -Be @(1, 2, 3)
+        @($ctx.InTestPerComponente['dico']) | Should -Be @(5)
+    }
+    It 'Add-CardAlContestoTest e il punto che usano anche il giro e lo smistatore: aggiunge una volta sola' {
+        $ctx = New-ContestoGiro $script:CfgColl @() 'u-ric' (Join-Path $TestDrive 'quota-inesistente.json')
+        Add-CardAlContestoTest $ctx $script:VoceColl 9
+        Add-CardAlContestoTest $ctx $script:VoceColl 9
+        Add-CardAlContestoTest $ctx $script:VoceSenza 10
+        @($ctx.AmbientiCollaudo) | Should -Be @(9)
+        @($ctx.InTestPerComponente['stime']) | Should -Be @(9)
+        @($ctx.InTestPerComponente['dico']) | Should -Be @(10)
+    }
+    Context 'Get-IstantaneaCard' {
+        BeforeEach {
+            Mock Get-AdoCommenti { @() }; Mock Get-AdoStoriaStato { @() }; Mock Get-RevNostre { @() }; Mock Get-AdoTaskFigli { @() }
+            Mock Get-AdoPr { $null }; Mock Get-AdoRun { throw 'non deve leggere un run' }
+            Mock Get-EsitoAmbienteCollaudo { [pscustomobject]@{ Stato = 'completed'; Esito = 'failed'; Log = 'C:\x.log'; Url = $null } }
+            Mock Get-AdoParametriDeploy { throw 'non deve leggere lo YAML' }
+            $script:Sn = { param($Sc) Get-IstantaneaCard $script:CfgColl (script:Card-In 7 'inDeployTest' $script:VoceColl.area) $script:VoceColl $Sc @{} (Join-Path $TestDrive 'stato.json') (New-ContestoGiro $script:CfgColl @() 'u-ric' (Join-Path $TestDrive 'q.json')) }
+        }
+        It 'con un ambiente salvato il Run e l esito dell ambiente (stessa forma del run), letto con pid e avvio dello stato, senza run di Azure DevOps' {
+            $i = & $script:Sn @{ collaudoProgetto = 'card-7'; collaudoSlot = 1; collaudoPid = 321; collaudoAvvio = '2026-11-26T10:00:00Z'; runDopoRev = 3 }
+            $i.Run.Stato | Should -Be 'completed'; $i.Run.Esito | Should -Be 'failed'; $i.Run.Log | Should -Be 'C:\x.log'
+            Should -Invoke Get-EsitoAmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Card -eq 7 -and $ProcessoId -eq 321 -and $Avvio -eq '2026-11-26T10:00:00Z' }
+            Should -Invoke Get-AdoRun -Times 0 -Exactly
+        }
+        It 'senza ambiente salvato non c e nessun run' {
+            (& $script:Sn @{}).Run | Should -BeNullOrEmpty
+            Should -Invoke Get-EsitoAmbienteCollaudo -Times 0 -Exactly
+        }
+        It 'per la voce collaudo non si leggono la scelta del deploy ne lo YAML' {
+            (& $script:Sn @{}).Deploy | Should -BeNullOrEmpty
+            Should -Invoke Get-AdoParametriDeploy -Times 0 -Exactly
+        }
+    }
+    It 'Get-RigaCoda non conta la ButtaAmbienteCollaudo fra i lavori pronti (come il mentore: non muove la card)' {
+        Mock Get-IstantaneaCard { @{ Card = $null } }
+        Mock Get-Decisione { @{ Azioni = @([ordered]@{ Tipo = 'ButtaAmbienteCollaudo' }); Motivo = $null } }
+        Mock Get-GestoAtteso { $null }; Mock Get-AttivitaOperatore { $null }
+        $r = Get-RigaCoda $script:CfgColl (script:Card-In 7 'inRevisione' $script:VoceColl.area) $script:VoceColl @{} @{} (Join-Path $TestDrive 's.json') @{}
+        $r.Azioni | Should -Be 0
+    }
+}
+
 AfterAll { $env:ATTREZZI_DATI = $script:DatiPrimaIsolamento }

@@ -42,7 +42,7 @@ Describe 'Supervisore.ps1: il giro, con tutto l I/O finto' {
         Mock Get-CimInstance { [pscustomobject]@{ LastBootUpTime = (Get-Date).AddHours(-6) } }
         Mock Invoke-WebRequest { if (-not $global:Mondo.VistaRisponde) { throw 'timeout' }; [pscustomobject]@{ StatusCode = 200 } }
         Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
-        Mock Get-AdoCardAttive { @($global:Mondo.Card) }
+        Mock Get-AdoCardAttive { @($global:Mondo.Card) }; Mock Get-AdoFeatureAperte { @() }
         Mock Get-AdoBuildPipeline {
             [pscustomobject]@{ Attivi = @(); Orchestratori = @($global:Mondo.Orchestratori); AgentiPool = @(); AgentiLetti = $true; ErroriAgenti = @(); Falliti = @($global:Mondo.Falliti); Errori = @() } }
         Mock Get-AdoMotivoFallimento { 'The agent lost communication with the server' }

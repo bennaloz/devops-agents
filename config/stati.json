@@ -19,6 +19,7 @@
   "taskRimosso": "Removed",
   "tagAgenti": "agents",
   "tagAttesa": "on-hold",
+  "tagPausa": "paused",
   "tagSenzaTest": "no-test-deploy",
   "tagProvaUmana": "human-test",
   "tagChiusura": "collaudo-funzionalita",

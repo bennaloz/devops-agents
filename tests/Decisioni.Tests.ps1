@@ -12,6 +12,8 @@ BeforeAll {
         @{
             Stati = $script:Stati; Limiti = $script:Limiti; SessioniAttive = 0
             InSviluppoPerRepo = @{}; InTestPerComponente = @{}; Titolare = 'u-titolare'
+            # D60: la Feature padre delle card di prova (PadreId 1), aperta e non in pausa
+            Feature = @{ '1' = @{ Rank = $null; Pausa = $false; Titolo = 'Raggruppa' } }
         }
     }
 
@@ -19,7 +21,7 @@ BeforeAll {
     # la revisione 7, fatta dal richiedente; Rev della card e' 10.
     function script:New-Ist([string]$Chiave, [string]$Da = 'inRevisione', [string]$Chi = 'u-richiedente') {
         @{
-            Card      = [pscustomobject]@{ Id = 100; Rev = 10; Tipo = 'User Story'; Stato = (script:Nome $Chiave); Tag = @($script:Stati.tagAgenti) }
+            Card      = [pscustomobject]@{ Id = 100; Rev = 10; Tipo = 'User Story'; Stato = (script:Nome $Chiave); Tag = @($script:Stati.tagAgenti); PadreId = 1 }
             Commenti  = @()
             Storia    = @([pscustomobject]@{ Rev = 7; Da = (script:Nome $Da); A = (script:Nome $Chiave); Chi = $Chi; ChiNome = 'x'; Quando = '2026-11-01T10:00:00Z' })
             Pr        = $null
@@ -541,7 +543,7 @@ Describe 'Get-Azioni: oltre la tabella' {
         @(Get-Azioni -Istantanea $i -Contesto (script:New-Contesto)).Count | Should -Be 0
     }
     It 'il modulo esporta Get-Azioni, i predecessori in attesa la definizione di commento di una persona e quando leggere il deploy' {
-        @((Get-Module Decisioni).ExportedFunctions.Keys | Sort-Object) | Should -Be @('Format-DomandaOperatore', 'Format-MotivoCoda', 'Get-AttesaSciolta', 'Get-AttivitaOperatore', 'Get-Azioni', 'Get-BloccoQuota', 'Get-CampiContatori', 'Get-Decisione', 'Get-GestoAtteso', 'Get-OverrideSogliaQuota', 'Get-PredecessoriInAttesa', 'Get-RiepilogoQuota', 'Get-SogliaQuotaEffettiva', 'Get-TitoloPr', 'Get-UltimoCommentoDiRuolo', 'Test-CommentoDiPersona', 'Test-DeployDaLeggere', 'Test-OnHoldPerLimite', 'Test-PredecessoreUnito')
+        @((Get-Module Decisioni).ExportedFunctions.Keys | Sort-Object) | Should -Be @('Format-DomandaOperatore', 'Format-MotivoCoda', 'Get-AttesaSciolta', 'Get-AttivitaOperatore', 'Get-Azioni', 'Get-BloccoQuota', 'Get-CampiContatori', 'Get-Decisione', 'Get-FermoPriorita', 'Get-GestoAtteso', 'Get-MappaFeature', 'Get-OrdineCard', 'Get-OrdineFeature', 'Get-OverrideSogliaQuota', 'Get-PredecessoriInAttesa', 'Get-RankRiordino', 'Get-RiepilogoQuota', 'Get-SlotCollaudoLibero', 'Get-Soglia5OreEffettiva', 'Get-SogliaQuotaEffettiva', 'Get-TitoloPr', 'Get-UltimoCommentoDiRuolo', 'Test-CardInPausa', 'Test-CommentoDiPersona', 'Test-DeployDaLeggere', 'Test-OnHoldPerLimite', 'Test-PredecessoreUnito')
     }
 }
 
@@ -3499,5 +3501,198 @@ Describe 'D52: le correzioni della card di chiusura (gruppo 5)' {
             $i.StatoCard.allineaFatti = @('c-testa')
             script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'CreaAllineaDevelop'; Commit = 'c-nuovo' })
         }
+    }
+}
+
+Describe 'D59: l ambiente Docker di collaudo al posto del deploy in Test' {
+    BeforeAll {
+        # Un componente con la voce collaudo: niente pipelineDeploy ne urlTest, il Test e l ambiente della card
+        function script:New-VoceCollaudo {
+            [pscustomobject]@{ repo = 'Acme.AI'; componente = 'stime'
+                collaudo = [pscustomobject]@{ compose = 'collaudo/stime/compose.yaml'; porte = @('WEB', 'API'); url = [pscustomobject]@{ WebApp = 'WEB'; Api = 'API' } } }
+        }
+        function script:New-IstColl([string]$Chiave = 'inDeployTest') {
+            $i = script:New-Ist $Chiave 'inRevisione' -Chi 'u-titolare'
+            $i.Voce = script:New-VoceCollaudo; $i.Deploy = $null
+            script:Set-Sessione $i 'dev' 'fatto' -Fine '2026-11-02T10:00:00Z'
+            script:Set-Sessione $i 'reviewer' 'superata' -Fine '2026-11-03T10:00:00Z'
+            $i
+        }
+        # l ambiente creato per l ingresso (rev 7) e il suo esito, nella forma del run di deploy
+        function script:Con-Ambiente($i, [string]$Esito = 'succeeded', [string]$Stato = 'completed') {
+            $i.StatoCard.collaudoSlot = 1; $i.StatoCard.collaudoProgetto = 'card-100'; $i.StatoCard.runDopoRev = 7
+            $i.StatoCard.collaudoUrl = [ordered]@{ WebApp = 'http://localhost:21100'; Api = 'http://localhost:21101' }
+            $i.Run = [pscustomobject]@{ Stato = $Stato; Esito = $Esito; Url = $null; Log = 'C:\dati\collaudo\card-100.log' }
+            $i
+        }
+        function script:Get-AzColl($i, $c = (script:New-Contesto)) { , @(Get-Azioni -Istantanea $i -Contesto $c) }
+        function script:Contesto-Ambienti([int[]]$Altre) { $c = script:New-Contesto; $c.AmbientiCollaudo = @($Altre); $c }
+        function script:Funz-Collaudo($i, [bool]$EChiusura) {
+            $i.StatoCard.destinazione = if ($EChiusura) { 'develop' } else { 'feature/f7-la-funzione' }
+            $i.Funzionalita = @{
+                Feature = [pscustomobject]@{ Id = 7; Titolo = 'La funzione'; Stato = $script:Stati.featureAttiva; Tag = @(); Area = 'x' }
+                Chiusura = $(if ($EChiusura) { 100 } else { 22 }); Sorelle = @(); Ramo = 'feature/f7-la-funzione'; EChiusura = $EChiusura; StatoChiusura = (script:Nome 'inDeployTest')
+            }
+            if ($EChiusura) { $i.StatoCard.cartella = $null }
+            $i
+        }
+    }
+
+    Context 'ingresso e limite' {
+        It 'In review superata con la voce collaudo: va in Deploying to test (non e senza Test)' {
+            $i = script:New-IstColl 'inRevisione'
+            script:Test-Azioni (script:Get-AzColl $i) @(@{ Tipo = 'SpostaCard'; Stato = 'inDeployTest' })
+        }
+        It 'senza pipelineDeploy e senza collaudo la card resta senza Test (come prima)' {
+            $i = script:New-IstColl 'inRevisione'; $i.Voce = [pscustomobject]@{ repo = 'Acme.AI'; componente = 'stime' }
+            script:Test-Azioni (script:Get-AzColl $i) @(@{ Tipo = 'SpostaCard'; Stato = 'daUnire' })
+        }
+        It 'con ambientiCollaudo card gia in Test, di qualunque componente, resta In review: motivo limiteAmbienti con le card' {
+            $i = script:New-IstColl 'inRevisione'
+            $n = [int]$script:Limiti.ambientiCollaudo
+            $altre = @(1..$n | ForEach-Object { 200 + $_ })
+            $d = Get-Decisione -Istantanea $i -Contesto (script:Contesto-Ambienti ($altre + 100))
+            @($d.Azioni).Count | Should -Be 0
+            $d.Motivo.Tipo | Should -Be 'limiteAmbienti'
+            $d.Motivo.Ruolo | Should -Be 'collaudatore'
+            Format-MotivoCoda $d.Motivo | Should -Be "in coda, gli ambienti di collaudo sono tutti occupati ($n/${n}: card $($altre -join ', '))"
+        }
+        It 'un posto in meno del limite: la card passa' {
+            $i = script:New-IstColl 'inRevisione'
+            $altre = @(1..([int]$script:Limiti.ambientiCollaudo - 1) | ForEach-Object { 200 + $_ })
+            script:Test-Azioni (script:Get-AzColl $i (script:Contesto-Ambienti $altre)) @(@{ Tipo = 'SpostaCard'; Stato = 'inDeployTest' })
+        }
+        It 'con human-test il motivo del limite non ha ruolo' {
+            $i = script:New-IstColl 'inRevisione'; $i.Card.Tag = @($script:Stati.tagAgenti, $script:Stati.tagProvaUmana)
+            $n = [int]$script:Limiti.ambientiCollaudo
+            $d = Get-Decisione -Istantanea $i -Contesto (script:Contesto-Ambienti (1..$n | ForEach-Object { 200 + $_ }))
+            $d.Motivo.Tipo | Should -Be 'limiteAmbienti'
+            $d.Motivo.Ruolo | Should -BeNullOrEmpty
+        }
+        It 'il limite per componente (cardInTestPerComponente) non conta per la voce collaudo' {
+            $i = script:New-IstColl 'inRevisione'
+            $c = script:New-Contesto; $c.InTestPerComponente = @{ stime = @(100, 8) }
+            script:Test-Azioni (script:Get-AzColl $i $c) @(@{ Tipo = 'SpostaCard'; Stato = 'inDeployTest' })
+        }
+    }
+
+    Context 'Deploying to test' {
+        It 'crea l ambiente con la revisione d ingresso, senza scegliere i parametri del deploy' {
+            $i = script:New-IstColl; $i.Deploy = @{ Scelta = @(); AmmessiLetti = $true; Ammessi = @() }
+            script:Test-Azioni (script:Get-AzColl $i) @(@{ Tipo = 'CreaAmbienteCollaudo'; Rev = 7 })
+        }
+        It 'la voce senza collaudo accoda ancora il deploy come prima' {
+            $i = script:New-Ist 'inDeployTest' 'inRevisione' -Chi 'u-titolare'
+            script:Set-Sessione $i 'dev' 'fatto'; script:Set-Sessione $i 'reviewer' 'superata' -Fine '2026-11-03T10:00:00Z'
+            (script:Get-AzColl $i)[0].Tipo | Should -Be 'AccodaDeployTest'
+        }
+        It 'oltre il limite degli ambienti torna In review senza on-hold' {
+            $i = script:New-IstColl
+            $n = [int]$script:Limiti.ambientiCollaudo
+            $az = script:Get-AzColl $i (script:Contesto-Ambienti (1..$n | ForEach-Object { 200 + $_ }))
+            script:Test-Azioni $az @(@{ Tipo = 'RiportaIndietro'; Stato = 'inRevisione' })
+        }
+        It 'ambiente in creazione: aspetta' {
+            $i = script:Con-Ambiente (script:New-IstColl) -Esito $null -Stato 'inProgress'
+            (script:Get-AzColl $i).Count | Should -Be 0
+        }
+        It 'ambiente pronto: Automated test, o Human test con il tag (umana: <Umana>)' -ForEach @(@{ Umana = $false; Atteso = 'inCollaudo' }, @{ Umana = $true; Atteso = 'inProvaUmana' }) {
+            $i = script:Con-Ambiente (script:New-IstColl)
+            if ($Umana) { $i.Card.Tag += $script:Stati.tagProvaUmana }
+            script:Test-Azioni (script:Get-AzColl $i) @(@{ Tipo = 'SpostaCard'; Stato = $Atteso })
+        }
+        It 'ambiente non creato: on-hold deployFallito (dopo la passata del responsabile) con il log nel motivo' {
+            $i = script:Con-Ambiente (script:New-IstColl) -Esito 'failed'
+            script:Set-PassataFatta $i
+            $az = script:Get-AzColl $i
+            $az[-1].Tipo | Should -Be 'MettiInAttesa'
+            $az[-1].Per | Should -Be 'deploy'
+            $az[-1].Motivo | Should -Be 'ambiente di collaudo non creato, log: C:\dati\collaudo\card-100.log: sistemata la causa, togli il tag e l ambiente si ricrea'
+        }
+        It 'tolto il tag dopo il fallimento: si dimentica l esito e si ricrea l ambiente' {
+            $i = script:Con-Ambiente (script:New-IstColl) -Esito 'failed'
+            $i.StatoCard.inAttesaPer = 'deploy'
+            $az = script:Get-AzColl $i
+            @($az | ForEach-Object { $_.Tipo }) | Should -Contain 'AzzeraDeploy'
+            $az[-1].Tipo | Should -Be 'CreaAmbienteCollaudo'
+        }
+    }
+
+    Context 'uscita dagli stati di Test' {
+        It 'una card fuori dal Test con un ambiente lo butta, come prima azione, in <Chiave>' -ForEach @(
+            @{ Chiave = 'inRevisione' }, @{ Chiave = 'inSviluppo' }, @{ Chiave = 'daUnire' }, @{ Chiave = 'daRilasciare' }, @{ Chiave = 'chiusa' }, @{ Chiave = 'rimossa' }, @{ Chiave = 'pronto' }
+        ) {
+            $i = script:Con-Ambiente (script:New-IstColl $Chiave)
+            $az = script:Get-AzColl $i
+            $az[0].Tipo | Should -Be 'ButtaAmbienteCollaudo'
+        }
+        It 'anche con l on-hold, con una sessione in corso e senza il tag degli agenti' {
+            $i = script:Con-Ambiente (script:New-IstColl 'inSviluppo'); $i.Card.Tag += $script:Stati.tagAttesa
+            (script:Get-AzColl $i)[0].Tipo | Should -Be 'ButtaAmbienteCollaudo'
+            $i = script:Con-Ambiente (script:New-IstColl 'inSviluppo'); $i.StatoCard.sessione = @{ id = 's'; ruolo = 'dev'; pid = 1 }
+            (script:Get-AzColl $i)[0].Tipo | Should -Be 'ButtaAmbienteCollaudo'
+            $i = script:Con-Ambiente (script:New-IstColl 'inSviluppo'); $i.Card.Tag = @()
+            (script:Get-AzColl $i)[0].Tipo | Should -Be 'ButtaAmbienteCollaudo'
+        }
+        It 'nei tre stati di Test l ambiente resta: <Chiave>' -ForEach @(@{ Chiave = 'inDeployTest' }, @{ Chiave = 'inCollaudo' }, @{ Chiave = 'inProvaUmana' }) {
+            $i = script:Con-Ambiente (script:New-IstColl $Chiave)
+            @(script:Get-AzColl $i | Where-Object { $_.Tipo -eq 'ButtaAmbienteCollaudo' }).Count | Should -Be 0
+        }
+        It 'senza ambiente salvato non c e niente da buttare' {
+            $i = script:New-IstColl 'inSviluppo'
+            @(script:Get-AzColl $i | Where-Object { $_.Tipo -eq 'ButtaAmbienteCollaudo' }).Count | Should -Be 0
+        }
+    }
+
+    Context 'il collaudatore' {
+        It 'riceve gli URL dell ambiente della card al posto di urlTest' {
+            $i = script:Con-Ambiente (script:New-IstColl 'inCollaudo')
+            $az = script:Get-AzColl $i
+            $az[0].Tipo | Should -Be 'LanciaSessione'; $az[0].Ruolo | Should -Be 'collaudatore'
+            $az[0].Allegato | Should -Match 'Ambiente di collaudo della card'
+            $az[0].Allegato | Should -Match 'WebApp: http://localhost:21100'
+            $az[0].Allegato | Should -Match 'Api: http://localhost:21101'
+            $az[0].Allegato | Should -Not -Match 'urlTest'
+        }
+        It 'senza URL salvati si ferma con ESITO=bloccato' {
+            $i = script:Con-Ambiente (script:New-IstColl 'inCollaudo'); $i.StatoCard.collaudoUrl = $null
+            (script:Get-AzColl $i)[0].Allegato | Should -Match 'ESITO=bloccato'
+        }
+        It 'la voce con urlTest e il deploy resta com era' {
+            $i = script:New-InTest; script:Set-Stato $i 'inCollaudo'
+            (script:Get-AzColl $i)[0].Allegato | Should -Be 'Ambiente di Test: https://test.example.invalid/stime'
+        }
+    }
+
+    Context 'la funzionalita (D52): solo la card di chiusura ha un ambiente' {
+        It 'la card di chiusura con la voce collaudo crea l ambiente dal ramo della funzionalita (azione per la card di chiusura)' {
+            $i = script:Funz-Collaudo (script:New-IstColl) $true
+            $i.StatoCard.ramo = 'feature/f7-la-funzione'
+            script:Test-Azioni (script:Get-AzColl $i) @(@{ Tipo = 'CreaAmbienteCollaudo'; Rev = 7; Chiusura = $true })
+        }
+        It 'una card figlia con la voce collaudo non ha ambiente: va dritta in Ready to merge' {
+            $i = script:Funz-Collaudo (script:New-IstColl 'inRevisione') $false
+            script:Test-Azioni (script:Get-AzColl $i) @(@{ Tipo = 'SpostaCard'; Stato = 'daUnire' })
+        }
+        It 'la chiusura che ha un ambiente pronto passa al collaudo automatico' {
+            $i = script:Con-Ambiente (script:Funz-Collaudo (script:New-IstColl) $true)
+            $i.StatoCard.ramo = 'feature/f7-la-funzione'
+            script:Test-Azioni (script:Get-AzColl $i) @(@{ Tipo = 'SpostaCard'; Stato = 'inCollaudo' })
+        }
+    }
+}
+
+Describe 'D59: lo slot e gli URL dell ambiente di collaudo' {
+    It 'Get-SlotCollaudoLibero: il piu piccolo non usato, 0 se sono tutti presi' {
+        Get-SlotCollaudoLibero @() 3 | Should -Be 1
+        Get-SlotCollaudoLibero @(1, 3) 3 | Should -Be 2
+        Get-SlotCollaudoLibero @(2, 1) 3 | Should -Be 3
+        Get-SlotCollaudoLibero @(1, 2, 3) 3 | Should -Be 0
+        Get-SlotCollaudoLibero $null 2 | Should -Be 1
+    }
+    It 'ConvertTo-ElencoUrlCollaudo: nome: url, da una tabella o da un oggetto riletto dallo stato; vuoto senza URL' {
+        ConvertTo-ElencoUrlCollaudo ([ordered]@{ WebApp = 'http://h:1'; Api = 'http://h:2' }) | Should -Be "- WebApp: http://h:1`n- Api: http://h:2"
+        ConvertTo-ElencoUrlCollaudo ('{ "WebApp": "http://h:1" }' | ConvertFrom-Json) | Should -Be '- WebApp: http://h:1'
+        ConvertTo-ElencoUrlCollaudo $null | Should -BeNullOrEmpty
     }
 }

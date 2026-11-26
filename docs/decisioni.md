@@ -13,11 +13,11 @@ Ogni voce dice cosa si è deciso, chi e quando, perché, l'alternativa scartata 
 |---|---|---|
 | Il titolare (o l'assegnatario della card) | Le scelte di prodotto. Porta la card da Draft a New, anche la card di chiusura di una funzionalità (D52: la vista gliela mostra quando le sorelle sono tutte In feature branch). Prova in Test le card che lo chiedono. Approva il rilascio in produzione e le modifiche ad Azure DevOps (aree, pipeline, policy). Completa le PR del repo `DevOps.Agents` | Non scrive le card a mano: le prepara la sessione di sviluppo con lui. Non sposta più le card in Deploying to test né completa le PR dei prodotti: lo fa lo smistatore |
 | Sessione di sviluppo (Claude con il titolare) | Analisi con `grill-me`, divisione in card, testo della card, area e mappa quando mancano, giri dello smistatore a mano, lavoro sul repo `DevOps.Agents` | Non scrive codice nei repo dei prodotti: lo fanno gli agenti |
-| Smistatore | Fa avanzare le card del suo utente: lancia le sessioni, apre le PR, legge le validazioni e i log delle build, porta la card in Deploying to test e accoda il deploy, completa la PR verso `develop` da Ready to merge, crea e toglie i worktree, avvisa sulla card e su Telegram. Per una funzionalità (D52): crea e pubblica il ramo della funzionalità, completa le PR delle card nel ramo e le porta In feature branch, apre la PR ramo della funzionalità verso `develop` per la card di chiusura, crea le Bug di correzione e `allinea-develop`, aggiorna lo stato della Feature | Non decide niente che non sia scritto in `src/Decisioni.psm1`: senza modelli. Non rilascia in produzione |
+| Smistatore | Fa avanzare le card del suo utente: lancia le sessioni, apre le PR, legge le validazioni e i log delle build, porta la card in Deploying to test e accoda il deploy (per i componenti con `collaudo`, D59, crea invece l'ambiente Docker della card e lo butta quando la card esce dal Test), completa la PR verso `develop` da Ready to merge, crea e toglie i worktree, avvisa sulla card e su Telegram. Per una funzionalità (D52): crea e pubblica il ramo della funzionalità, completa le PR delle card nel ramo e le porta In feature branch, apre la PR ramo della funzionalità verso `develop` per la card di chiusura, crea le Bug di correzione e `allinea-develop`, aggiorna lo stato della Feature | Non decide niente che non sia scritto in `src/Decisioni.psm1`: senza modelli. Non rilascia in produzione |
 | `responsabile` | Criteri di accettazione verificabili, task, decisioni che il repo sa giustificare (con `file:riga`), bivi di `dev`, `no-test-deploy` quando nessun criterio si verifica in Test, esito della prova in Test (Ready to merge o di nuovo In development). Per la card di chiusura (D52): i parametri del deploy, `human-test` (`card.ps1 prova-umana`) e la correzione di un collaudo respinto, tecnica o di prodotto (`card.ps1 correzione`) | Non scrive codice e non fa commit. Non decide il prodotto: lo rimanda alla persona |
 | `dev` | Codice e test nel worktree della card, un task alla volta; correzioni dopo validazioni rosse, rilievi e conflitti. In una funzionalità il worktree parte dal ramo della funzionalità e la PR va lì (D52) | Non decide: davanti a una scelta si ferma con un bivio |
 | `reviewer` | Una passata sulla PR intera contro i criteri e le regole di sviluppo. In una funzionalità guarda il diff rispetto al ramo della funzionalità; sulla Bug `allinea-develop` solo la risoluzione del merge (D52) | Non corregge: segnala |
-| `collaudatore` | Prova i criteri sull'ambiente di Test e scrive l'esito (D28). Per la card di chiusura (D52) i criteri della funzionalità intera | Non corregge: il resoconto va a `responsabile`. Non tocca la produzione |
+| `collaudatore` | Prova i criteri sull'ambiente di Test, o sull'ambiente Docker della card per i componenti con `collaudo` (D59), e scrive l'esito (D28). Per la card di chiusura (D52) i criteri della funzionalità intera | Non corregge: il resoconto va a `responsabile`. Non tocca la produzione |
 
 ## Uso del sistema
 
@@ -1216,3 +1216,136 @@ Ogni voce dice cosa si è deciso, chi e quando, perché, l'alternativa scartata 
 - Da verificare: il consumo nel registro dopo qualche card; se `dev` torna su Sonnet (D54) l'advisor può restare Fable
   o scendere a Opus.
 - Dove: `config/ruoli.json`, `src/Sessioni.psm1` (`Get-ArgomentiClaude`), i due brief.
+
+**D56. `dev` e `responsabile` scrivono la descrizione della PR con `card.ps1 descrizione-pr`.**
+- Chi e quando: Il titolare, 2026-11-26. La card 111 chiede misure e passi dopo il merge nella descrizione della PR, ma lo
+  smistatore apre la PR col solo link alla card e `card.ps1` non aveva un comando per cambiarla.
+- Cosa: `card.ps1 descrizione-pr -File <markdown>` trova la PR attiva della card dai suoi link (come `titolo-pr`, mai da
+  un id dato da fuori), tiene la riga col link alla card che lo smistatore mette in testa e ci mette sotto il testo del
+  file. Il file si legge in UTF-8 e la scrittura passa dalla REST (`Set-AdoDescrizionePr`), perché `az` da PowerShell
+  tronca le righe multiple e perde gli accenti. Il tetto di 4000 caratteri vale con link e firma: un testo più lungo si
+  rifiuta, non si tronca. Si può riscrivere: ogni volta sostituisce il testo precedente.
+- Perché un file e non stdin: la descrizione è lunga e con tabelle, e `crea -File` funziona già così.
+- Dove: `src/Card.psm1` (`Set-CardDescrizionePr`), `src/card.ps1`, `ruoli/dev.md`, `ruoli/responsabile.md`.
+
+**D58. `descrizione-pr` funziona anche prima che la PR esista: il testo aspetta in un commento.**
+- Chi e quando: Il titolare, 2026-11-26, scelta del responsabile della card 111. La PR la apre lo smistatore dopo il `fatto`
+  di `dev`, quindi durante il lavoro `dev` non ha una PR su cui scrivere (D56).
+- Cosa: senza una PR attiva `card.ps1 descrizione-pr` salva il testo in un commento della card con la marca
+  «Descrizione della PR:», come `deploy`; vale l'ultimo di `dev` o `responsabile`. `ApriPr` lo rilegge e lo mette sotto
+  il link alla card. Con la PR già aperta il comando scrive direttamente, come in D56.
+- Tetto: il comando controlla subito che il testo ci stia (con un link alla card di lunghezza media); se all'apertura
+  non ci sta lo stesso, la PR si apre col solo link e lo smistatore lo scrive nel log.
+- Dove: `src/Card.psm1` (`Set-CardDescrizionePr`), `src/Comune.psm1` (`Get-DescrizionePrSalvata`), `src/Smistatore.ps1` (`ApriPr`).
+
+**D57. Ogni on-hold dice al titolare cosa fare, perché e perché non l'hanno fatto gli agenti.**
+- Chi e quando: Il titolare, 2026-11-26. La card 86 era in on-hold `limite` dopo il secondo `rilancia` (D38). Il gesto
+  ("rilancia la validazione del gateway sulla PR 1146, poi togli l'on-hold") era sepolto nella diagnosi lunga del
+  responsabile, e non era chiaro che la 74 aspettasse proprio la 86. Il titolare ha riportato la card in Draft e poi in New:
+  togliendo l'on-hold lo smistatore l'avrebbe trattata come nuova, con PR e ramo già aperti.
+- Cosa:
+  - Il gesto lo scrive il ruolo che ha visto la causa, di solito il responsabile nella passata D42. Con `ESITO=bloccato`
+    il suo commento e il testo finale cominciano con `Per il titolare:` (il gesto, in ordine, con i nomi veri), `Perché:` e
+    `Perché non gli agenti:` (il permesso, la regola o l'accesso che manca, per esempio D38 e D51). Sono righe sole,
+    prima della diagnosi.
+  - `Set-InAttesa` legge queste righe dall'ultima sessione e chiude il commento di on-hold con la sezione **Cosa fare**:
+    1) il gesto, 2) togliere l'on-hold, con l'effetto che dipende da `inAttesaPer` (`sessione`, `limite`, `deploy`), poi
+    il perché, il perché non gli agenti e l'avviso di non riportare la card in Draft o in New. Senza le righe del ruolo,
+    o per un on-hold di `Close-Sessione` (causaAttesa), vale un testo predefinito per inAttesaPer e causa. Le
+    indicazioni restano nello stato della card (`indicazioniAttesa`).
+  - Il supervisore mette il gesto come azione della voce Telegram e il resto come righe, con le card che la aspettano.
+    Un bloccato con resoconto ma senza le righe del ruolo resta al resoconto, che dice più del testo predefinito.
+  - La vista mostra il riquadro "Cosa fare" sulla card in on-hold. Una card che aspetta una predecessora in on-hold
+    mostra, sotto "Aspetta la card #86", il gesto di quella, e va fra le card da sbloccare.
+- Perché: un on-hold è un gesto per una persona. Se il gesto non è la prima cosa che si legge, la persona fa altro, e
+  spostare la card di stato fa perdere allo smistatore il filo della PR. Dire perché gli agenti non l'hanno fatto evita
+  di chiedersi se basti aspettare. Il supervisore continua a non rilanciare le validazioni delle PR delle card (D38/D51).
+- Alternativa scartata: riassumere la diagnosi con un modello nello smistatore o nel supervisore, che sono senza modello.
+  Il gesto lo sa chi ha letto i log.
+- Dove: `src/CosaFare.psm1`, `src/Smistatore.ps1` (`Set-InAttesa`), `src/Istantanea.ps1` (`Get-RigaCoda`,
+  `Get-PredecessoriCard`), `src/Supervisione.psm1` (`Get-ProblemiCard`), `src/Vista.ps1` (`Get-GestoPredecessore`),
+  `src/VistaHtml.psm1`, `ruoli/responsabile.md` ("Quando serve una persona").
+
+**D59. In Test va solo `develop`; una card si collauda nel suo ambiente Docker, costruito dal ramo e poi buttato via.**
+- Chi e quando: Il titolare, 2026-11-26.
+- Perché: con un solo ambiente di Test per componente (D26, D34) le card si bloccavano a vicenda (la card 56 di
+  Acme.AI ferma in coda dietro la 59 in on-hold) o si sovrascrivevano la build (la 55 e la 56). Un ambiente per card
+  toglie il posto da contendere; Test torna a essere lo specchio di `develop`.
+- Cosa:
+  - Un componente con la voce `collaudo` in `config/mappa.json` non fa più deploy in Test: in Deploying to test lo
+    smistatore crea l'ambiente con `docker compose` dal worktree della card (progetto `card-<id>`, etichetta
+    `acme.collaudo`), con le porte di uno slot libero. Lo stesso per la card di chiusura di una funzionalità (D52),
+    dal ramo della funzionalità. Il componente senza `collaudo` resta col giro di prima (deploy del ramo in Test, un posto per
+    componente) finché il suo repo non ha l'ambiente.
+  - Il contratto col repo prodotto: un file compose per componente, indicato dalla mappa, che costruisce le immagini dal
+    sorgente del ramo, crea il database dagli schemi con i seed del repo, avvia un Keycloak con realm e utenti di prova, e
+    si considera pronto quando `docker compose up --wait` torna. Le porte, gli utenti di prova e i segreti arrivano come
+    variabili d'ambiente; nel repo nessun segreto né password.
+  - Gli URL dell'ambiente vanno in un commento sulla card e al collaudatore al posto di `urlTest`; per `human-test`
+    l'ambiente resta su finché la card è in Human test.
+  - L'ambiente si butta (`docker compose down -v`) quando la card lascia Automated test e Human test per qualunque
+    stato, o si chiude. A ogni giro lo smistatore butta anche i progetti `acme.collaudo` di card che non sono più in
+    collaudo (orfani).
+  - Limite: `ambientiCollaudo` in `config/limiti.json` (3) al posto di `cardInTestPerComponente` per i componenti con
+    `collaudo`. Oltre il limite la card aspetta in In review, senza on-hold.
+  - Dati: schema e seed del repo, mai copie del database di Test. Servizi esterni: Keycloak è locale e muore con
+    l'ambiente; Models.Api e gli altri servizi esterni sono quelli di Test.
+  - Segreti per l'ambiente (chiavi dei servizi esterni, password degli utenti di prova): `~/.claude/collaudo/<repo>.json`,
+    fuori da ogni repo, lo stesso file da cui il collaudatore riceve `COLLAUDO_*`.
+  - Docker (Engine, senza Docker Desktop) gira per ora in WSL2 sulla macchina degli agenti (distro Ubuntu-26.04). Il
+    comando che lo raggiunge (`comandoDocker`, con `{cartella}` = cartella Windows del worktree), l'host e la porta base
+    stanno in `config/collaudo.json`: per spostarlo su un server si cambia il comando (per esempio
+    `docker --context server`), senza toccare il codice. `wsl.exe` non passa le variabili di Windows alla distro: le
+    `COLLAUDO_*` viaggiano con `WSLENV`, solo nel processo figlio. Il compose si indica con un percorso relativo alla cartella.
+    La distro resta accesa grazie all'operazione pianificata di Windows "WSL Ubuntu sempre acceso" (all'accesso,
+    `wsl.exe -d Ubuntu-26.04 --exec sleep infinity`): senza, WSL spegne la distro e con lei gli ambienti.
+  - `develop` in Test per ora lo porta il titolare a mano; l'orchestratore di Acme.AI rifiuta in Test i rami che non
+    sono `develop`. Automatizzarlo dopo ogni merge è rimandato: rischio di troppe CI e pipeline.
+- Alternative scartate: VM Linux dedicata subito (serve una macchina; si migra dopo); copia del database di Test (dati
+  pesanti e potenzialmente sensibili sul PC); Keycloak di Test (un redirect URI da registrare per ogni ambiente).
+- Cambia: D26 e D34 (il limite per componente vale solo per i componenti senza `collaudo`), D28 (il collaudatore prova
+  l'ambiente della card, non Test).
+- Dove: `config/mappa.json` (la voce `collaudo`: `compose`, `porte`, `url`; non ancora nelle voci vere), `config/collaudo.json`,
+  `config/limiti.json` (`ambientiCollaudo`), `src/Decisioni.psm1` (`Test-AmbienteCollaudo`, `Get-BloccoLimiteTest`,
+  `Get-AzioniInDeployTest`, `Get-AzioneButtaAmbiente`, `Get-SlotCollaudoLibero`), `src/Istantanea.ps1`
+  (`Add-CardAlContestoTest`, l'esito dell'ambiente nel `Run`), `src/Smistatore.ps1` (`CreaAmbienteCollaudo`,
+  `ButtaAmbienteCollaudo`, `Remove-AmbientiOrfani`), `src/Collaudo.psm1` e `src/Collaudo-Crea.ps1` (il punto unico `Invoke-Docker`, il
+  processo staccato), `hooks/deny-host-collaudo.ps1`, `src/Card.psm1` (`deploy` e `leggi` su un componente con `collaudo`), `ruoli/collaudatore.md`, `ruoli/responsabile.md`; nei repo prodotto la cartella `collaudo/` e
+  l'orchestratore.
+
+**D60. Le card stanno in una Feature; le Feature hanno una priorità e si mettono in pausa; anche il sistema intero; la finestra di 5 ore ha la sua soglia.**
+- Chi e quando: Il titolare, 2026-11-26. Il lavoro va concentrato sui preventivi, e per farlo oggi l'unico modo era fermare
+  lo smistatore disabilitando l'attività pianificata. Il limite settimanale non basta: la finestra di 5 ore si consumava
+  troppo in fretta.
+- Ogni card nuova sta in una Feature. `card crea` senza `-Feature` si rifiuta. Una card in New senza una Feature aperta
+  come padre lo smistatore non la fa partire (motivo `senzaFeature`, lo dice la vista). Le card senza Feature già oltre New
+  finiscono il loro giro. Una Feature senza card di chiusura (`card crea -Tipo Feature -Raggruppa`) serve solo a
+  raggruppare: le sue card vanno in `develop` una per una e possono stare in repo diversi. Con la card di chiusura resta
+  una funzionalità D52, in un'area sola.
+- La priorità è l'ordine del backlog delle Feature in Azure DevOps (`Microsoft.VSTS.Common.StackRank`), lo stesso che
+  cambia trascinando una riga del backlog. Non il campo Priority, che va da 1 a 4. Lo smistatore guarda le card nell'ordine
+  delle loro Feature (`Get-OrdineCard`), così un posto libero (sessioni, repo, Test) va alla card della Feature più in alto.
+  Le Feature mai ordinate vengono dopo, per id; dentro la stessa Feature le card vanno per id. Si leggono solo le Feature
+  delle aree della mappa: quelle di altri gruppi del progetto non si mostrano e non si riordinano.
+- Nella vista la sezione Funzionalità ha una scheda per ogni Feature aperta, in ordine di priorità. Una scheda si trascina
+  (POST `/ordine?id=&dopo=`): se tutte le Feature hanno un rank si scrive solo quella spostata, a metà fra le vicine;
+  altrimenti si rinumerano 1000, 2000, ... e si scrivono solo quelle che cambiano (`Get-RankRiordino`).
+- La pausa di una Feature è il tag `paused` (`tagPausa`), che vale anche su una card sola. Una card in pausa non lancia
+  sessioni e non si sposta: la sessione in corso finisce, poi la card resta ferma finché il tag c'è. Non tiene il posto
+  in sviluppo del suo repo; in Test sì, perché l'ambiente resta occupato. Non si riusa `on-hold`: toglierlo vuol dire "una
+  persona ha sbloccato la card" e azzera le passate (D42, D51). Ogni scheda della vista ha il pulsante pausa/riprendi
+  (POST `/pausa?id=&attiva=`). Se le Feature non si leggono il giro si ferma: senza, una Feature in pausa ripartirebbe.
+- Il sistema intero si mette in pausa dalla testata della vista (POST `/pausa-sistema?attivo=`, `pausaSistema` in
+  `impostazioni.json`). Lo smistatore gira ancora e chiude le sessioni che finiscono, ma non lancia niente e non sposta
+  card. Disabilitare l'attività pianificata lasciava le sessioni finite senza esito fino alla ripresa.
+- La finestra di 5 ore ha una soglia sua, `sogliaQuota5Ore` in `config/limiti.json` (partenza 60%). Oltre la soglia non
+  parte nessuna sessione nuova fino al reset della finestra (motivo `quota`, causa `cinqueOre`). Ignorare la riserva
+  settimanale non la salta. Dalla vista la si alza fino al reset della finestra (`soglia5Ore`, `fino5Ore` in
+  `soglia-quota.json`). Il supervisore non la segnala: è un freno voluto, che passa da solo a ogni reset.
+- La vista risponde fra un disegno e l'altro: mentre rilegge Azure DevOps (40-50 secondi) una richiesta può cadere e il
+  browser dice "Failed to fetch", anche se il comando era arrivato. I pulsanti ora riprovano da soli (5 volte, ogni 10 s).
+- Dove: `src/Decisioni.psm1` (`Get-FermoPriorita`, `Test-CardInPausa`, `Get-OrdineCard`, `Get-RankRiordino`,
+  `Get-Soglia5OreEffettiva`, `Get-BloccoQuota`), `src/Ado.psm1` (`Get-AdoFeatureAperte`, `Set-AdoRank`),
+  `src/Smistatore.ps1`, `src/Istantanea.ps1`, `src/Supervisore.ps1`, `src/Card.psm1`, `src/card.ps1`,
+  `src/Impostazioni.psm1`, `src/Vista.ps1`, `src/VistaServer.psm1`, `src/VistaHtml.psm1`, `config/stati.json`,
+  `config/limiti.json`.

@@ -1,0 +1,7 @@
+{
+  "comandoDocker": ["wsl", "-d", "Ubuntu-26.04", "--cd", "{cartella}", "--", "docker"],
+  "host": "localhost",
+  "portaBase": 21000,
+  "minutiCreazione": 30,
+  "minutiComandi": 3
+}

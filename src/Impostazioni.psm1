@@ -7,6 +7,7 @@ Import-Module (Join-Path $PSScriptRoot 'Stato.psm1') -Global
 # rispetta ATTREZZI_DATI). Cosi la copia della suite resta pulita e si aggiorna in fast-forward. Contiene:
 #   canale                    main o develop: da quale ramo la suite si aggiorna (assente: lo decide Get-CanaleAggiornamento)
 #   aggiornamentoAutomatico   vero/falso, predefinito vero
+#   pausaSistema              vero/falso, predefinito falso (D60): lo smistatore chiude le sessioni finite ma non lancia e non sposta niente
 #   limiti, supervisore       override delle chiavi di primo livello di config/limiti.json e config/supervisore.json
 # Qui solo lettura, scrittura e applicazione degli override: le regole di validazione restano a chi legge il file di config
 # (Get-Config, Get-ConfigSupervisore), che le applica al valore finale, override compresi.
@@ -39,6 +40,8 @@ function Get-Impostazioni([string]$CartellaDati = (Get-CartellaDati)) {
     if ($null -ne $canale -and "$canale" -notin $script:CanaliAmmessi) { throw "impostazioni.json: 'canale' deve essere $($script:CanaliAmmessi -join ' o '), non '$canale'" }
     $auto = Get-Campo $o 'aggiornamentoAutomatico'
     if ($null -ne $auto -and $auto -isnot [bool]) { throw "impostazioni.json: 'aggiornamentoAutomatico' deve essere vero o falso" }
+    $pausa = Get-Campo $o 'pausaSistema'
+    if ($null -ne $pausa -and $pausa -isnot [bool]) { throw "impostazioni.json: 'pausaSistema' deve essere vero o falso" }
     $sezioni = @{}
     foreach ($n in $script:SezioniOverride) {
         $v = Get-Campo $o $n
@@ -48,6 +51,7 @@ function Get-Impostazioni([string]$CartellaDati = (Get-CartellaDati)) {
     [pscustomobject]@{
         Canale = $(if ($null -ne $canale) { [string]$canale } else { $null })
         Automatico = $(if ($null -ne $auto) { [bool]$auto } else { $true })
+        Pausa = [bool]$pausa
         Limiti = $sezioni['limiti']; Supervisore = $sezioni['supervisore']
     }
 }

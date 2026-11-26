@@ -43,7 +43,12 @@ perché nessun criterio si verifica nell'ambiente di Test
 @'
 feat: titolo della PR
 '@ | pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 titolo-pr
+pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 descrizione-pr -File <file markdown>
 ```
+
+`descrizione-pr` scrive la descrizione della PR dal file (UTF-8, link alla card in testa conservato, al massimo 4000
+caratteri firma compresa); la scrive di norma `dev`, tu solo se serve correggerla. Se la PR non c'è ancora, il testo
+resta in un commento sulla card e lo smistatore lo mette nella PR quando la apre.
 
 Lo usi quando scrivi i criteri e nessuno di essi si verifica nell'ambiente di Test: per esempio una modifica a una
 pipeline o ai test, il cui effetto si vede nella CI e non nell'app. La card prende il tag `no-test-deploy` e dopo la
@@ -108,6 +113,9 @@ Il formato è una riga `=== <titolo>` per ogni task e sotto il suo testo, fino a
 del primo titolo, un task senza testo o nessun task fanno rifiutare tutto: non resta niente a metà.
 
 ## Il deploy in Test
+
+Se `leggi`, alla voce DEPLOY IN TEST, dice che la card si prova nell'ambiente Docker della card (D59), non c'è niente da
+scegliere: `deploy` non scrive niente su quel componente e non è un motivo per `senza-test`.
 
 Cosa portare nell'ambiente di Test lo decidi tu: conosci il recinto della card, e un componente aggiunto ieri al repo lo
 vedi leggendo la pipeline. Lo scegli con `deploy`, che è solo tuo:
@@ -232,7 +240,8 @@ Cosa non va, dove lo hai visto (file:riga, criterio violato) e il comportamento 
     difetto è reale in un collaudo respinto, `sposta daUnire` resta il tuo gesto (solo In Automated test o Human test).
   - Con la CI rossa (`ciRossa`) può capitare che la causa sia l'infrastruttura (un'immagine, un servizio, un tempo
     scaduto) e non il codice: non scrivere una correzione per quella. Scrivi con `commenta` la diagnosi e cosa
-    andrebbe guardato e chiudi `ESITO=bloccato`: lo smistatore mette la card in on-hold, per una persona, con il rimando al tuo commento.
+    andrebbe guardato e chiudi `ESITO=bloccato`, con le righe di "Quando serve una persona": lo smistatore mette la card
+    in on-hold, per una persona, con il rimando al tuo commento.
 
 ## Classificare i bivi
 
@@ -255,8 +264,8 @@ allegato. Cosa puoi provare e quando serve una persona lo dice la sezione succes
 
 - `ESITO=fatto`: hai sbloccato la card. Scrivi con `commenta` cosa hai fatto o deciso: dev riparte con il tuo commento
   come decisione. Se dev si blocca di nuovo subito dopo, la card si ferma per una persona senza ripassare da te.
-- `ESITO=bloccato`: serve una persona. Scrivi con `commenta` la diagnosi e cosa deve fare: lo smistatore mette la card
-  in on-hold e rimanda al tuo commento.
+- `ESITO=bloccato`: serve una persona. Scrivi con `commenta` le righe di "Quando serve una persona" e poi la diagnosi:
+  lo smistatore mette la card in on-hold e rimanda al tuo commento.
 - `ESITO=domande`: è una scelta di prodotto. Scrivi le domande con le ipotesi e porta la card in `daChiarire` con
   `sposta daChiarire`, come per un bivio.
 
@@ -277,12 +286,35 @@ persona avesse tolto l'on-hold. Puoi correggere un criterio, riscrivere un task,
   in un altro stato, la card va dalla persona senza un'altra passata finché una persona non toglie un on-hold: chiudi
   `fatto` solo se hai agito sulla causa.
 - `ESITO=bloccato`: serve una persona per un permesso, un ambiente, un segreto o una scelta di prodotto. Scrivi con
-  `commenta` la diagnosi e cosa deve fare la persona, in modo che non debba rileggere i log: lo smistatore ferma la card
-  con il motivo di prima e rimanda al tuo commento.
+  `commenta` le righe di "Quando serve una persona" e poi la diagnosi, in modo che la persona non debba rileggere i
+  log: lo smistatore ferma la card con il motivo di prima e rimanda al tuo commento.
 - `ESITO=domande`: è una scelta di prodotto. Scrivi le domande con le ipotesi in un commento. Se la card è in `nuova` o
   in `inSviluppo` portala in `daChiarire` con `sposta daChiarire`, come negli altri casi. Da ogni altro stato `sposta`
   non te lo permette: lascia la card dov'è, e lo smistatore la mette in on-hold con il motivo di prima e il rimando alle
   tue domande.
+
+## Quando serve una persona
+
+Ogni volta che chiudi `ESITO=bloccato` il commento e il testo finale cominciano con queste tre righe, prima della
+diagnosi:
+
+```
+Per il titolare: <il gesto>
+Perché: <perché quel gesto toglie la causa>
+Perché non gli agenti: <cosa manca a te, a dev e al supervisore per farlo da soli>
+```
+
+- Il gesto è quello che la persona fa prima di togliere l'on-hold, in ordine e con i nomi veri: il numero della PR, il
+  nome della pipeline o della validazione, il segreto, l'ambiente. Non scrivere "togli l'on-hold" e non dire di spostare
+  la card: quel passo lo aggiunge lo smistatore, con quello che succede dopo.
+- "Perché non gli agenti" nomina il limite vero: un permesso che non hai (non puoi rilanciare una build né un deploy),
+  una regola (D38: `dev` rilancia una volta sola; il supervisore non rilancia le validazioni delle PR delle card e non
+  tocca i deploy), un accesso o una scelta di prodotto.
+- Una riga ciascuna, senza la diagnosi: la diagnosi viene dopo.
+
+Lo smistatore legge queste righe dal tuo testo finale e le riporta nel commento di on-hold, nella voce del supervisore
+su Telegram e nella vista, anche sulle card che aspettano questa (D57). Senza la riga "Per il titolare:" mette un gesto
+generico, e la persona deve cercarlo nella tua diagnosi.
 
 ## Il secondo parere
 

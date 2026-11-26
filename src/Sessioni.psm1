@@ -8,6 +8,7 @@ Import-Module (Join-Path $PSScriptRoot 'Comune.psm1') -Global
 Import-Module (Join-Path $PSScriptRoot 'Ado.psm1') -Global
 Import-Module (Join-Path $PSScriptRoot 'Memoria.psm1') -Global
 Import-Module (Join-Path $PSScriptRoot 'MemoriaRepo.psm1') -Global
+Import-Module (Join-Path $PSScriptRoot 'Collaudo.psm1') -Global
 
 $script:Eseguibile = $null
 $script:ArgomentiIniziali = @()
@@ -169,14 +170,7 @@ function Start-SessioneRuolo {
     # puo elencare l'ambiente, e senza i nomi non saprebbe quali usare.
     $credCollaudo = @()
     if ($Ruolo -eq 'collaudatore') {
-        if ($FileCollaudo -and (Test-Path -LiteralPath $FileCollaudo)) {
-            # il messaggio di ConvertFrom-Json citerebbe il contenuto: si riporta solo che il file non va
-            $cred = try { Get-Content -LiteralPath $FileCollaudo -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop }
-            catch { throw "Il file delle credenziali di collaudo $FileCollaudo non e un JSON valido" }
-            foreach ($c in @($cred.PSObject.Properties | Where-Object { $null -eq $_.Value -or $_.Value -is [string] -or $_.Value -is [ValueType] })) {
-                $credCollaudo += [pscustomobject]@{ Nome = 'COLLAUDO_' + ($c.Name.ToUpperInvariant() -replace '[^A-Z0-9_]', '_'); Valore = [string]$c.Value }
-            }
-        }
+        $credCollaudo = @(Read-CredenzialiCollaudo $FileCollaudo)
         $Messaggio += if ($credCollaudo.Count -gt 0) {
             "`nCredenziali di prova nell'ambiente: " + ((@($credCollaudo.Nome) | Sort-Object) -join ', ') + '.'
         } else { "`nCredenziali di prova: nessuna credenziale di prova per questo repo." }
@@ -483,16 +477,8 @@ function Get-EventiSessione {
 function Test-SessioneViva {
     [CmdletBinding()]
     param([int]$ProcessoId, $Avvio)   # una stringa ISO o un DateTime: lo stato rilegge le date come DateTime
-    if ($ProcessoId -le 0 -or "$Avvio" -eq '') { return $false }
-    $atteso = ConvertTo-DataUtc $Avvio
-    if ($null -eq $atteso) { return $false }
-    $p = Get-Process -Id $ProcessoId -ErrorAction SilentlyContinue
-    if (-not $p) { return $false }
-    try {
-        if ($p.HasExited) { return $false }
-        if ([math]::Abs(($p.StartTime.ToUniversalTime() - $atteso).TotalSeconds) -gt 2) { return $false }
-        [string]$p.Path -ieq [string](Get-EseguibileClaude)
-    }
+    if (-not (Test-ProcessoAvviato -ProcessoId $ProcessoId -Avvio $Avvio)) { return $false }
+    try { [string](Get-Process -Id $ProcessoId -ErrorAction Stop).Path -ieq [string](Get-EseguibileClaude) }
     catch { $false }   # processo scomparso nel frattempo, o non leggibile: non e il nostro
 }
 

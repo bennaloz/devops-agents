@@ -15,24 +15,37 @@ function Add-AInTabella($Tabella, [string]$Chiave, $Id) {
     if ($Tabella[$Chiave] -notcontains [int]$Id) { $Tabella[$Chiave].Add([int]$Id) }
 }
 
+# Una card che entra (o e entrata) in uno stato di Test, nelle tabelle dei limiti: per componente (cardInTestPerComponente) e, se il
+# componente ha l'ambiente di collaudo (D59), nell'elenco degli ambienti (ambientiCollaudo). Una sola funzione per il giro, che le conta
+# all'inizio, e per lo smistatore, che le aggiorna quando sposta una card.
+function Add-CardAlContestoTest($Ctx, $Voce, $Id) {
+    Add-AInTabella $Ctx.InTestPerComponente ([string]$Voce.componente) $Id
+    if (Test-AmbienteCollaudo $Voce) {
+        if ($Ctx.AmbientiCollaudo -notcontains [int]$Id) { $Ctx.AmbientiCollaudo.Add([int]$Id) }
+    }
+}
+
 # Le tabelle dei limiti per repo e per componente, e la quota (quota.json), su tutte le card attive (anche degli altri: le risorse sono comuni).
-function New-ContestoGiro($Cfg, $Attive, [string]$IdUtente, [string]$PercorsoQuota = (Join-Path (Get-CartellaDati) 'quota.json'), [string]$PercorsoSoglia = (Get-PercorsoSogliaQuotaPredefinito)) {
+function New-ContestoGiro($Cfg, $Attive, [string]$IdUtente, [string]$PercorsoQuota = (Join-Path (Get-CartellaDati) 'quota.json'), [string]$PercorsoSoglia = (Get-PercorsoSogliaQuotaPredefinito), $Feature = @()) {
     $ctx = @{
         Stati = $Cfg.Stati; Limiti = $Cfg.Limiti; SessioniAttive = 0; ConSessione = @(); Titolare = $IdUtente; Adesso = (Get-Adesso).ToString('o')
-        InSviluppoPerRepo = @{}; InTestPerComponente = @{}
+        InSviluppoPerRepo = @{}; InTestPerComponente = @{}; AmbientiCollaudo = [System.Collections.Generic.List[int]]::new()
         # D51: l'ultima lettura della quota e la pausa per il limite, uguali per tutte le card (la quota e una sola)
         Quota = (Get-Quota -Percorso $PercorsoQuota)
         # l'override della soglia dalla vista, valido fino al reset: Get-BloccoQuota lo applica (e lo ignora se scaduto)
         OverrideQuota = (Get-SogliaQuota -Percorso $PercorsoSoglia)
         # D52: i padri delle card, letti una volta per giro per padre (id padre -> @{ Feature; Figli; Ramo; ErroreRamo } | @{ NonFeature } | @{ Errore })
         Funzionalita = @{}
+        # D60: le Feature aperte (id -> @{ Rank; Pausa; Titolo }), per la pausa e per l'ordine delle card
+        Feature = (Get-MappaFeature $Feature $Cfg.Stati)
     }
     foreach ($c in @($Attive)) {
         $v = Find-VoceMappa -Mappa $Cfg.Mappa -Area $c.Area
         if (-not $v) { continue }
         $k = Get-ChiaveStato $Cfg.Stati $c.Stato
-        if ($k -eq 'inSviluppo') { Add-AInTabella $ctx.InSviluppoPerRepo $v.repo $c.Id }
-        if ($k -in (Get-StatiInTest)) { Add-AInTabella $ctx.InTestPerComponente $v.componente $c.Id }
+        # D60: una card in pausa non tiene il posto in sviluppo del repo (in Test si: l'ambiente resta occupato dal suo deploy)
+        if ($k -eq 'inSviluppo' -and -not (Test-CardInPausa $c $ctx)) { Add-AInTabella $ctx.InSviluppoPerRepo $v.repo $c.Id }
+        if ($k -in (Get-StatiInTest)) { Add-CardAlContestoTest $ctx $v $c.Id }
     }
     $ctx
 }
@@ -54,6 +67,8 @@ function Get-PredecessoriCard($CardAdo, $Stato) {
             Id = $_.Id; Stato = $_.Stato; Tag = @(Get-Campo $_ 'Tag')
             prId = if ($locale) { $locale['prId'] } else { $null }
             cartella = if ($locale) { $locale['cartella'] } else { $null }
+            # D57: cosa serve a una persona se il predecessore e in on-hold (Get-GestoPredecessore)
+            IndicazioniAttesa = if ($locale) { $locale['indicazioniAttesa'] } else { $null }
             # D52: il padre del predecessore (se e la stessa Feature della card che aspetta lo dice chi decide)
             PadreId = Get-Campo $_ 'PadreId'
         }
@@ -66,7 +81,7 @@ function Get-PredecessoriCard($CardAdo, $Stato) {
 # pipeline sul ramo della card, letti solo se c'e una scelta da verificare e un ramo; un elenco letto puo essere vuoto.
 # ErroreAmmessi: se lo YAML o la definizione non si leggono la card non salta il giro, Decisioni ne fa un'attesa.
 function Get-DeployCard($CardAdo, $Voce, $Sc, [string]$Chiave, $Tutti, $Storia, $Run) {
-    if ($Chiave -ne 'inDeployTest' -or -not (Get-Campo $Voce 'pipelineDeploy')) { return $null }
+    if ($Chiave -ne 'inDeployTest' -or -not (Get-Campo $Voce 'pipelineDeploy') -or (Test-AmbienteCollaudo $Voce)) { return $null }
     if (-not (Test-DeployDaLeggere -Card $CardAdo -Storia $Storia -StatoCard $Sc -Run $Run)) { return $null }
     $deploy = @{ Scelta = @(Get-SceltaDeploy $Tutti); AmmessiLetti = $false; Ammessi = @(); ErroreAmmessi = $null }
     if ($deploy.Scelta.Count -gt 0 -and $Sc['ramo']) {
@@ -180,7 +195,12 @@ function Get-IstantaneaCard($Cfg, $CardAdo, $Voce, $Sc, $Stato, [string]$Percors
     $task = if ($conTask) { @(Get-AdoTaskFigli -CardId $CardAdo.Id) } else { @() }
     # L'ordine fra le card conta solo prima che parta il lavoro: Get-Azioni decide se la card puo partire.
     $predecessori = if ($chiave -in 'nuova', 'pronto') { @(Get-PredecessoriCard $CardAdo $Stato) } else { @() }
-    if ($Sc['runId']) { $run = Get-AdoRun -Progetto $Voce.progettoAdo -RunId ([int]$Sc['runId']) }
+    if ($Sc['collaudoProgetto']) {
+        # D59: l'ambiente di collaudo al posto del run di deploy: l'esito ha la stessa forma (Stato, Esito) e in piu il Log
+        $dati = if (Get-Variable CartellaDati -ErrorAction SilentlyContinue) { $CartellaDati } else { Get-CartellaDati }
+        $run = Get-EsitoAmbienteCollaudo -Card ([int]$CardAdo.Id) -CartellaDati $dati -ProcessoId ([int]$Sc['collaudoPid']) -Avvio $Sc['collaudoAvvio']
+    }
+    elseif ($Sc['runId']) { $run = Get-AdoRun -Progetto $Voce.progettoAdo -RunId ([int]$Sc['runId']) }
     $erroriBuild = if ($eChiusura) { Get-ErroriBuildChiusura $Voce $chiave $pr $run $Sc } else { $null }
     # i commenti si scaricano una volta: il deploy li vuole tutti, le decisioni solo quelli dopo ultimoCommento
     $tutti = @(Get-AdoCommenti -Id $CardAdo.Id)
@@ -250,12 +270,12 @@ function New-FunzionalitaVista($Funzionalita) {
 # (src/Supervisore.ps1): una regola sola. Se la lettura fallisce l'errore sta nella riga (Errore) e il resto e vuoto.
 # $Collegamenti, se c'e, riceve i predecessori della card (le catene della vista).
 function Get-RigaCoda($Cfg, $c, $voce, $sc, $Stato, [string]$PercorsoStato, $ctx, $Collegamenti = $null) {
-    $riga = [ordered]@{ Id = [int]$c.Id; Titolo = [string]$c.Titolo; Stato = [string]$c.Stato; Azioni = 0; Ruolo = $null; Motivo = $null; Gesto = $null; Attivita = $null; Domanda = $null; Errore = $null; Avanzamento = $null; Predecessori = @(); Pr = $null; TogliAttesa = $false; InStatoDa = $null; Funzionalita = $null; AspettaFunzionalita = $false }
+    $riga = [ordered]@{ Id = [int]$c.Id; Titolo = [string]$c.Titolo; Stato = [string]$c.Stato; Azioni = 0; Ruolo = $null; Motivo = $null; Gesto = $null; Attivita = $null; Domanda = $null; Errore = $null; Avanzamento = $null; Predecessori = @(); Pr = $null; TogliAttesa = $false; InStatoDa = $null; Funzionalita = $null; AspettaFunzionalita = $false; Indicazioni = $null; CosaFare = @() }
     try {
         $snap = Get-IstantaneaCard $Cfg $c $voce $sc $Stato $PercorsoStato $ctx
         $d = Get-Decisione -Istantanea $snap -Contesto $ctx
-        # il mentore non muove la card: non e un lavoro pronto per il giro
-        $riga.Azioni = @(@($d.Azioni) | Where-Object { $_.Tipo -ne 'LanciaMentore' }).Count
+        # il mentore e il buttare l'ambiente (D59) non muovono la card: non sono un lavoro pronto per il giro
+        $riga.Azioni = @(@($d.Azioni) | Where-Object { $_.Tipo -notin 'LanciaMentore', 'ButtaAmbienteCollaudo' }).Count
         $riga.Motivo = $d.Motivo
         # un on-hold che lo smistatore sta per togliere non e una cosa per una persona (D51)
         $riga.TogliAttesa = @(@($d.Azioni) | Where-Object { $_.Tipo -eq 'TogliAttesa' }).Count -gt 0
@@ -268,6 +288,12 @@ function Get-RigaCoda($Cfg, $c, $voce, $sc, $Stato, [string]$PercorsoStato, $ctx
             try { $riga.Domanda = Format-DomandaOperatore (Get-UltimoCommentoDiRuolo @(Get-AdoCommenti -Id $c.Id) 'responsabile') } catch { }
         }
         $riga.Avanzamento = Get-AvanzamentoTask $Cfg $snap.Task
+        # D57: la sezione "Cosa fare" scritta da Set-InAttesa, solo per la card che e in on-hold adesso. Una card messa in
+        # on-hold prima di D57 non ha indicazioniAttesa: CosaFare resta vuoto e vista e supervisore fanno come prima.
+        if (@($c.Tag) -contains [string]$Cfg.Stati.tagAttesa) {
+            $riga.Indicazioni = Get-Campo $sc 'indicazioniAttesa'
+            $riga.CosaFare = @(Get-RigheCosaFare $riga.Indicazioni (Get-Campo $sc 'inAttesaPer'))
+        }
         $riga.Predecessori = @($snap.Predecessori)
         $riga.Pr = New-PrVista $snap.Pr $voce
         # D52: la funzionalita della card (null se isolata). AspettaFunzionalita: una card In feature branch ha il lavoro nel ramo e segue la

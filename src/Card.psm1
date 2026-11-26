@@ -7,6 +7,8 @@ foreach ($m in 'Comune', 'Config', 'Ado', 'Stato') {
 }
 
 $script:MaxCommenti = 10
+# D59: cosa dicono `leggi` e `deploy` per un componente con l'ambiente di collaudo
+$script:TestoSenzaDeployCollaudo = 'si prova nell''ambiente Docker della card (D59): nessun parametro da scegliere, non e un motivo per senza-test'
 
 function Get-RuoloConfig($Config, $Ruolo) {
     $r = $Config.Ruoli.PSObject.Properties[$Ruolo]
@@ -63,7 +65,10 @@ function Read-Card {
     $righe.Add([string]$card.Criteri)
     $righe.Add('')
     $righe.Add('DEPLOY IN TEST')
-    $righe.Add($(if ($deploy.Count -gt 0) { $deploy -join ', ' } else { 'nessuna scelta del responsabile (card.ps1 deploy)' }))
+    # D59: un componente con l'ambiente di collaudo non ha un deploy in Test da scegliere
+    $voceCard = try { Find-VoceMappa -Mappa (Get-Config).Mappa -Area $card.Area } catch { $null }
+    $righe.Add($(if (Test-AmbienteCollaudo $voceCard) { $script:TestoSenzaDeployCollaudo }
+        elseif ($deploy.Count -gt 0) { $deploy -join ', ' } else { 'nessuna scelta del responsabile (card.ps1 deploy)' }))
     $righe.Add('')
     if ($task.Count -gt 0) {
         $righe.Add("TASK ($($task.Count), nell'ordine di esecuzione)")
@@ -317,6 +322,7 @@ function Set-CardDeploy {
     $config = Get-Config
     $card = Get-AdoCard -Id $Id
     $voce = Get-VoceMappa -Area $card.Area -Mappa $config.Mappa
+    if (Test-AmbienteCollaudo $voce) { return $script:TestoSenzaDeployCollaudo }
     if (-not (Get-Campo $voce 'pipelineDeploy')) {
         throw "il componente '$($voce.componente)' non ha un deploy in Test (pipelineDeploy nella mappa): se nessun criterio si prova in Test usa senza-test"
     }
@@ -354,20 +360,57 @@ function Set-CardTitoloPr {
     "Titolo della PR $($pr.Id) cambiato in '$titolo'. Validazioni rilanciate: $n."
 }
 
+# La descrizione della PR della card: il testo del file va dopo la riga con il link alla card che lo smistatore ha messo
+# in testa, che resta. Il tetto di Azure DevOps (firma compresa) si controlla qui, prima di scrivere: un testo troppo lungo
+# si rifiuta, non si tronca. Il file si legge in UTF-8 e la scrittura passa dalla REST, non da az (che perde gli accenti).
+function Set-CardDescrizionePr {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$Id,
+        [Parameter(Mandatory)][string]$Ruolo,
+        [Parameter(Mandatory)][string]$File
+    )
+    if ($Ruolo -notin 'dev', 'responsabile') { throw "Il ruolo '$Ruolo' non puo scrivere la descrizione della PR: solo dev e responsabile" }
+    if (-not (Test-Path -LiteralPath $File)) { throw "File non trovato: '$File'" }
+    $testo = (Get-Content -LiteralPath $File -Raw -Encoding UTF8).Trim()
+    if (-not $testo) { throw 'il file della descrizione e vuoto' }
+    $pr = Get-AdoPrCollegata -CardId $Id
+    if (-not $pr -or $pr.Stato -ne 'active') {
+        # Niente PR ancora: il testo resta sulla card e lo smistatore lo mette nella PR quando la apre. Il tetto si controlla
+        # gia qui, con la riga del link che avra la PR, perche un testo che poi non ci sta si scoprirebbe solo all'apertura.
+        $tettoSenzaLink = (Get-AdoLimiteTestoPr) - ("[Card $Id](" + (Get-AdoUrlCard -Id $Id) + ")").Length - 2
+        if ($testo.Length -gt $tettoSenzaLink) {
+            throw "la descrizione e di $($testo.Length) caratteri: con il link alla card ne restano al massimo $tettoSenzaLink per il testo. Accorciala"
+        }
+        [void](Add-CardCommento -Id $Id -Ruolo $Ruolo -Testo (ConvertTo-TestoCommentoDescrizionePr $testo))
+        return "La card $Id non ha ancora una PR: descrizione salvata sulla card ($($testo.Length) caratteri), la metto nella PR quando lo smistatore la apre."
+    }
+    $attuale = Get-AdoDescrizionePr -Progetto $pr.Progetto -Repo $pr.Repo -Id $pr.Id
+    $testa = ([string]$attuale -split "`r?`n")[0].Trim()
+    if ($testa -notmatch "^\[Card $Id\]\(") { $testa = "[Card $Id]($(Get-AdoUrlCard -Id $Id))" }
+    $descrizione = "$testa`n`n$testo"
+    $tetto = Get-AdoLimiteTestoPr
+    if ($descrizione.Length -gt $tetto) {
+        throw "la descrizione e di $($descrizione.Length) caratteri, compreso il link alla card: Azure DevOps ne ammette al massimo $tetto. Accorciala"
+    }
+    Set-AdoDescrizionePr -Progetto $pr.Progetto -Repo $pr.Repo -Id $pr.Id -Descrizione $descrizione
+    "Descrizione della PR $($pr.Id) scritta ($($descrizione.Length) caratteri su $tetto)."
+}
+
 # Legge la Feature a cui si vuole aggiungere una card e rifiuta quello che D52 non ammette: un work item che non e una
 # Feature, un'area diversa, una Feature Removed o gia in develop (Resolved o Closed), una Feature senza card di chiusura (e una Feature
 # della spec, sezione 18: la sua card si crea senza -Feature).
 function Assert-FeatureAccetta($Config, [int]$Feature, [string]$Area) {
     $f = Get-AdoFeature -Id $Feature
     if ($f.Tipo -ne 'Feature') { throw "il work item $Feature non e una Feature (e: $($f.Tipo))" }
-    if ($f.Area -ine $Area) { throw "l'area '$Area' e diversa da quella della Feature $Feature ('$($f.Area)'): una funzionalita sta in un'area sola" }
     if ($f.Stato -ieq $Config.Stati.featureRimossa) { throw "la Feature $Feature e $($f.Stato): non si aggiungono card a una Feature rimossa" }
     if ($f.Stato -ieq $Config.Stati.featureRisolta -or $f.Stato -ieq $Config.Stati.featureChiusa) {
-        throw "la Feature $Feature e $($f.Stato): la funzionalita e gia in develop, il lavoro nuovo e una funzionalita nuova o una card isolata"
+        throw "la Feature $Feature e $($f.Stato): la funzionalita e gia in develop, il lavoro nuovo va in una Feature nuova"
     }
-    if ($null -eq (Get-ComposizioneFunzionalita $Config.Stati @(Get-AdoFigliFeature -FigliIds @($f.FigliIds)))) {
-        throw "la Feature $Feature non ha una card di chiusura: non e una funzionalita D52 (e una Feature della spec, sezione 18). Crea la card senza -Feature"
-    }
+    # D60: una Feature senza card di chiusura raggruppa le card per priorita e pausa, e le sue card vanno in develop una per una, come le
+    # isolate: possono stare in aree (repo) diverse. Con la card di chiusura e una funzionalita D52 e sta in un'area sola.
+    $d52 = $null -ne (Get-ComposizioneFunzionalita $Config.Stati @(Get-AdoFigliFeature -FigliIds @($f.FigliIds)))
+    if ($d52 -and $f.Area -ine $Area) { throw "l'area '$Area' e diversa da quella della Feature $Feature ('$($f.Area)'): una funzionalita con la card di chiusura sta in un'area sola" }
 }
 
 # Una card appena nata deve essere in bozza: solo allora le si da il tag agenti (e gli altri), cioe il via agli agenti.
@@ -397,6 +440,8 @@ function New-Card {
         [switch]$ProvaUmana,
         # D52, con -Tipo Feature: la funzionalita e una correzione (tag bug sulla Feature, ramo bugfix/...).
         [switch]$Bug,
+        # D60, con -Tipo Feature: la Feature raggruppa soltanto (priorita e pausa), senza card di chiusura: le sue card vanno in develop una per una.
+        [switch]$Raggruppa,
         # D52: l'id della Feature di cui la card e una figlia.
         [int]$Feature
     )
@@ -412,6 +457,8 @@ function New-Card {
     }
     if ($Tipo -notin @('User Story', 'Bug', 'Feature')) { throw "Tipo non valido: '$Tipo' (User Story | Bug | Feature)" }
     if ($Bug -and -not $creaFeature) { throw '-Bug vale solo con -Tipo Feature: segna la funzionalita come correzione' }
+    if ($Raggruppa -and -not $creaFeature) { throw '-Raggruppa vale solo con -Tipo Feature' }
+    if ($Raggruppa -and $Bug) { throw '-Raggruppa e -Bug non vanno insieme: -Bug riguarda il ramo della funzionalita, che una Feature che raggruppa non ha' }
     if ($figlia -and $Feature -le 0) { throw "-Feature vuole l'id di una Feature: '$Feature'" }
     if ($creaFeature) {
         if ($figlia) { throw 'una Feature non ha una Feature padre: -Feature non vale con -Tipo Feature' }
@@ -436,6 +483,8 @@ function New-Card {
     }
 
     [void](Get-VoceMappa -Area $Area -Mappa $config.Mappa)
+    # D60: ogni card sta in una funzionalita. Una card senza Feature lo smistatore non la fa partire da New.
+    if (-not $creaFeature -and -not $figlia) { throw "ogni card sta in una Feature: serve -Feature <id>. Se la Feature non c'e, creala prima: -Tipo Feature -Raggruppa per raggruppare card che vanno in develop una per una, -Tipo Feature per una funzionalita D52 da provare intera" }
     if ($figlia) { Assert-FeatureAccetta $config $Feature $Area }
 
     $descrizione = "## Descrizione`n$($testo['Descrizione'])`n`n## Recinto`n$($testo['Recinto'])`n`n## Riferimenti`n$($testo['Riferimenti'])"
@@ -451,6 +500,7 @@ function New-Card {
         # La Feature non si fa avanzare da uno smistatore: niente tag agenti. Il tag bug (con -Bug) c'e fin dalla nascita.
         $tagFeature = @(if ($Bug) { $config.Stati.tagBugFeature })
         $f = New-AdoCard -Tipo 'Feature' -Titolo $Titolo -Area $Area -Descrizione $descrizione -AssegnataA $io.Email -Tag $tagFeature
+        if ($Raggruppa) { return [pscustomobject]@{ Id = $f.Id; Chiusura = $null } }
         # La card di chiusura: figlia della Feature, senza codice suo, con i criteri della funzionalita intera (la Feature non ha il campo).
         $chiusura = $null
         try {
@@ -528,4 +578,4 @@ function New-CardAllineaDevelop {
     New-BugDellaFunzionalita $Config $Feature "Allinea $Ramo a develop" $descrizione "la PR $Ramo → develop non ha conflitti" $AssegnataA `
         @($Config.Stati.tagAgenti, $Config.Stati.tagAllinea) 'pronto' $DopoNascita
 }
-Export-ModuleMember -Function Add-CardCorrezione, New-CardCorrezioneFunzionalita, New-CardAllineaDevelop, Set-CardDeploy, Set-CardTitoloPr, Read-Card, Add-CardCommento, Set-CardCriteri, Set-CardSenzaTest, Set-CardProvaUmana, Move-Card, New-Card, New-CardTask, Close-CardTask
+Export-ModuleMember -Function Add-CardCorrezione, New-CardCorrezioneFunzionalita, New-CardAllineaDevelop, Set-CardDeploy, Set-CardTitoloPr, Set-CardDescrizionePr, Read-Card, Add-CardCommento, Set-CardCriteri, Set-CardSenzaTest, Set-CardProvaUmana, Move-Card, New-Card, New-CardTask, Close-CardTask

@@ -859,6 +859,40 @@ function Get-AdoFigliFeature {
     } | Sort-Object Id)
 }
 
+# D60: il campo dell'ordine del backlog (lo stesso che Azure DevOps cambia quando si trascina una riga del backlog o una card dentro una colonna).
+$script:CampoRank = 'Microsoft.VSTS.Common.StackRank'
+
+# D60: le Feature aperte (non Closed, non Removed) nelle aree della mappa, con Id, Titolo, Stato, Tag, Area e Rank (null se mai ordinata).
+# Solo le aree della mappa: le Feature di altri gruppi del progetto non si mostrano e non si riordinano. Letture a lotti di 200 (il massimo di ADO).
+function Get-AdoFeatureAperte {
+    [CmdletBinding()]
+    param()
+    $s = Get-AdoStati
+    $progetto = Get-AdoProgettoBoard
+    $mappa = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'config/mappa.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $aree = @($mappa.aree) | ForEach-Object { "[System.AreaPath] UNDER '$($_.area -replace "'", "''")'" }
+    $q = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '$progetto' AND [System.WorkItemType] = '$script:TipoFeature' " +
+         "AND [System.State] <> '$($s.featureChiusa)' AND [System.State] <> '$($s.featureRimossa)' AND ($(@($aree) -join ' OR ')) ORDER BY [System.Id]"
+    $r = Invoke-Ado -Metodo Post -Url "$script:Org/$([uri]::EscapeDataString($progetto))/_apis/wit/wiql?api-version=7.1" -Corpo @{ query = $q }
+    $ids = @(@($r.workItems) | Where-Object { $_ } | ForEach-Object { [int]$_.id })
+    $letti = @(for ($i = 0; $i -lt $ids.Count; $i += 200) { Get-AdoLotto @($ids[$i..([math]::Min($i + 199, $ids.Count - 1))]) -Omit })
+    @($letti | ForEach-Object {
+        $rank = Get-CampoAdo $_.fields $script:CampoRank
+        [pscustomobject]@{
+            Id = [int]$_.id; Titolo = (Get-CampoAdo $_.fields 'System.Title'); Stato = (Get-CampoAdo $_.fields 'System.State')
+            Tag = @(ConvertTo-ElencoTag (Get-CampoAdo $_.fields 'System.Tags')); Area = (Get-CampoAdo $_.fields 'System.AreaPath')
+            Rank = $(if ($null -ne $rank -and "$rank" -ne '') { [double]$rank } else { $null })
+        }
+    })
+}
+
+# D60: scrive l'ordine del backlog di un work item.
+function Set-AdoRank {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$Id, [Parameter(Mandatory)][double]$Rank)
+    [void](Set-AdoCard -Id $Id -Campi @{ $script:CampoRank = $Rank })
+}
+
 # Lo stato di una Feature: lo scrive come quello di una card.
 function Set-AdoStatoFeature {
     [CmdletBinding()]
@@ -1281,4 +1315,4 @@ function Get-AdoBuildPipeline {
 
 Export-ModuleMember -Function Get-SorgenteRepo, Find-RepoDaGitHub, Add-AdoLinkCard, Get-AdoMotivoFallimento, Start-AdoRilancioRun, Get-AdoUltimoRun, Get-AdoAgentiPool, Get-AdoBuildPipeline, Get-AdoLimiteTestoPr, Set-AdoTitoloPr, Get-AdoDescrizionePr, Set-AdoDescrizionePr, Start-AdoRivalutazione, Get-AdoPrCollegata, Get-AdoErroriBuild, Get-AdoCampiConsumi, Get-AdoUrlCard, New-AdoCard, Get-AdoCardAttive, Get-AdoCard, Set-AdoCard, Get-AdoStoriaStato, Get-AdoCommenti,
     Add-AdoCommento, Get-AdoPr, Get-AdoPrDelRamo, New-AdoPr, Complete-AdoPr, Start-AdoDeployTest, Get-AdoParametriDeploy, Get-AdoRamoCard, Get-AdoRun, Get-AdoUrlBuild, Get-AdoUrlPr, Get-AdoUtenteCorrente, Get-AdoUrlOrganizzazione,
-    New-AdoTask, Get-AdoTaskFigli, Get-AdoCardPredecessori, Set-AdoTaskStato, Get-AdoFeature, Get-AdoFigliFeature, Set-AdoStatoFeature
+    New-AdoTask, Get-AdoTaskFigli, Get-AdoCardPredecessori, Set-AdoTaskStato, Get-AdoFeature, Get-AdoFigliFeature, Set-AdoStatoFeature, Get-AdoFeatureAperte, Set-AdoRank

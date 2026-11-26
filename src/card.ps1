@@ -6,6 +6,8 @@
 #   <testo su stdin> | card.ps1 criteri         l'interprete dei comandi lo altererebbe: $, backtick, trattino iniziale)
 #   <task su stdin> | card.ps1 crea-task      (solo responsabile: righe '=== <titolo>' e sotto il testo del task, in ordine)
 #   <titolo su stdin> | card.ps1 titolo-pr     (dev e responsabile: rinomina la PR della card e ne rilancia la validazione)
+#   card.ps1 descrizione-pr -File <markdown>   (dev e responsabile: scrive la descrizione della PR della card dal file, UTF-8, al massimo
+#                                              4000 caratteri firma compresa; il link alla card in testa resta)
 #   <testo su stdin> | card.ps1 deploy         (solo responsabile: i parametri deploy* del deploy in Test sulla prima riga,
 #                                              il perche sotto; finiscono in un commento sulla card, vale l'ultimo)
 #   <testo su stdin> | card.ps1 correzione    (solo responsabile, solo sulla card di chiusura di una funzionalita D52: la prima riga e la
@@ -23,8 +25,10 @@
 #       -Tipo Feature [-Bug]: crea la Feature della funzionalita e la sua card di chiusura (User Story figlia, tag
 #           collaudo-funzionalita e agents, Draft, titolo "Collaudo funzionalita: <titolo>", criteri dal file). -Bug segna la
 #           funzionalita come correzione (tag bug sulla Feature). Non vale con -Feature, -Dopo, -SenzaTest, -ProvaUmana.
-#       -Feature <id>: crea la card come figlia della Feature. Si rifiuta se l'area e diversa da quella della Feature, se la
-#           Feature e Resolved o Closed, o se non ha una card di chiusura (allora la card si crea senza -Feature).
+#       -Tipo Feature -Raggruppa (D60): crea solo la Feature, senza card di chiusura: raggruppa card per priorita e pausa, e le
+#           sue card vanno in develop una per una.
+#       -Feature <id>: crea la card come figlia della Feature (obbligatorio per User Story e Bug, D60). Si rifiuta se la Feature
+#           e Resolved, Closed o Removed, e, per una funzionalita D52 (con card di chiusura), se l'area e diversa.
 param(
     [Parameter(Position = 0)][string]$Comando,
     [Parameter(Position = 1)][string]$Argomento,
@@ -34,6 +38,7 @@ param(
     [switch]$SenzaTest,
     [switch]$ProvaUmana,
     [switch]$Bug,
+    [switch]$Raggruppa,
     [int]$Feature
 )
 $ErrorActionPreference = 'Stop'
@@ -50,6 +55,7 @@ if ($Comando -eq 'crea') {
         if ($SenzaTest) { $opzioni.SenzaTest = $true }
         if ($ProvaUmana) { $opzioni.ProvaUmana = $true }
         if ($Bug) { $opzioni.Bug = $true }
+        if ($Raggruppa) { $opzioni.Raggruppa = $true }
         if ($PSBoundParameters.ContainsKey('Feature')) { $opzioni.Feature = $Feature }
         $c = New-Card -Tipo $Tipo -Titolo $Titolo -Area $Area -File $File @opzioni
         if ($Tipo -eq 'Feature') { "Feature $($c.Id) creata: $(Get-AdoUrlCard -Id $c.Id). Card di chiusura $($c.Chiusura.Id): $(Get-AdoUrlCard -Id $c.Chiusura.Id)" }
@@ -127,6 +133,10 @@ try {
             $testo = ([Console]::In.ReadToEnd()).Trim()
             Set-CardTitoloPr -Id $id -Ruolo $ruolo -Titolo $testo
         }
+        'descrizione-pr' {
+            if (-not $PSBoundParameters.ContainsKey('File')) { throw 'manca -File con la descrizione in markdown' }
+            Set-CardDescrizionePr -Id $id -Ruolo $ruolo -File $File
+        }
         'deploy' {
             $testo = ([Console]::In.ReadToEnd()).TrimEnd("`r", "`n")
             Set-CardDeploy -Id $id -Ruolo $ruolo -Testo $testo
@@ -135,7 +145,7 @@ try {
             $testo = ([Console]::In.ReadToEnd()).TrimEnd("`r", "`n")
             Add-CardCorrezione -Id $id -Ruolo $ruolo -Testo $testo
         }
-        default { throw "comando sconosciuto: '$Comando' (leggi | commenta | criteri | sposta | crea-task | chiudi-task | senza-test | prova-umana | titolo-pr | deploy | correzione)" }
+        default { throw "comando sconosciuto: '$Comando' (leggi | commenta | criteri | sposta | crea-task | chiudi-task | senza-test | prova-umana | titolo-pr | descrizione-pr | deploy | correzione)" }
     }
 }
 catch {

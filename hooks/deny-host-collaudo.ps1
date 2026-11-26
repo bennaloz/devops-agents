@@ -1,6 +1,7 @@
 # Hook PreToolUse su Bash, PowerShell e WebFetch: nelle sessioni del collaudatore rifiuta un comando che nomina un host
 # diverso da quelli ammessi. Ammessi: gli host degli urlTest di config/mappa.json (qualunque porta: sullo stesso host
-# gira anche Keycloak di Test), Azure DevOps (per az in lettura), localhost e 127.0.0.1.
+# gira anche Keycloak di Test), l'host degli ambienti di collaudo Docker (D59, `host` di config/collaudo.json), Azure DevOps
+# (per az in lettura), localhost e 127.0.0.1.
 # L'elenco si ricava a ogni chiamata dalla mappa del repo da cui gira l'hook: una voce nuova vale subito.
 # E' un presidio contro l'errore (un indirizzo di produzione copiato da una configurazione), non una recinzione: legge
 # solo il testo del comando, quindi un URL costruito in una variabile non lo vede.
@@ -42,6 +43,18 @@ catch {
     Deny "Bloccato: non riesco a leggere gli host di Test da $mappa ($_). Chiudi con ESITO=bloccato."
 }
 
+# D59: l'host degli ambienti Docker di collaudo (oggi localhost, domani un server)
+$fileCollaudo = Join-Path (Split-Path $PSScriptRoot -Parent) 'config/collaudo.json'
+if (Test-Path -LiteralPath $fileCollaudo) {
+    try {
+        $hostCollaudo = [string](Get-Content -LiteralPath $fileCollaudo -Raw -Encoding UTF8 | ConvertFrom-Json).host
+        if ($hostCollaudo) { [void] $ammessi.Add($hostCollaudo) }
+    }
+    catch {
+        Deny "Bloccato: non riesco a leggere l'host degli ambienti di collaudo da $fileCollaudo ($_). Chiudi con ESITO=bloccato."
+    }
+}
+
 $trovati = [System.Collections.Generic.List[string]]::new()
 # http(s)://[utente@]host[:porta]
 foreach ($m in [regex]::Matches($testo, '(?i)\bhttps?://(?:[^/\s@"''`]*@)?(?<h>[^/:\s"''`?#\)\]]+)')) { $trovati.Add($m.Groups['h'].Value) }
@@ -60,8 +73,8 @@ foreach ($h in $trovati) {
         Deny @"
 Bloccato: l'host '$h' non e' tra quelli che il collaudatore puo chiamare.
 
-Gli host ammessi sono quelli degli urlTest di config/mappa.json (ambiente di Test, qualunque porta), Azure DevOps,
-localhost e 127.0.0.1. Se per provare la card ti serviva davvero questo indirizzo, chiudi con ESITO=bloccato e scrivi
+Gli host ammessi sono quelli degli urlTest di config/mappa.json (ambiente di Test, qualunque porta), l'host degli
+ambienti di collaudo di config/collaudo.json, Azure DevOps, localhost e 127.0.0.1. Se per provare la card ti serviva davvero questo indirizzo, chiudi con ESITO=bloccato e scrivi
 il motivo sulla card.
 "@
     }

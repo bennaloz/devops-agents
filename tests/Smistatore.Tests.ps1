@@ -2,7 +2,7 @@ BeforeAll {
     # D53: Get-Config e Get-ConfigSupervisore leggono impostazioni.json dalla cartella dati: i test non devono vedere quella vera di chi li lancia.
     $script:DatiPrimaIsolamento = $env:ATTREZZI_DATI; $env:ATTREZZI_DATI = Join-Path $TestDrive 'dati-isolati'
     # I moduli si caricano prima, nello stesso modo dello script, cosi i Mock trovano i comandi da sostituire.
-    foreach ($m in 'Config', 'Ado', 'Stato', 'Decisioni', 'Sessioni', 'Telegram', 'Worktree', 'Card') {
+    foreach ($m in 'Config', 'Ado', 'Stato', 'Decisioni', 'Collaudo', 'Sessioni', 'Telegram', 'Worktree', 'Card') {
         Import-Module (Join-Path $PSScriptRoot "../src/$m.psm1") -Global
     }
     $script:Script = Join-Path $PSScriptRoot '../src/Smistatore.ps1'
@@ -72,7 +72,7 @@ Describe 'Smistatore: un giro' {
             ParametriDeploy = @('deployStime', 'deployDatabases')   # i booleani deploy* dello YAML della pipeline sul ramo
         }
         Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
-        Mock Get-AdoCardAttive { @($global:Mondo.Cards) }
+        Mock Get-AdoCardAttive { @($global:Mondo.Cards | ForEach-Object { if (-not $_.PSObject.Properties['PadreId']) { $_ | Add-Member -NotePropertyName PadreId -NotePropertyValue 1 }; $_ }) }; Mock Get-AdoFeatureAperte { @([pscustomobject]@{ Id = 1; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; Rank = $null }) }; Mock Get-AdoFeature { [pscustomobject]@{ Id = 1; Tipo = 'Feature'; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; FigliIds = @() } } -ParameterFilter { $Id -eq 1 }; Mock Get-AdoFigliFeature { @() } -ParameterFilter { @($FigliIds).Count -eq 0 }
         Mock Get-AdoCard { param($Id) $global:Mondo.Cards | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
         Mock Get-AdoCommenti { param($Id, $DopoId = 0) @($global:Mondo.Commenti["$Id"] | Where-Object { $null -ne $_ -and $_.Id -gt $DopoId }) }
         Mock Get-AdoStoriaStato { param($Id) @($global:Mondo.Storia["$Id"]) }
@@ -1182,7 +1182,7 @@ Describe 'Smistatore: un giro' {
     It '-Card su una card in Draft (fuori dalle attive) non interrompe il giro' {
         $global:Mondo.Cards = @(New-FintaCard 2 'bozza')
         $global:Mondo.Storia['2'] = New-FintaStoria 'bozza'
-        Mock Get-AdoCardAttive { @() }
+        Mock Get-AdoCardAttive { @() }; Mock Get-AdoFeatureAperte { @() }
         $out = Invoke-Giro $script:Dati @{ Card = 2; WhatIf = $true }
         $out | Should -Not -Match 'giro interrotto'
         Should -Invoke Get-AdoCard -ParameterFilter { $Id -eq 2 }
@@ -1471,6 +1471,26 @@ Describe 'Smistatore: un giro' {
             $Descrizione -eq "[Card 5]($(Get-AdoUrlCard -Id 5)): Titolo della card 5"
         }
         (Get-StatoFinale $script:Dati)['5']['prId'] | Should -Be 77
+    }
+
+    It 'ApriPr mette sotto il link la descrizione salvata sulla card con descrizione-pr' {
+        $global:Mondo.Cards = @(New-FintaCard 5 'inSviluppo')
+        $global:Mondo.Storia['5'] = New-FintaStoria 'inSviluppo'
+        $global:Mondo.Commenti['5'] = @([pscustomobject]@{ Id = 9; Autore = 'x'; Quando = 'd'
+            Testo = "[dev] Descrizione della PR:`n`n## Misure`nprima 10 minuti`n`n$([char]0x2014) scritto da Claude (dev)" })
+        Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; ultimoRuolo = 'dev'; ultimaSessione = @{ dev = @{ id = 'd1'; esito = 'fatto'; fine = '2026-11-01T10:00:00Z' } } } }
+        Invoke-Giro $script:Dati | Out-Null
+        Should -Invoke New-AdoPr -Times 1 -Exactly -ParameterFilter {
+            $Descrizione -eq "[Card 5]($(Get-AdoUrlCard -Id 5)): Titolo della card 5`n`n## Misure`nprima 10 minuti" }
+    }
+
+    It 'ApriPr con una descrizione salvata troppo lunga apre la PR col solo link' {
+        $global:Mondo.Cards = @(New-FintaCard 5 'inSviluppo')
+        $global:Mondo.Storia['5'] = New-FintaStoria 'inSviluppo'
+        $global:Mondo.Commenti['5'] = @([pscustomobject]@{ Id = 9; Autore = 'x'; Quando = 'd'; Testo = "[dev] Descrizione della PR:`n`n$('a' * 4000)" })
+        Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; ultimoRuolo = 'dev'; ultimaSessione = @{ dev = @{ id = 'd1'; esito = 'fatto'; fine = '2026-11-01T10:00:00Z' } } } }
+        Invoke-Giro $script:Dati | Out-Null
+        Should -Invoke New-AdoPr -Times 1 -Exactly -ParameterFilter { $Descrizione -eq "[Card 5]($(Get-AdoUrlCard -Id 5)): Titolo della card 5" }
     }
 
     It 'una card in Ready to develop: crea il worktree, salva ramo e cartella, la sposta e lancia dev nel worktree' {
@@ -2053,7 +2073,9 @@ Describe 'Smistatore: un giro' {
 
         It 'passata la pausa la card riprende la sessione con --resume e un messaggio che dice del limite di token' {
             $e = New-FintoEsito $true $null $true
-            $e | Add-Member Quota $script:Quota; $e | Add-Member Limite @{ Finestra = 'five_hour'; Reset = (Get-Date).ToUniversalTime().AddHours(-1) }
+            # la finestra piena e quella della pausa: il suo reset e passato con lei (D60: altrimenti la soglia delle 5 ore la fermerebbe)
+            $passato = (Get-Date).ToUniversalTime().AddHours(-1)
+            $e | Add-Member Quota @{ five_hour = @{ Utilization = 1.0; ResetsAt = $passato } }; $e | Add-Member Limite @{ Finestra = 'five_hour'; Reset = $passato }
             $global:Mondo.Esiti['sid-d'] = $e
             # un reset gia passato (piu il margine): al giro stesso la pausa e finita e la sessione riprende
             Invoke-Giro $script:Dati | Out-Null
@@ -2969,7 +2991,7 @@ Describe 'Smistatore: ultimoCommento' {
         New-Item -ItemType Directory $script:Dati | Out-Null
         $global:Mondo = @{ Cards = @(); Commenti = @{}; Storia = @{}; Pr = @{}; Run = @{}; Esiti = @{}; Task = @{} }
         Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
-        Mock Get-AdoCardAttive { @($global:Mondo.Cards) }
+        Mock Get-AdoCardAttive { @($global:Mondo.Cards | ForEach-Object { if (-not $_.PSObject.Properties['PadreId']) { $_ | Add-Member -NotePropertyName PadreId -NotePropertyValue 1 }; $_ }) }; Mock Get-AdoFeatureAperte { @([pscustomobject]@{ Id = 1; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; Rank = $null }) }; Mock Get-AdoFeature { [pscustomobject]@{ Id = 1; Tipo = 'Feature'; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; FigliIds = @() } } -ParameterFilter { $Id -eq 1 }; Mock Get-AdoFigliFeature { @() } -ParameterFilter { @($FigliIds).Count -eq 0 }
         Mock Get-AdoCard { param($Id) $global:Mondo.Cards | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
         Mock Get-AdoCommenti { param($Id, $DopoId = 0) @($global:Mondo.Commenti["$Id"] | Where-Object { $null -ne $_ -and $_.Id -gt $DopoId }) }
         Mock Get-AdoStoriaStato { param($Id) @($global:Mondo.Storia["$Id"]) }
@@ -3037,7 +3059,7 @@ Describe 'Smistatore: avvisi' {
         New-Item -ItemType Directory $script:Dati | Out-Null
         $global:Mondo = @{ Cards = @(); Commenti = @{}; Storia = @{}; Pr = @{}; Run = @{}; Esiti = @{}; Task = @{} }
         Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
-        Mock Get-AdoCardAttive { @($global:Mondo.Cards) }
+        Mock Get-AdoCardAttive { @($global:Mondo.Cards | ForEach-Object { if (-not $_.PSObject.Properties['PadreId']) { $_ | Add-Member -NotePropertyName PadreId -NotePropertyValue 1 }; $_ }) }; Mock Get-AdoFeatureAperte { @([pscustomobject]@{ Id = 1; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; Rank = $null }) }; Mock Get-AdoFeature { [pscustomobject]@{ Id = 1; Tipo = 'Feature'; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; FigliIds = @() } } -ParameterFilter { $Id -eq 1 }; Mock Get-AdoFigliFeature { @() } -ParameterFilter { @($FigliIds).Count -eq 0 }
         Mock Get-AdoCard { param($Id) $global:Mondo.Cards | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
         Mock Get-AdoCommenti { @() }
         Mock Get-AdoStoriaStato { param($Id) @($global:Mondo.Storia["$Id"]) }
@@ -3206,7 +3228,7 @@ Describe 'Smistatore: sessioni morte, orfane e comportamenti di contorno' {
         New-Item -ItemType Directory $script:Dati | Out-Null
         $global:Mondo = @{ Cards = @(); Commenti = @{}; Storia = @{}; Pr = @{}; Run = @{}; Esiti = @{}; Attive = $null; Task = @{} }
         Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
-        Mock Get-AdoCardAttive { if ($null -ne $global:Mondo.Attive) { @($global:Mondo.Attive) } else { @($global:Mondo.Cards) } }
+        Mock Get-AdoCardAttive { if ($null -ne $global:Mondo.Attive) { @($global:Mondo.Attive | ForEach-Object { if (-not $_.PSObject.Properties['PadreId']) { $_ | Add-Member -NotePropertyName PadreId -NotePropertyValue 1 }; $_ }) } else { @($global:Mondo.Cards | ForEach-Object { if (-not $_.PSObject.Properties['PadreId']) { $_ | Add-Member -NotePropertyName PadreId -NotePropertyValue 1 }; $_ }) } }; Mock Get-AdoFeatureAperte { @([pscustomobject]@{ Id = 1; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; Rank = $null }) }; Mock Get-AdoFeature { [pscustomobject]@{ Id = 1; Tipo = 'Feature'; Titolo = 'Raggruppa'; Stato = 'Active'; Tag = @(); Area = 'x'; FigliIds = @() } } -ParameterFilter { $Id -eq 1 }; Mock Get-AdoFigliFeature { @() } -ParameterFilter { @($FigliIds).Count -eq 0 }
         Mock Get-AdoCard { param($Id) $global:Mondo.Cards | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
         Mock Get-AdoCommenti { param($Id, $DopoId = 0) @($global:Mondo.Commenti["$Id"] | Where-Object { $null -ne $_ -and $_.Id -gt $DopoId }) }
         Mock Get-AdoStoriaStato { param($Id) @($global:Mondo.Storia["$Id"]) }
@@ -3384,6 +3406,250 @@ Describe 'Smistatore: sessioni morte, orfane e comportamenti di contorno' {
         Set-StatoDiPartenza $script:Dati @{ '6' = $stato }
         Invoke-Giro $script:Dati | Out-Null
         Should -Invoke Add-AdoCommento -Times 1 -Exactly -ParameterFilter { $Id -eq 6 -and $Menziona -eq 'u-ric' }
+    }
+}
+
+Describe 'Smistatore: gli ambienti di collaudo Docker (D59)' {
+    BeforeAll {
+        # una radice di prova in cui il componente stime ha la voce collaudo
+        function New-RadiceCollaudo {
+            $r = New-RadiceDiProva -Cartella $TestDrive -Limiti @{ funzionalitaAttive = $true }
+            $f = Join-Path $r 'config/mappa.json'
+            $m = Get-Content $f -Raw | ConvertFrom-Json
+            $m.aree[0] | Add-Member -NotePropertyName collaudo -NotePropertyValue ([pscustomobject]@{ compose = 'collaudo/stime/compose.yaml'; porte = @('WEB', 'API'); url = [pscustomobject]@{ WebApp = 'WEB'; Api = 'API' } })
+            $m | ConvertTo-Json -Depth 8 | Set-Content $f
+            $r
+        }
+        function Get-LogGiro($Dati) { (Get-ChildItem (Join-Path $Dati 'log') -Filter 'smistatore-*.log' -ErrorAction SilentlyContinue | Get-Content -Raw) }
+    }
+    BeforeEach {
+        $script:Dati = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory $script:Dati | Out-Null
+        $script:CartellaOk = Join-Path $TestDrive 'wt-coll'
+        New-Item -ItemType Directory $script:CartellaOk -Force | Out-Null
+        $script:RadiceC = New-RadiceCollaudo
+        $global:Mondo = @{ Cards = @(); Commenti = @{}; Storia = @{}; Pr = @{}; Run = @{}; Esiti = @{}; Task = @{}; ParametriDeploy = @() }
+        Mock Get-AdoUtenteCorrente { [pscustomobject]@{ Id = 'u-ric'; Nome = 'Titolare' } }
+        Mock Get-AdoCardAttive { @($global:Mondo.Cards) }
+        Mock Get-AdoCard { param($Id) $global:Mondo.Cards | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
+        Mock Get-AdoCommenti { param($Id, $DopoId = 0) @($global:Mondo.Commenti["$Id"] | Where-Object { $null -ne $_ -and $_.Id -gt $DopoId }) }
+        Mock Get-AdoStoriaStato { param($Id) @($global:Mondo.Storia["$Id"]) }
+        Mock Get-AdoTaskFigli { @() }
+        Mock Get-AdoCardPredecessori { @() }
+        Mock Get-AdoPr { param($Progetto, $Repo, $Ramo, [switch]$AncheCompletate) $global:Mondo.Pr[$Ramo] }
+        Mock Get-AdoRun { throw 'un componente con collaudo non ha run di deploy' }
+        Mock Set-AdoCard { 55 }
+        Mock Add-AdoCommento { 900 }
+        Mock Start-SessioneRuolo { [pscustomobject]@{ Id = 'sid-nuova'; Pid = 5151; Avvio = '2026-11-16T09:00:00.0000000Z'; Ripresa = $false } }
+        Mock Get-EsitoSessione { $null }
+        Mock Stop-Sessione { }
+        Mock Start-AdoDeployTest { throw 'non si accoda nessun deploy' }
+        Mock Test-SessioneViva { $true }
+        Mock Send-TelegramAvviso { $true }
+        Mock Get-ImprontaWorktree { @{ ramo = 'x'; testa = 'a'; stato = ''; diff = '' } }
+        # docker non si lancia mai: i punti che lo toccano sono sostituiti
+        Mock Start-AmbienteCollaudo { [pscustomobject]@{ Progetto = "card-$($Richiesta.Card)"; Pid = 999; Avvio = '2026-11-26T10:00:00.0000000Z'; Log = 'C:\dati\collaudo\log.log'
+                Url = [ordered]@{ WebApp = 'http://localhost:21100'; Api = 'http://localhost:21101' } } }
+        Mock Remove-AmbienteCollaudo { $true }
+        Mock Get-ProgettiCollaudo { @() }
+        Mock Get-EsitoAmbienteCollaudo { [pscustomobject]@{ Stato = 'inProgress'; Esito = $null; Log = 'C:\dati\collaudo\card-5.log'; Url = $null } }
+        $script:InTestC = @{ ramo = 'feature/5-x'; cartella = $script:CartellaOk; ultimoRuolo = 'reviewer'; ultimaSessione = @{ reviewer = @{ id = 'r1'; esito = 'superata'; fine = '2026-11-01T10:00:00Z' } } }
+    }
+
+    It 'Deploying to test: crea l ambiente dal worktree della card nello slot 1, salva lo stato e commenta senza accodare nessun deploy' {
+        $global:Mondo.Cards = @(New-FintaCard 5 'inDeployTest'); $global:Mondo.Storia['5'] = New-FintaStoria 'inDeployTest'
+        Set-StatoDiPartenza $script:Dati @{ '5' = $script:InTestC }
+        Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+        Should -Invoke Start-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter {
+            $Richiesta.Card -eq 5 -and $Richiesta.Slot -eq 1 -and $Richiesta.Cartella -eq $script:CartellaOk -and $Richiesta.Compose -eq 'collaudo/stime/compose.yaml' -and $Richiesta.FileCredenziali -like '*collaudo*Acme.AI.json' }
+        Should -Invoke Start-AdoDeployTest -Times 0 -Exactly
+        $s = (Get-StatoFinale $script:Dati)['5']
+        $s['collaudoSlot'] | Should -Be 1
+        $s['collaudoProgetto'] | Should -Be 'card-5'
+        $s['collaudoPid'] | Should -Be 999
+        $s['collaudoAvvio'] | Should -Not -BeNullOrEmpty
+        $s['runDopoRev'] | Should -Be 20
+        $s['collaudoUrl']['WebApp'] | Should -Be 'http://localhost:21100'
+        Should -Invoke Add-AdoCommento -Times 1 -Exactly -ParameterFilter { $Id -eq 5 -and $Testo -match 'Ambiente di collaudo in creazione' }
+    }
+
+    It 'lo slot e il piu piccolo non usato dalle altre card nello stato' {
+        $global:Mondo.Cards = @(New-FintaCard 5 'inDeployTest'); $global:Mondo.Storia['5'] = New-FintaStoria 'inDeployTest'
+        Set-StatoDiPartenza $script:Dati @{ '5' = $script:InTestC; '6' = @{ collaudoSlot = 1; collaudoProgetto = 'card-6' }; '7' = @{ collaudoSlot = 3; collaudoProgetto = 'card-7' } }
+        Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+        Should -Invoke Start-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Richiesta.Slot -eq 2 }
+        (Get-StatoFinale $script:Dati)['5']['collaudoSlot'] | Should -Be 2
+    }
+
+    It 'una card che ha gia uno slot lo tiene quando l ambiente si ricrea' {
+        $global:Mondo.Cards = @(New-FintaCard 5 'inDeployTest'); $global:Mondo.Storia['5'] = New-FintaStoria 'inDeployTest'
+        $st = [hashtable]::new($script:InTestC); $st['collaudoSlot'] = 3; $st['collaudoProgetto'] = 'card-5'; $st['runDopoRev'] = 12
+        Set-StatoDiPartenza $script:Dati @{ '5' = $st }
+        Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+        Should -Invoke Start-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Richiesta.Slot -eq 3 }
+    }
+
+    It 'senza worktree utilizzabile la creazione fallisce e la card va in on-hold (nessun processo avviato)' {
+        $global:Mondo.Cards = @(New-FintaCard 5 'inDeployTest'); $global:Mondo.Storia['5'] = New-FintaStoria 'inDeployTest'
+        $st = [hashtable]::new($script:InTestC); $st['cartella'] = Join-Path $TestDrive 'non-esiste'
+        Set-StatoDiPartenza $script:Dati @{ '5' = $st }
+        Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+        Should -Invoke Start-AmbienteCollaudo -Times 0 -Exactly
+        Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $AggiungiTag }
+    }
+
+    It 'ambiente pronto: la card passa in Automated test e il commento ha gli URL e i nomi (mai i valori) delle COLLAUDO_*' {
+        Mock Get-EsitoAmbienteCollaudo { [pscustomobject]@{ Stato = 'completed'; Esito = 'succeeded'; Log = 'C:\dati\collaudo\card-5.log'; Url = $null } }
+        $global:Mondo.Cards = @(New-FintaCard 5 'inDeployTest'); $global:Mondo.Storia['5'] = New-FintaStoria 'inDeployTest'
+        $st = [hashtable]::new($script:InTestC); $st['collaudoSlot'] = 1; $st['collaudoProgetto'] = 'card-5'; $st['runDopoRev'] = 20; $st['collaudoPid'] = 999; $st['collaudoAvvio'] = '2026-11-26T10:00:00Z'
+        $st['collaudoUrl'] = @{ WebApp = 'http://localhost:21100' }
+        Set-StatoDiPartenza $script:Dati @{ '5' = $st }
+        Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+        Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Stato -eq (St 'inCollaudo') }
+        Should -Invoke Add-AdoCommento -Times 1 -ParameterFilter { $Id -eq 5 -and $Testo -match 'WebApp: http://localhost:21100' -and $Testo -match 'COLLAUDO_' -and $Testo -match 'Acme\.AI\.json' }
+        Should -Invoke Start-AmbienteCollaudo -Times 0 -Exactly
+    }
+
+    It 'ambiente non creato: on-hold con il log nel commento' {
+        Mock Get-EsitoAmbienteCollaudo { [pscustomobject]@{ Stato = 'completed'; Esito = 'failed'; Log = 'C:\dati\collaudo\card-5.log'; Url = $null } }
+        $global:Mondo.Cards = @(New-FintaCard 5 'inDeployTest'); $global:Mondo.Storia['5'] = New-FintaStoria 'inDeployTest'
+        $st = [hashtable]::new($script:InTestC); $st['collaudoSlot'] = 1; $st['collaudoProgetto'] = 'card-5'; $st['runDopoRev'] = 20; $st['collaudoPid'] = 999; $st['collaudoAvvio'] = '2026-11-26T10:00:00Z'
+        $st['passateFatte'] = @('deployFallito')
+        Set-StatoDiPartenza $script:Dati @{ '5' = $st }
+        Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+        Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $AggiungiTag }
+        Should -Invoke Add-AdoCommento -Times 1 -ParameterFilter { $Testo -match 'ambiente di collaudo non creato, log: C:\\dati\\collaudo\\card-5\.log' }
+    }
+
+    It 'la card che esce dal Test butta l ambiente, azzera i campi e commenta' {
+        $global:Mondo.Cards = @(New-FintaCard 5 'inRevisione'); $global:Mondo.Storia['5'] = New-FintaStoria 'inRevisione'
+        Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; cartella = $script:CartellaOk; collaudoSlot = 2; collaudoProgetto = 'card-5'; collaudoPid = 1; runDopoRev = 20; collaudoUrl = @{ WebApp = 'x' } } }
+        Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+        Should -Invoke Remove-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Progetto -eq 'card-5' }
+        $s = (Get-StatoFinale $script:Dati)['5']
+        $s['collaudoSlot'] | Should -BeNullOrEmpty; $s['collaudoProgetto'] | Should -BeNullOrEmpty; $s['collaudoUrl'] | Should -BeNullOrEmpty; $s['runDopoRev'] | Should -BeNullOrEmpty
+        Should -Invoke Add-AdoCommento -Times 1 -ParameterFilter { $Id -eq 5 -and $Testo -match 'Ambiente di collaudo buttato' }
+    }
+
+    It 'se docker non riesce a buttare l ambiente i campi restano (si riprova al giro dopo) e il giro non va in on-hold' {
+        Mock Remove-AmbienteCollaudo { $false }
+        $global:Mondo.Cards = @(New-FintaCard 5 'inRevisione'); $global:Mondo.Storia['5'] = New-FintaStoria 'inRevisione'
+        Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; cartella = $script:CartellaOk; collaudoSlot = 2; collaudoProgetto = 'card-5' } }
+        $out = Invoke-Giro $script:Dati @{ Radice = $script:RadiceC }
+        (Get-StatoFinale $script:Dati)['5']['collaudoProgetto'] | Should -Be 'card-5'
+        Should -Invoke Set-AdoCard -Times 0 -Exactly -ParameterFilter { $AggiungiTag }
+        $out | Should -Match 'WARN card 5: .*ambiente di collaudo'
+    }
+
+    Context 'correzioni: stato senza contenitori, processo di creazione, card ceduta' {
+        It 'una card chiusa con un ambiente nello stato ma senza contenitori in docker: lo slot si libera' {
+            $global:Mondo.Cards = @(New-FintaCard 5 'inRevisione'); $global:Mondo.Storia['5'] = New-FintaStoria 'inRevisione'
+            Set-StatoDiPartenza $script:Dati @{ '40' = @{ collaudoSlot = 2; collaudoProgetto = 'card-40'; collaudoPid = 321; collaudoAvvio = '2026-11-26T10:00:00Z'; runDopoRev = 4; ramo = 'x' } }
+            Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+            Should -Invoke Remove-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Progetto -eq 'card-40' -and $ProcessoId -eq 321 -and (ConvertTo-DataUtc $Avvio).Hour -eq 10 }
+            $s = (Get-StatoFinale $script:Dati)['40']
+            $s['collaudoSlot'] | Should -BeNullOrEmpty; $s['collaudoProgetto'] | Should -BeNullOrEmpty
+        }
+        It 'una card in Test con l ambiente nello stato non e un orfano' {
+            $global:Mondo.Cards = @(New-FintaCard 5 'inCollaudo'); $global:Mondo.Storia['5'] = New-FintaStoria 'inCollaudo'
+            Set-StatoDiPartenza $script:Dati @{ '5' = @{ collaudoSlot = 1; collaudoProgetto = 'card-5'; ramo = 'x'; cartella = $script:CartellaOk; runDopoRev = 20; ultimoRuolo = 'reviewer'; ultimaSessione = @{ reviewer = @{ id = 'r1'; esito = 'superata'; fine = '2026-11-01T10:00:00Z' } } } }
+            Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+            Should -Invoke Remove-AmbienteCollaudo -Times 0 -Exactly
+        }
+        It 'se docker non butta l ambiente dello stato i campi restano e il giro non fallisce' {
+            Mock Remove-AmbienteCollaudo { $false }
+            $global:Mondo.Cards = @(New-FintaCard 5 'inRevisione'); $global:Mondo.Storia['5'] = New-FintaStoria 'inRevisione'
+            Set-StatoDiPartenza $script:Dati @{ '40' = @{ collaudoSlot = 2; collaudoProgetto = 'card-40' } }
+            $out = Invoke-Giro $script:Dati @{ Radice = $script:RadiceC }
+            (Get-StatoFinale $script:Dati)['40']['collaudoSlot'] | Should -Be 2
+            $out | Should -Match 'WARN .*card-40 non buttato'
+        }
+        It 'la card che esce dal Test ferma il processo di creazione prima del down (pid e avvio dello stato)' {
+            $global:Mondo.Cards = @(New-FintaCard 5 'inRevisione'); $global:Mondo.Storia['5'] = New-FintaStoria 'inRevisione'
+            Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; cartella = $script:CartellaOk; collaudoSlot = 2; collaudoProgetto = 'card-5'; collaudoPid = 777; collaudoAvvio = '2026-11-26T10:00:00Z' } }
+            Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+            Should -Invoke Remove-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Progetto -eq 'card-5' -and $ProcessoId -eq 777 -and (ConvertTo-DataUtc $Avvio).Hour -eq 10 }
+        }
+        It 'una card ceduta a un collega: l ambiente si butta prima di togliere il worktree' {
+            $global:OrdineS = [System.Collections.Generic.List[string]]::new()
+            Mock Remove-AmbienteCollaudo { $global:OrdineS.Add("ambiente $Progetto"); $true }
+            Mock Remove-WorktreeCard { $global:OrdineS.Add('worktree'); [pscustomobject]@{ RamoCancellato = $true } }
+            $global:Mondo.Cards = @(New-FintaCard 5 'inCollaudo' -Assegnata 'u-collega'); $global:Mondo.Storia['5'] = New-FintaStoria 'inCollaudo'
+            Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; cartella = 'C:/wt/card-5'; collaudoSlot = 1; collaudoProgetto = 'card-5' } }
+            Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+            @($global:OrdineS)[0..1] | Should -Be @('ambiente card-5', 'worktree')
+            (Get-StatoFinale $script:Dati).Contains('5') | Should -BeFalse
+            Remove-Variable OrdineS -Scope Global
+        }
+        It 'una card ceduta il cui ambiente non si butta resta segnata come ceduta, con lo slot ancora suo e il worktree al suo posto' {
+            Mock Remove-AmbienteCollaudo { $false }
+            Mock Remove-WorktreeCard { throw 'non doveva toccarlo' }
+            $global:Mondo.Cards = @(New-FintaCard 5 'inCollaudo' -Assegnata 'u-collega'); $global:Mondo.Storia['5'] = New-FintaStoria 'inCollaudo'
+            Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; cartella = 'C:/wt/card-5'; collaudoSlot = 1; collaudoProgetto = 'card-5' } }
+            Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+            Should -Invoke Remove-WorktreeCard -Times 0 -Exactly
+            $s = (Get-StatoFinale $script:Dati)['5']
+            $s['ceduta'] | Should -BeTrue; $s['collaudoSlot'] | Should -Be 1
+        }
+    }
+
+    Context 'orfani' {
+        It 'butta i progetti di card che non sono in uno stato di Test (o non esistono piu) e lascia quelli in Test' {
+            Mock Get-ProgettiCollaudo { @('card-5', 'card-9', 'card-11') }
+            $global:Mondo.Cards = @((New-FintaCard 5 'inCollaudo'), (New-FintaCard 9 'inRevisione'))
+            $global:Mondo.Storia['5'] = New-FintaStoria 'inCollaudo'; $global:Mondo.Storia['9'] = New-FintaStoria 'inRevisione'
+            Set-StatoDiPartenza $script:Dati @{ '5' = @{ collaudoSlot = 1; collaudoProgetto = 'card-5'; ramo = 'x'; cartella = $script:CartellaOk; runDopoRev = 20; ultimoRuolo = 'reviewer'; ultimaSessione = @{ reviewer = @{ id = 'r1'; esito = 'superata'; fine = '2026-11-01T10:00:00Z' } } }
+                '9' = @{ ramo = 'y'; cartella = $script:CartellaOk } }
+            $out = Invoke-Giro $script:Dati @{ Radice = $script:RadiceC }
+            Should -Invoke Remove-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Progetto -eq 'card-9' }
+            Should -Invoke Remove-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Progetto -eq 'card-11' }
+            Should -Invoke Remove-AmbienteCollaudo -Times 0 -Exactly -ParameterFilter { $Progetto -eq 'card-5' }
+            (Get-LogGiro $script:Dati) | Should -Match 'ambiente di collaudo orfano card-9'
+        }
+        It 'docker che non risponde non ferma il giro: un avviso nel log e le card avanzano' {
+            Mock Get-ProgettiCollaudo { throw 'docker non risponde' }
+            $global:Mondo.Cards = @(New-FintaCard 5 'inDeployTest'); $global:Mondo.Storia['5'] = New-FintaStoria 'inDeployTest'
+            Set-StatoDiPartenza $script:Dati @{ '5' = $script:InTestC }
+            $out = Invoke-Giro $script:Dati @{ Radice = $script:RadiceC }
+            $out | Should -Match 'WARN .*orfani.*docker non risponde'
+            Should -Invoke Start-AmbienteCollaudo -Times 1 -Exactly
+            Should -Invoke Remove-AmbienteCollaudo -Times 0 -Exactly
+        }
+        It 'senza nessuna voce collaudo nella mappa non chiede niente a docker' {
+            $global:Mondo.Cards = @(New-FintaCard 5 'inRevisione'); $global:Mondo.Storia['5'] = New-FintaStoria 'inRevisione'
+            Invoke-Giro $script:Dati @{ Radice = (New-RadiceDiProva -Cartella $TestDrive) } | Out-Null
+            Should -Invoke Get-ProgettiCollaudo -Times 0 -Exactly
+        }
+    }
+
+    Context 'la card di chiusura di una funzionalita (D52)' {
+        BeforeEach {
+            $global:FxC = @{ InFeature = (St 'inFeature'); InDeployTest = (St 'inDeployTest'); TagChiusura = $script:Cfg.Stati.tagChiusura }
+            Mock Get-AdoFeature { [pscustomobject]@{ Id = 7; Tipo = 'Feature'; Titolo = 'La funzione'; Stato = 'Active'; Tag = @(); Area = 'x'; FigliIds = @(5, 22) } }
+            Mock Get-AdoFigliFeature { @(
+                    [pscustomobject]@{ Id = 5; Stato = $global:FxC.InFeature; Tag = @(); Tipo = 'User Story' }
+                    [pscustomobject]@{ Id = 22; Stato = $global:FxC.InDeployTest; Tag = @($global:FxC.TagChiusura); Tipo = 'User Story' }) }
+            Mock Get-AdoRamoCard { 'feature/f7-la-funzione' }
+            $global:CartellaChiusura = Join-Path $TestDrive 'wt-chiusura'
+            New-Item -ItemType Directory $global:CartellaChiusura -Force | Out-Null
+            Mock Update-WorktreeChiusura { [pscustomobject]@{ Cartella = $global:CartellaChiusura; Ramo = $null } }
+        }
+        It 'l ambiente si crea dal worktree della chiusura aggiornato al ramo della funzionalita' {
+            $c = New-FintaCard 22 'inDeployTest'; $c | Add-Member -NotePropertyName PadreId -NotePropertyValue 7
+            $global:Mondo.Cards = @($c); $global:Mondo.Storia['22'] = New-FintaStoria 'inDeployTest'
+            Set-StatoDiPartenza $script:Dati @{ '22' = @{ ramo = 'feature/f7-la-funzione'; destinazione = 'develop'; cartella = $null } }
+            Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+            Should -Invoke Update-WorktreeChiusura -Times 1 -Exactly -ParameterFilter { $Ramo -eq 'feature/f7-la-funzione' -and $Card.Id -eq 22 }
+            Should -Invoke Start-AmbienteCollaudo -Times 1 -Exactly -ParameterFilter { $Richiesta.Card -eq 22 -and $Richiesta.Cartella -eq $global:CartellaChiusura }
+        }
+        It 'una card figlia della funzionalita con la voce collaudo non crea nessun ambiente: va in Ready to merge come prima' {
+            $c = New-FintaCard 5 'inRevisione'; $c | Add-Member -NotePropertyName PadreId -NotePropertyValue 7
+            $global:Mondo.Cards = @($c); $global:Mondo.Storia['5'] = New-FintaStoria 'inRevisione'
+            Set-StatoDiPartenza $script:Dati @{ '5' = @{ ramo = 'feature/5-x'; destinazione = 'feature/f7-la-funzione'; cartella = $script:CartellaOk; ultimoRuolo = 'reviewer'; ultimaSessione = @{ reviewer = @{ id = 'r1'; esito = 'superata'; fine = '2026-11-01T10:00:00Z' } } } }
+            Invoke-Giro $script:Dati @{ Radice = $script:RadiceC } | Out-Null
+            Should -Invoke Start-AmbienteCollaudo -Times 0 -Exactly
+            Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Stato -eq (St 'daUnire') }
+        }
     }
 }
 

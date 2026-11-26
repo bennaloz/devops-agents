@@ -119,6 +119,36 @@ Describe 'Get-Config' {
         { Get-Config -Radice $script:R } | Should -Throw '*funzionalitaAttive*'
     }
 
+    It 'D59: collaudo.json si legge: comando docker, host, porta base, minuti' {
+        $c = (Get-Config -Radice $script:R).Collaudo
+        @($c.comandoDocker).Count | Should -BeGreaterThan 0
+        @($c.comandoDocker) | Should -Contain '{cartella}'
+        $c.host | Should -Be 'localhost'
+        $c.portaBase | Should -Be 21000
+        $c.minutiCreazione | Should -Be 30
+        $c.minutiComandi | Should -Be 3
+    }
+
+    It 'D59: errore se collaudo.json manca o ha un comando vuoto o una porta base non numerica' {
+        $p = "$script:R/config/collaudo.json"
+        $orig = Get-Content $p -Raw
+        $orig -replace '"comandoDocker":\s*\[[^\]]*\]', '"comandoDocker": []' | Set-Content $p
+        { Get-Config -Radice $script:R } | Should -Throw '*comandoDocker*'
+        $orig -replace '"portaBase":\s*[0-9]+', '"portaBase": "x"' | Set-Content $p
+        { Get-Config -Radice $script:R } | Should -Throw '*portaBase*'
+        $orig -replace '"minutiComandi":\s*[0-9]+', '"minutiComandi": 0' | Set-Content $p
+        { Get-Config -Radice $script:R } | Should -Throw '*minutiComandi*'
+        Remove-Item $p
+        { Get-Config -Radice $script:R } | Should -Throw '*collaudo*'
+    }
+
+    It 'D59: ambientiCollaudo e un numero di almeno 1 in limiti.json' {
+        (Get-Config -Radice $script:R).Limiti.ambientiCollaudo | Should -Be 3
+        $p = "$script:R/config/limiti.json"
+        (Get-Content $p -Raw) -replace '"ambientiCollaudo":\s*[0-9]+', '"ambientiCollaudo": 0' | Set-Content $p
+        { Get-Config -Radice $script:R } | Should -Throw '*ambientiCollaudo*'
+    }
+
     It 'D52: gli stati della Feature sono in stati.json' {
         $c = Get-Config -Radice $script:R
         $c.Stati.featureNuova | Should -Be 'New'

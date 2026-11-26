@@ -610,3 +610,57 @@ Describe 'Start-SupervisorePianificato (D53): la vista avvia il supervisore, che
         Should -Invoke Start-ScheduledTask -ModuleName VistaServer -Times 0 -Exactly
     }
 }
+
+Describe 'Get-RispostaVista: POST /ordine e /pausa (D60)' {
+    BeforeEach { $script:Aggiornamenti = 0; $script:Chiamate = [System.Collections.Generic.List[object]]::new() }
+    BeforeAll {
+        $script:Ordina = { param($Id, $Dopo) $script:Chiamate.Add("ordine $Id $Dopo"); @{ Esito = 'ok'; Messaggio = 'fatto' } }
+        $script:Pausa = { param($Id, $Attiva) $script:Chiamate.Add("pausa $Id $Attiva"); @{ Esito = 'ok'; Messaggio = 'fatto' } }
+        function Invoke-Priorita([string]$Percorso, $Ricevuto = $script:Atteso, [string]$Metodo = 'POST') {
+            Get-RispostaVista -Metodo $Metodo -Percorso $Percorso -TokenRicevuto $Ricevuto -Token $script:Atteso -Cartella $script:Cartella `
+                -AvviaGiro { } -Aggiorna $script:Aggiorna -ImpostaOrdine $script:Ordina -ImpostaPausa $script:Pausa -Feature @(10, 20) -HostHeader 'localhost:8787' -Porta $script:Porta -Locale $true
+        }
+    }
+    It 'sposta una Feature dopo un altra o in cima, e chiede la rilettura' {
+        (Invoke-Priorita '/ordine?id=20&dopo=0').Codice | Should -Be 202
+        (Invoke-Priorita '/ordine?id=10&dopo=20').Codice | Should -Be 202
+        @($script:Chiamate) | Should -Be @('ordine 20 0', 'ordine 10 20')
+        $script:Aggiornamenti | Should -Be 2
+    }
+    It 'mette e toglie la pausa' {
+        (Invoke-Priorita '/pausa?id=10&attiva=1').Codice | Should -Be 202
+        (Invoke-Priorita '/pausa?id=10&attiva=0').Codice | Should -Be 202
+        @($script:Chiamate) | Should -Be @('pausa 10 True', 'pausa 10 False')
+    }
+    It 'rifiuta senza token, con id fuori dalla lista bianca o parametri sbagliati, e non chiama niente' {
+        (Invoke-Priorita '/ordine?id=10&dopo=0' $null).Codice | Should -Be 403
+        (Invoke-Priorita '/ordine?id=99&dopo=0').Codice | Should -Be 400
+        (Invoke-Priorita '/ordine?id=10&dopo=99').Codice | Should -Be 400
+        (Invoke-Priorita '/pausa?id=10&attiva=2').Codice | Should -Be 400
+        (Invoke-Priorita '/pausa?id=abc&attiva=1').Codice | Should -Be 400
+        (Invoke-Priorita '/pausa?id=10&attiva=1' $script:Atteso 'GET').Codice | Should -Be 405
+        $script:Chiamate.Count | Should -Be 0
+    }
+}
+
+Describe 'Get-RispostaVista: POST /soglia con soglia5Ore e POST /pausa-sistema (D60)' {
+    It 'soglia5Ore arriva al comando della soglia' {
+        $script:Ricevuti = $null
+        $imposta = { param($P) $script:Ricevuti = $P; @{ Esito = 'ok'; Messaggio = 'fatto' } }
+        $r = Get-RispostaVista -Metodo 'POST' -Percorso '/soglia?soglia5Ore=0.8000' -TokenRicevuto $script:Atteso -Token $script:Atteso -Cartella $script:Cartella `
+            -AvviaGiro { } -Aggiorna { } -ImpostaSoglia $imposta -HostHeader 'localhost:8787' -Porta $script:Porta -Locale $true
+        $r.Codice | Should -Be 202
+        $script:Ricevuti['soglia5Ore'] | Should -Be '0.8000'
+    }
+    It 'pausa-sistema passa vero o falso, rifiuta il resto e senza token' {
+        $script:Chiesti = [System.Collections.Generic.List[object]]::new()
+        $pausa = { param($A) $script:Chiesti.Add($A); @{ Esito = 'ok'; Messaggio = 'fatto' } }
+        $chiedi = { param($Percorso, $Ricevuto) Get-RispostaVista -Metodo 'POST' -Percorso $Percorso -TokenRicevuto $Ricevuto -Token $script:Atteso -Cartella $script:Cartella `
+            -AvviaGiro { } -Aggiorna { } -ImpostaPausaSistema $pausa -HostHeader 'localhost:8787' -Porta $script:Porta -Locale $true }
+        (& $chiedi '/pausa-sistema?attivo=1' $script:Atteso).Codice | Should -Be 202
+        (& $chiedi '/pausa-sistema?attivo=0' $script:Atteso).Codice | Should -Be 202
+        (& $chiedi '/pausa-sistema?attivo=2' $script:Atteso).Codice | Should -Be 400
+        (& $chiedi '/pausa-sistema?attivo=1' $null).Codice | Should -Be 403
+        @($script:Chiesti) | Should -Be @($true, $false)
+    }
+}
