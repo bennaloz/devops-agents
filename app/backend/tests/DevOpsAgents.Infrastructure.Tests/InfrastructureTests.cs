@@ -734,10 +734,7 @@ public class AdoptionInfrastructureTests
     [Fact]
     public async Task La_PR_collegata_e_la_piu_recente_fra_quelle_di_Azure_Repos_e_di_GitHub()
     {
-        var h = new FakeHttp((_, _) => FakeHttp.Ok("""{ "id": 42, "relations": [
-            { "rel": "ArtifactLink", "url": "vstfs:///Git/PullRequestId/p%2Fr%2F15" },
-            { "rel": "Hyperlink", "url": "https://github.com/acme/web/pull/21" },
-            { "rel": "Hyperlink", "url": "https://esempio.invalid/x" } ] }"""));
+        var h = new FakeHttp((_, _) => FakeHttp.Ok("""{ "id": 42, "relations": [ { "rel": "ArtifactLink", "url": "vstfs:///Git/PullRequestId/p%2Fr%2F15" }, { "rel": "Hyperlink", "url": "https://github.com/acme/web/pull/21" }, { "rel": "Hyperlink", "url": "https://esempio.invalid/x" } ] }"""));
         Assert.Equal(21, await new AdoBoard(Tx.Ado(h), "DevOps.Agents", SuiteConfig.Load(Tx.Root).Names).GetLinkedPullRequestIdAsync(42));
         var none = new FakeHttp((_, _) => FakeHttp.Ok("""{ "id": 42 }"""));
         Assert.Null(await new AdoBoard(Tx.Ado(none), "DevOps.Agents", SuiteConfig.Load(Tx.Root).Names).GetLinkedPullRequestIdAsync(42));
