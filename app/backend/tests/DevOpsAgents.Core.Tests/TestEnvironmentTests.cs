@@ -100,6 +100,8 @@ public class TestEnvironmentTests
         public Task<(string Branch, string Folder)> CreateWorktreeAsync(AreaMapping a, Card c, string? b, CancellationToken ct = default) => w.CreateWorktreeAsync(a, c, b, ct);
         public Task RemoveWorktreeAsync(AreaMapping a, string f, CancellationToken ct = default) => w.RemoveWorktreeAsync(a, f, ct);
         public bool Exists(string folder) => folder.StartsWith("/wt/");
+        public Task<string> PublishFeatureBranchAsync(AreaMapping a, FeatureInfo f, bool bug, CancellationToken ct = default) => w.PublishFeatureBranchAsync(a, f, bug, ct);
+        public Task<string> UpdateClosingWorktreeAsync(AreaMapping a, Card c, string branch, CancellationToken ct = default) => w.UpdateClosingWorktreeAsync(a, c, branch, ct);
     }
 
     private static Dispatcher D(World w, Envs e) =>

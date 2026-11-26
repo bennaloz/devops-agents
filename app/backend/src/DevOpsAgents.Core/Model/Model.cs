@@ -151,6 +151,20 @@ public sealed class CardLocalState
     public DateTimeOffset? TestStartedAt { get; set; }
     public Dictionary<string, string>? TestUrls { get; set; }
     public List<string> Notices { get; set; } = new();
+    /// <summary>D52: le correzioni gia diventate Bug (id del commento), le teste per cui c'e gia una Bug allinea-develop.</summary>
+    public List<string> CorrectionsDone { get; set; } = new();
+    public List<string> AlignDone { get; set; } = new();
+    /// <summary>D52: la testa della PR con cui la card di chiusura e tornata in Ready to develop: un secondo ritorno per la stessa e un on-hold.</summary>
+    public string? ReturnCommit { get; set; }
+    /// <summary>D52: la Feature da chiudere quando la card di chiusura sara chiusa.</summary>
+    public int? FeatureToClose { get; set; }
+    /// <summary>D52: la CI rossa della card di chiusura gia data al responsabile (build), quante di fila, e se va rilanciata dopo un on-hold.</summary>
+    public string? CiRedHandled { get; set; }
+    public int CiRedInARow { get; set; }
+    public bool CiRedRetry { get; set; }
+    /// <summary>Gli errori della build letti una volta per build (D52): build e testo.</summary>
+    public string? BuildErrorsOf { get; set; }
+    public string? BuildErrors { get; set; }
 
     [JsonIgnore] public SessionRecord? LastSession => LastRole is not null && LastSessionByRole.TryGetValue(LastRole, out var s) ? s : null;
 
@@ -162,14 +176,29 @@ public sealed class CardLocalState
         if (TestUrls is not null) c.TestUrls = new Dictionary<string, string>(TestUrls);
         c.LastSessionByRole = new Dictionary<string, SessionRecord>(LastSessionByRole);
         c.Notices = new List<string>(Notices);
+        c.CorrectionsDone = new List<string>(CorrectionsDone);
+        c.AlignDone = new List<string>(AlignDone);
         return c;
     }
 
     public void ResetCounters()
     {
-        ReviewRounds = 0; RedInARow = 0; TestRounds = 0; Relaunches = 0;
-        CompletePrKey = null; WaitingFor = null;
+        ReviewRounds = 0; RedInARow = 0; TestRounds = 0; Relaunches = 0; CiRedInARow = 0;
+        CompletePrKey = null; WaitingFor = null; ReturnCommit = null;
     }
+}
+
+/// <summary>Una card sorella nella stessa Feature (D52): per sapere se e unita nel ramo della funzionalita.</summary>
+public sealed record Sibling(int Id, string State, IReadOnlyList<string> Tags);
+
+/// <summary>
+/// D52: la funzionalita di una card, se la sua Feature ha una card di chiusura. IsClosing: questa card e la card di chiusura.
+/// Branch: il ramo della funzionalita su origin (null se non c'e ancora). Siblings: le altre card della Feature (senza le Removed).
+/// Error: la funzionalita non si e letta (la card allora non fa niente).
+/// </summary>
+public sealed record FeatureContext(FeatureInfo Feature, bool IsClosing, int ClosingCardId, string? ClosingState, string? Branch, IReadOnlyList<Sibling> Siblings, string? Error = null)
+{
+    public static FeatureContext Failed(string error) => new(new FeatureInfo(0, "", "", [], null, null), false, 0, null, null, [], error);
 }
 
 /// <summary>Tutto cio che serve per decidere su una card, letto una volta per giro.</summary>
@@ -183,4 +212,10 @@ public sealed record Snapshot(
     IReadOnlyList<Predecessor> Predecessors,
     PullRequestInfo? Pr = null,
     PipelineRun? Run = null,
-    DeployChoice? Deploy = null);
+    DeployChoice? Deploy = null,
+    /// <summary>D52: la funzionalita della card (null per una card isolata).</summary>
+    FeatureContext? Feature = null,
+    /// <summary>Tutti i commenti, letti e no: le correzioni scritte dal responsabile e le Bug gia create stanno li.</summary>
+    IReadOnlyList<Comment>? AllComments = null,
+    /// <summary>D52: per la card di chiusura, gli errori di codice della build rossa (validazione o deploy); null se non ce ne sono.</summary>
+    string? BuildErrors = null);

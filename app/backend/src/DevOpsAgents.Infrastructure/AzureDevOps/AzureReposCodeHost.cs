@@ -110,6 +110,16 @@ public sealed class AzureReposCodeHost(AdoClient ado) : ICodeHost
     }
 
     public string PullRequestUrl(AreaMapping area, int prId) => $"{ado.Organization}/{E(area.AdoProject)}/_git/{E(area.Repo)}/pullrequest/{prId}";
+
+    public async Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping area, string prefix, CancellationToken ct = default) =>
+        (await ado.GetAsync($"{RepoUrl(area)}/refs?filter={E($"heads/{prefix}")}&api-version=7.1", ct)).Items("value")
+            .Select(r => (r.Str("name") ?? "").Replace("refs/heads/", "")).Where(n => n.Length > 0).ToList();
+
+    public async Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default)
+    {
+        var pr = await ado.GetAsync($"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", ct);
+        return pr is null ? null : (pr.Str("status") ?? "", (pr.Str("sourceRefName") ?? "").Replace("refs/heads/", ""));
+    }
 }
 
 /// <summary>Il deploy in Test su Azure Pipelines, per i repo di Azure Repos e di GitHub.</summary>
@@ -127,6 +137,40 @@ public sealed class AzurePipelinesCi(AdoClient ado) : ICiService
             templateParameters = parameters,
         }, ct: ct);
         return r.Int("id")!.Value;
+    }
+
+    /// <summary>Un test fallito (xUnit, NUnit, MSTest: "Failed &lt;nome&gt;") o un errore di compilazione (CS, MSB, NU, TS).</summary>
+    public static bool IsFailedTestLine(string line) => System.Text.RegularExpressions.Regex.IsMatch(line, @"^\s*Failed ");
+    public static bool IsCodeErrorLine(string line) => IsFailedTestLine(line) || System.Text.RegularExpressions.Regex.IsMatch(line, @"error (CS|MSB|NU|TS)\d+");
+
+    /// <summary>
+    /// Come Get-AdoErroriBuild -SoloCodice: dai log dei passi falliti della timeline i test falliti con il loro dettaglio e le righe ##[error];
+    /// null se nessun passo fallito ha errori di codice (un timeout o un agente perso sono infrastruttura, non codice).
+    /// </summary>
+    public async Task<string?> GetBuildErrorsAsync(AreaMapping area, int buildId, CancellationToken ct = default)
+    {
+        var timeline = await ado.GetAsync($"/{E(area.AdoProject)}/_apis/build/builds/{buildId}/timeline?api-version=7.1", ct);
+        var failed = timeline.Items("records").Where(r => r.Str("type") == "Task" && r.Str("result") == "failed").ToList();
+        var output = new List<string>();
+        var code = false;
+        foreach (var step in failed)
+        {
+            output.Add($"Passo '{step.Str("name")}' fallito.");
+            if (step.Str("log", "url") is not { } url) { output.Add("(nessun log per questo passo)"); continue; }
+            var log = (await ado.GetAsync($"{url}?api-version=7.1", ct))?.ToString() ?? "";
+            var inside = false;
+            foreach (var raw in log.Split('\n'))
+            {
+                var line = System.Text.RegularExpressions.Regex.Replace(raw.TrimEnd('\r'), @"^\d{4}-\d\d-\d\dT[\d:.]+Z ?", "");
+                if (IsCodeErrorLine(line)) code = true;
+                if (IsFailedTestLine(line)) { inside = true; output.Add(""); output.Add(line.TrimEnd()); continue; }
+                if (System.Text.RegularExpressions.Regex.IsMatch(line, @"^\s*(Passed|Skipped) ") || line.StartsWith("[xUnit.net")) { inside = false; continue; }
+                if (line.Contains("##[error]")) { inside = false; output.Add(line.TrimEnd()); continue; }
+                if (inside) output.Add(line.TrimEnd());
+            }
+            if (output.Count >= 400) break;
+        }
+        return code ? string.Join("\n", output.Take(400)) : null;
     }
 
     public async Task<PipelineRun> GetRunAsync(AreaMapping area, int runId, CancellationToken ct = default)

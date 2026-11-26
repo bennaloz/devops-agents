@@ -55,6 +55,10 @@ public sealed class StateNames
     public string? HumanTestTag => Get("tagProvaUmana");
     /// <summary>D60: il tag della pausa, su una Feature o su una card sola.</summary>
     public string? PausedTag => Get("tagPausa");
+    /// <summary>D52: la card di chiusura, la Feature di correzione (ramo bugfix/), la Bug che allinea il ramo della funzionalita a develop.</summary>
+    public string? ClosingTag => Get("tagChiusura");
+    public string? BugFeatureTag => Get("tagBugFeature");
+    public string? AlignTag => Get("tagAllinea");
     public IEnumerable<string> ClosedTaskStates => new[] { Get("taskChiuso"), Get("taskRimosso") }.Where(s => s is not null)!;
 }
 

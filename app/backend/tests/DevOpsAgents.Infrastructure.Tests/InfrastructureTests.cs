@@ -628,3 +628,89 @@ public class DockerTestEnvironmentTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => broken.ListProjectsAsync());
     }
 }
+
+public class FeatureInfrastructureTests
+{
+    private static void Git(string dir, params string[] args)
+    {
+        var psi = new ProcessStartInfo("git") { WorkingDirectory = dir, RedirectStandardError = true, RedirectStandardOutput = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        p.WaitForExit();
+        Assert.True(p.ExitCode == 0, $"git {string.Join(' ', args)}: {p.StandardError.ReadToEnd()}");
+    }
+
+    private static (string Main, string Tmp) Repo()
+    {
+        var tmp = Directory.CreateTempSubdirectory("git").FullName;
+        var origin = Path.Combine(tmp, "origin.git");
+        var main = Path.Combine(tmp, "main");
+        Git(tmp, "init", "--bare", "-b", "develop", origin);
+        Git(tmp, "clone", origin, main);
+        Git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "--allow-empty", "-m", "primo");
+        Git(main, "push", "origin", "HEAD:develop");
+        return (main, tmp);
+    }
+
+    [Fact]
+    public async Task Il_ramo_della_funzionalita_nasce_da_develop_si_pubblica_e_una_seconda_volta_si_riusa()
+    {
+        var (main, tmp) = Repo();
+        var ws = new GitWorkspace(Path.Combine(tmp, "_wt"));
+        var area = Tx.AzureArea with { Folder = main };
+        var f = new FeatureInfo(10, "Preventivi rapidi", "New", ["bug"], null, null);
+        Assert.Equal("bugfix/f10-preventivi-rapidi", await ws.PublishFeatureBranchAsync(area, f, bug: true));
+        Git(main, "ls-remote", "--exit-code", "--heads", "origin", "bugfix/f10-preventivi-rapidi");
+        Assert.Equal("bugfix/f10-preventivi-rapidi", await ws.PublishFeatureBranchAsync(area, f with { Title = "Altro" }, bug: false));
+        // il worktree di una card della funzionalita parte dal ramo della funzionalita
+        var (branch, folder) = await ws.CreateWorktreeAsync(area, new Card(42, 1, "Una card", "Ready", [], null), "bugfix/f10-preventivi-rapidi");
+        Assert.Equal("feature/42-una-card", branch);
+        // la card di chiusura: worktree detached sul ramo, poi riportato al ramo aggiornato
+        var closing = await ws.UpdateClosingWorktreeAsync(area, new Card(90, 1, "Chiusura", "Ready", [], null), "bugfix/f10-preventivi-rapidi");
+        Assert.True(Directory.Exists(closing));
+        Assert.Equal(closing, await ws.UpdateClosingWorktreeAsync(area, new Card(90, 1, "Chiusura", "Ready", [], null), "bugfix/f10-preventivi-rapidi"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ws.UpdateClosingWorktreeAsync(area, new Card(42, 1, "Una card", "Ready", [], null), "bugfix/f10-preventivi-rapidi"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ws.UpdateClosingWorktreeAsync(area, new Card(91, 1, "X", "Ready", [], null), "feature/f99"));
+        Directory.Delete(tmp, true);
+    }
+
+    [Fact]
+    public async Task Gli_errori_della_build_sono_i_test_falliti_e_le_righe_error_dei_passi_falliti_e_un_guasto_senza_codice_e_null()
+    {
+        const string log = "2026-11-20T10:00:00.000Z Build started\n  Passed Test.Uno\n  Failed Test.Due [12 ms]\n  Error Message:\n   Assert.Equal failed\n  Passed Test.Tre\n##[error]Process completed with exit code 1.";
+        var h = new FakeHttp((r, _) => r.RequestUri!.ToString().Contains("/timeline")
+            ? FakeHttp.Ok("""{ "records": [ { "type": "Task", "result": "failed", "name": "Test", "log": { "url": "https://acme.visualstudio.com/x/_apis/build/builds/7/logs/3" } }, { "type": "Task", "result": "succeeded", "name": "Build" } ] }""")
+            : (HttpStatusCode.OK, log));
+        var errors = await new AzurePipelinesCi(Tx.Ado(h)).GetBuildErrorsAsync(Tx.AzureArea, 7);
+        Assert.Equal("Passo 'Test' fallito.\n\n  Failed Test.Due [12 ms]\n  Error Message:\n   Assert.Equal failed\n##[error]Process completed with exit code 1.", errors);
+        var infra = new FakeHttp((r, _) => r.RequestUri!.ToString().Contains("/timeline")
+            ? FakeHttp.Ok("""{ "records": [ { "type": "Task", "result": "failed", "name": "Deploy", "log": { "url": "https://x/logs/1" } } ] }""")
+            : (HttpStatusCode.OK, "##[error]The agent lost communication with the server"));
+        Assert.Null(await new AzurePipelinesCi(Tx.Ado(infra)).GetBuildErrorsAsync(Tx.AzureArea, 8));
+    }
+
+    [Fact]
+    public async Task La_Bug_nasce_con_padre_descrizione_e_assegnatario_poi_tag_e_stato_in_una_seconda_scrittura()
+    {
+        var h = new FakeHttp((r, _) => FakeHttp.Ok("""{ "id": 501 }"""));
+        var names = SuiteConfig.Load(Tx.Root).Names;
+        var id = await new AdoBoard(Tx.Ado(h), "DevOps.Agents", names).CreateBugAsync(new NewBug("Totale", "## Descrizione\nx", null, "DevOps.Agents\\AI\\Stime", 10, ["agents"], StateKeys.New, "t@example.invalid"));
+        Assert.Equal(501, id);
+        Assert.Equal("https://acme.visualstudio.com/DevOps.Agents/_apis/wit/workitems/$Bug?api-version=7.1", h.Calls[0].Url);
+        var create = JsonNode.Parse(h.Calls[0].Body)!.AsArray();
+        Assert.Contains(create, o => o!["path"]!.GetValue<string>() == "/fields/Microsoft.VSTS.TCM.ReproSteps");
+        Assert.Contains(create, o => o!["path"]!.GetValue<string>() == "/relations/-" && o["value"]!["rel"]!.GetValue<string>() == "System.LinkTypes.Hierarchy-Reverse");
+        var then = JsonNode.Parse(h.Calls[1].Body)!.AsArray();
+        Assert.Equal(("agents", "New"), (then[0]!["value"]!.GetValue<string>(), then[1]!["value"]!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task I_rami_si_elencano_per_prefisso_su_Azure_Repos_e_su_GitHub()
+    {
+        var ado = new FakeHttp((_, _) => FakeHttp.Ok("""{ "value": [ { "name": "refs/heads/feature/f10-x" } ] }"""));
+        Assert.Equal(["feature/f10-x"], await new AzureReposCodeHost(Tx.Ado(ado)).ListBranchesAsync(Tx.AzureArea, "feature/f10"));
+        Assert.Contains("refs?filter=heads%2Ffeature%2Ff10", ado.Calls[0].Url);
+        var gh = new FakeHttp((_, _) => FakeHttp.Ok("""[ { "ref": "refs/heads/bugfix/f10-y" } ]"""));
+        Assert.Equal(["bugfix/f10-y"], await Tx.Gh(gh).ListBranchesAsync(Tx.GitHubArea, "bugfix/f10"));
+    }
+}

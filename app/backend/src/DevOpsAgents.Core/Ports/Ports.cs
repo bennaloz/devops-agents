@@ -20,6 +20,10 @@ public interface IBoard
     Task RemoveTagAsync(int cardId, string tag, CancellationToken ct = default);
     /// <summary>D60: le Feature aperte delle aree date, con rank e tag. Un errore ferma il giro: senza, una Feature in pausa ripartirebbe.</summary>
     Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default);
+    /// <summary>D52: le card figlie di una Feature (relazione Parent), con stato e tag.</summary>
+    Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default);
+    /// <summary>D52: una Bug figlia della Feature (correzione o allinea-develop), assegnata, con i tag e lo stato iniziale. Restituisce l'id.</summary>
+    Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default);
     /// <summary>D60: l'ordine del backlog (Microsoft.VSTS.Common.StackRank).</summary>
     Task SetRankAsync(int workItemId, double rank, CancellationToken ct = default);
     string CardUrl(int cardId);
@@ -36,6 +40,10 @@ public interface ICodeHost
     /// <summary>Rilancia le validazioni rosse (o, con <paramref name="expiredOnly"/>, quelle scadute). Restituisce quante.</summary>
     Task<int> RequeueValidationsAsync(AreaMapping area, string branch, string destination, bool expiredOnly, CancellationToken ct = default);
     string PullRequestUrl(AreaMapping area, int prId);
+    /// <summary>D52: i rami su origin che cominciano con il prefisso (feature/f10 trova feature/f10 e feature/f10-titolo).</summary>
+    Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping area, string prefix, CancellationToken ct = default);
+    /// <summary>Una PR per numero: stato (active, completed, abandoned) e ramo sorgente; null se non c'e.</summary>
+    Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default);
     /// <summary>true se la PR deve essere collegata alla card con un link (GitHub); Azure Repos la collega da se.</summary>
     bool NeedsCardLink { get; }
 }
@@ -51,13 +59,22 @@ public interface ICiService
 {
     Task<int> QueueTestDeployAsync(AreaMapping area, string branch, IReadOnlyList<string> on, IReadOnlyList<string> off, CancellationToken ct = default);
     Task<PipelineRun> GetRunAsync(AreaMapping area, int runId, CancellationToken ct = default);
+    /// <summary>D52: gli errori di codice di una build (test falliti, errori di compilazione) dai log dei passi falliti; null se non ce ne sono.</summary>
+    Task<string?> GetBuildErrorsAsync(AreaMapping area, int buildId, CancellationToken ct = default);
 }
+
+/// <summary>D52: una Bug da creare sotto una Feature. InitialState: la chiave di stato in cui deve nascere (null = resta nello stato iniziale, Draft).</summary>
+public sealed record NewBug(string Title, string Description, string? Criteria, string Area, int ParentId, IReadOnlyList<string> Tags, string? InitialState, string AssignedTo);
 
 /// <summary>I worktree delle card sul disco: uno per card, dal ramo pubblicato o da origin/develop.</summary>
 public interface IWorkspace
 {
     Task<(string Branch, string Folder)> CreateWorktreeAsync(AreaMapping area, Card card, string? baseBranch, CancellationToken ct = default);
     Task RemoveWorktreeAsync(AreaMapping area, string folder, CancellationToken ct = default);
+    /// <summary>D52: il ramo della funzionalita (feature/ o bugfix/f&lt;id&gt;-&lt;titolo&gt;) da origin/develop e pubblicato; se c'e gia, quello.</summary>
+    Task<string> PublishFeatureBranchAsync(AreaMapping area, FeatureInfo feature, bool bug, CancellationToken ct = default);
+    /// <summary>D52: il worktree in sola lettura della card di chiusura (detached su origin/&lt;ramo&gt;), creato o riportato al ramo aggiornato.</summary>
+    Task<string> UpdateClosingWorktreeAsync(AreaMapping area, Card card, string branch, CancellationToken ct = default);
     bool Exists(string folder) => Directory.Exists(folder);
 }
 

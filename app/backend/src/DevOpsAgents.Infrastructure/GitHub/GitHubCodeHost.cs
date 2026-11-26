@@ -148,6 +148,16 @@ public sealed class GitHubCodeHost(HttpClient http, Func<string> token, AdoClien
     }
 
     public string PullRequestUrl(AreaMapping area, int prId) => $"https://github.com/{Repo(area)}/pull/{prId}";
+
+    public async Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping area, string prefix, CancellationToken ct = default) =>
+        (await SendAsync(HttpMethod.Get, $"/repos/{Repo(area)}/git/matching-refs/heads/{prefix}", ct: ct)).Items()
+            .Select(r => (r.Str("ref") ?? "").Replace("refs/heads/", "")).Where(n => n.Length > 0).ToList();
+
+    public async Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default)
+    {
+        var pr = await SendAsync(HttpMethod.Get, $"/repos/{Repo(area)}/pulls/{prId}", ct: ct);
+        return pr is null ? null : (StatusOf(pr), pr.Str("head", "ref") ?? "");
+    }
 }
 
 /// <summary>Sceglie Azure Repos o GitHub per l'area.</summary>

@@ -34,6 +34,12 @@ internal static class Fx
     /// <summary>Una card in quello stato, entrata alla revisione 10 un'ora fa, con il tag agents.</summary>
     public static CardBuilder Card(string stateKey) => new(stateKey);
 
+    public static readonly FeatureInfo Feature10 = new(10, "Preventivi", "Active", [], "DevOps.Agents\\AI\\Stime", 1000);
+
+    /// <summary>D52: una funzionalita con la card di chiusura 90 nello stato dato e le sorelle date (id, chiave di stato).</summary>
+    public static FeatureContext Feature(bool closing = false, string closingState = StateKeys.New, string? branch = "feature/f10-preventivi", FeatureInfo? feature = null, params (int Id, string State)[] siblings) =>
+        new(feature ?? Feature10, closing, 90, Names[closingState], branch, siblings.Select(x => new Sibling(x.Id, Names[x.State], [])).ToList());
+
     public static SessionRecord Session(string role, string? outcome, string? reason = null, int minutesAfterT0 = 30, string? text = null, int? task = null, bool finished = true) =>
         new()
         {
@@ -55,10 +61,17 @@ internal sealed class CardBuilder(string stateKey)
     private AreaMapping? _area = Fx.Area;
     private string? _from = StateKeys.Ready;
     private int? _parent;
+    private FeatureContext? _feature;
+    private string? _buildErrors;
+    private readonly List<Comment> _all = [];
     public CardLocalState Local { get; } = new();
 
     public CardBuilder Tag(string tag) { _tags.Add(tag); return this; }
     public CardBuilder Parent(int featureId) { _parent = featureId; return this; }
+    /// <summary>D52: la funzionalita della card (Feature 10, card di chiusura 90).</summary>
+    public CardBuilder InFeature(FeatureContext f) { _feature = f; _parent = f.Feature.Id; return this; }
+    public CardBuilder BuildErrors(string text) { _buildErrors = text; return this; }
+    public CardBuilder OldComment(string author, string text) { _all.Add(new Comment(100 + _all.Count, author, text, Fx.T0)); return this; }
     public CardBuilder NoAgentsTag() { _tags.Remove(Fx.Names.AgentsTag); return this; }
     public CardBuilder OnHold(string? per = null) { _tags.Add(Fx.Names.OnHoldTag); Local.WaitingFor = per; return this; }
     public CardBuilder WaitingFor(string per) { Local.WaitingFor = per; return this; }
@@ -93,6 +106,6 @@ internal sealed class CardBuilder(string stateKey)
         var history = new List<StateChange>(_history);
         if (_from is not null) history.Add(new StateChange(10, Fx.N(_from), Fx.N(stateKey), Fx.T0));
         var card = new Card(42, 12, "Importare le stime", Fx.N(stateKey), _tags, _area?.Area, ParentId: _parent);
-        return new Snapshot(card, Local, _area, _comments, history, _tasks, _preds, _pr, _run, _deploy);
+        return new Snapshot(card, Local, _area, _comments, history, _tasks, _preds, _pr, _run, _deploy, _feature, _all.Concat(_comments).ToList(), _buildErrors);
     }
 }

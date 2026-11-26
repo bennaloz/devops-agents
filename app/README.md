@@ -93,7 +93,7 @@ script al posto di claude).
 | Collaudo nell'ambiente Docker della card (D59): creazione da compose nel worktree, slot e porte, limite `ambientiCollaudo`, URL al collaudatore, ambiente buttato all'uscita dal Test e orfani; credenziali di prova `COLLAUDO_*` al collaudatore | portato, con test (docker finto) |
 | Cosa fare negli on-hold (D57): gesto del ruolo o testo predefinito nel commento, nello stato e nella dashboard; descrizione della PR salvata prima della PR (D58) e titolo dal ramo | portato, con test |
 | Quota letta dai `rate_limit_event` delle sessioni, pausa dopo il limite di token (D51) | portato |
-| Funzionalita di piu card con card di chiusura (D52) | **manca**: le card di una Feature sono trattate come isolate |
+| Funzionalita di piu card con card di chiusura (D52): ramo della funzionalita, card In feature branch, card di chiusura con PR verso develop, sorelle, vincolo sul commit, CI rossa al responsabile, Bug di correzione e allinea-develop, Feature Active e Resolved, worktree in sola lettura del collaudatore | portato, con test. Manca: la Feature che passa Closed quando la card di chiusura si chiude, e il ramo dalla PR collegata alla card per una chiusura senza stato locale |
 | Passata del responsabile prima di un on-hold (D42), on-hold sciolti da soli (D51), riprese automatiche dopo silenzio | **manca** |
 | Mentore e memoria dei ruoli (D46), presa in carico da un altro PC (`AdottaCard`), sessione altrui recente | **manca** |
 | Supervisore, Telegram, aggiornamento automatico della suite (D53) | **manca** |

@@ -12,7 +12,7 @@ namespace DevOpsAgents.Api.Demo;
 /// </summary>
 public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService, IWorkspace, ISessionRunner, IStateStore
 {
-    public static readonly Person Me = new("demo-1", "Titolare");
+    public static readonly Person Me = new("demo-1", "Titolare", "titolare@example.invalid");
     private readonly object _lock = new();
     private readonly StateNames _names;
     private readonly IClock _clock;
@@ -97,6 +97,19 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
         return Task.CompletedTask;
     }
     public Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<FeatureInfo>>(_features.ToList()); }
+    public Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<Card>>(_cards.Where(c => c.ParentId == featureId).ToList()); }
+    public Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            var id = 200 + _nextId++;
+            var key = bug.InitialState ?? K.Draft;
+            _cards.Add(new Card(id, 1, bug.Title, _names[key], bug.Tags.ToList(), bug.Area, Me, Me, "Bug", bug.ParentId));
+            _history[id] = [new StateChange(1, null, _names[key], _clock.Now)];
+            _comments[id] = [];
+            return Task.FromResult(id);
+        }
+    }
     public Task SetRankAsync(int id, double rank, CancellationToken ct = default)
     {
         lock (_lock) { var f = _features.FindIndex(x => x.Id == id); if (f >= 0) _features[f] = _features[f] with { Rank = rank }; }
@@ -129,6 +142,18 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
     }
     public Task<int> RequeueValidationsAsync(AreaMapping a, string b, string d, bool expired, CancellationToken ct = default) => Task.FromResult(0);
     public string PullRequestUrl(AreaMapping a, int id) => $"#pr-{id}";
+    private readonly List<string> _branches = [];
+    public Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping a, string prefix, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<string>>(_branches.Where(b => b.StartsWith(prefix)).ToList()); }
+    public Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping a, int id, CancellationToken ct = default)
+    {
+        lock (_lock) return Task.FromResult<(string, string)?>(_prs.Where(p => p.Value.Id == id).Select(p => ((string, string)?)(p.Value.Status, p.Key)).FirstOrDefault());
+    }
+    public Task<string?> GetBuildErrorsAsync(AreaMapping a, int buildId, CancellationToken ct = default) => Task.FromResult<string?>(null);
+    public Task<string> PublishFeatureBranchAsync(AreaMapping a, FeatureInfo f, bool bug, CancellationToken ct = default)
+    {
+        lock (_lock) { var name = $"feature/f{f.Id}-demo"; if (!_branches.Contains(name)) _branches.Add(name); return Task.FromResult(name); }
+    }
+    public Task<string> UpdateClosingWorktreeAsync(AreaMapping a, Card c, string branch, CancellationToken ct = default) => Task.FromResult($"demo://wt/card-{c.Id}");
 
     // ---- ICiService ----
     public Task<int> QueueTestDeployAsync(AreaMapping a, string b, IReadOnlyList<string> on, IReadOnlyList<string> off, CancellationToken ct = default) { lock (_lock) return Task.FromResult(_nextId++); }

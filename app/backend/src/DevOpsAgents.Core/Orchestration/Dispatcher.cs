@@ -54,9 +54,16 @@ public sealed class Dispatcher(
     public const int PrDescriptionLimit = 4000 - 70;
     private static readonly Regex DeployLine = new(@"^\s*\[responsabile\]\s*" + Regex.Escape(DeployMark) + "(.*)$", RegexOptions.Compiled);
 
+    // D52: per il giro, le figlie e il ramo di ogni Feature letti una volta, e l'utente (le Bug nuove gli vanno assegnate)
+    private Dictionary<int, IReadOnlyList<Card>> _children = new();
+    private Dictionary<int, string?> _featureBranches = new();
+    private Dictionary<int, FeatureInfo> _features = new();
+    private Person? _me;
+
     public async Task<RoundReport> RunRoundAsync(bool whatIf, int? onlyCard = null, CancellationToken ct = default)
     {
         var started = clock.Now;
+        _children = new(); _featureBranches = new();
         var log = new List<string>();
         void Log(string m) { log.Add(m); logger.LogInformation("{Message}", m); }
 
@@ -66,12 +73,14 @@ public sealed class Dispatcher(
         // D60: le Feature aperte, per la pausa e per l'ordine. Se non si leggono il giro si ferma: senza, una Feature in pausa ripartirebbe.
         var features = await board.GetOpenFeaturesAsync(areas.Select(a => a.Area).ToList(), ct);
         var featureMap = features.ToDictionary(f => f.Id);
+        _features = featureMap;
         var settings = settingsStore is null ? new SystemSettings() : await settingsStore.LoadAsync(ct);
         var quota = quotaStore is null ? null : await quotaStore.LoadAsync(ct);
         var overrides = quotaStore is null ? null : await quotaStore.LoadOverridesAsync(ct);
         var featureReports = FeaturePriority.Order(features).Select(f => new FeatureReport(f.Id, f.Title, f.State, f.Rank, f.HasTag(names.PausedTag), f.Area)).ToList();
 
-        var me = _options.OnlyMine ? await board.GetCurrentUserAsync(ct) : null;
+        _me = await board.GetCurrentUserAsync(ct);
+        var me = _options.OnlyMine ? _me : null;
         // D60: un posto libero (sessioni, repo, Test) va alla card della Feature piu in alto
         var cards = FeaturePriority.OrderCards((await board.GetActiveCardsAsync(ct))
             .Where(c => onlyCard is null || c.Id == onlyCard)
@@ -221,7 +230,59 @@ public sealed class Dispatcher(
             : local.RunId is { } runId ? await ci.GetRunAsync(area, runId, ct) : null;
         var deploy = ParseDeployChoice(comments);
         var fresh = comments.Where(c => c.Id > local.LastCommentId).ToList();
-        return new Snapshot(card, local, area, fresh, history, tasks, preds, pr, run, deploy);
+        var feature = await FeatureContextAsync(card, area, ct);
+        var errors = feature is { IsClosing: true, Error: null } ? await ClosingBuildErrorsAsync(key, area, local, pr, run, ct) : null;
+        return new Snapshot(card, local, area, fresh, history, tasks, preds, pr, run, deploy, feature, comments, errors);
+    }
+
+    /// <summary>
+    /// D52: la funzionalita della card, se la sua Feature (aperta, delle aree della mappa) ha una card di chiusura: le sorelle (senza le
+    /// Removed e senza la card stessa), lo stato della chiusura, il ramo su origin. Una lettura fallita e un errore che ferma la card.
+    /// </summary>
+    private async Task<FeatureContext?> FeatureContextAsync(Card card, AreaMapping area, CancellationToken ct)
+    {
+        if (card.ParentId is not { } fid || !_features.TryGetValue(fid, out var f)) return null;
+        try
+        {
+            if (!_children.TryGetValue(fid, out var children)) _children[fid] = children = await board.GetFeatureChildrenAsync(fid, ct);
+            var closing = children.FirstOrDefault(c => names.ClosingTag is { } t && c.Tags.Contains(t, StringComparer.OrdinalIgnoreCase));
+            if (closing is null) return null;
+            if (!_featureBranches.TryGetValue(fid, out var branch))
+            {
+                var found = new List<string>();
+                foreach (var prefix in new[] { $"feature/f{fid}", $"bugfix/f{fid}" })
+                    found.AddRange((await code.For(area).ListBranchesAsync(area, prefix, ct)).Where(b => System.Text.RegularExpressions.Regex.IsMatch(b, $@"^(feature|bugfix)/f{fid}(-.*)?$")));
+                if (found.Count > 1) throw new InvalidOperationException($"Su origin c'e piu di un ramo della funzionalita {fid}: {string.Join(", ", found)}. Quale vale lo decide una persona");
+                _featureBranches[fid] = branch = found.SingleOrDefault();
+            }
+            var siblings = children.Where(c => c.Id != card.Id && c.Id != closing.Id && names.KeyOf(c.State) != K.Removed)
+                .Select(c => new Sibling(c.Id, c.State, c.Tags)).ToList();
+            return new FeatureContext(f, card.Id == closing.Id, closing.Id, closing.State, branch, siblings);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return FeatureContext.Failed(e.Message);
+        }
+    }
+
+    /// <summary>
+    /// D52: gli errori di codice della build rossa della card di chiusura (validazione della PR in Ready to develop e Ready to merge, run del
+    /// deploy in Deploying to test), letti una volta per build: l'esito resta nello stato. Una lettura fallita non si ricorda: si riprova.
+    /// </summary>
+    private async Task<string?> ClosingBuildErrorsAsync(string? key, AreaMapping area, CardLocalState local, PullRequestInfo? pr, PipelineRun? run, CancellationToken ct)
+    {
+        int? build = null;
+        if (key is K.Ready or K.ReadyToMerge && pr is { Status: PrStatuses.Active, Validation: Validations.Red, BuildId: { } b }) build = b;
+        else if (key == K.DeployingToTest && run is { Status: "completed" } && run.Result != "succeeded" && local.RunId is { } r) build = r;
+        if (build is null) return null;
+        if (local.BuildErrorsOf == build.ToString()) return local.BuildErrors;
+        try
+        {
+            var text = await ci.GetBuildErrorsAsync(area, build.Value, ct);
+            local.BuildErrorsOf = build.ToString(); local.BuildErrors = text;
+            return text;
+        }
+        catch (Exception e) when (e is not OperationCanceledException) { logger.LogWarning("errori della build {Build} non letti: {Error}", build, e.Message); return null; }
     }
 
     /// <summary>L'ultima scelta del deploy scritta dal responsabile: "[responsabile] Parametri del deploy in Test: a, b".</summary>
@@ -250,6 +311,8 @@ public sealed class Dispatcher(
             case CreateTestEnvironment env:
             {
                 var envs = testEnvironments ?? throw new InvalidOperationException("Gli ambienti di collaudo non sono configurati (config/collaudo.json)");
+                // D52: per la card di chiusura l'ambiente si crea dal suo worktree in sola lettura, riportato al ramo della funzionalita
+                if (s.Feature is { IsClosing: true } && local.Branch is { } closingBranch) local.Folder = await workspace.UpdateClosingWorktreeAsync(area, card, closingBranch, ct);
                 if (local.Folder is not { } wt || !workspace.Exists(wt))
                     throw new InvalidOperationException($"La card non ha un worktree utilizzabile (cartella salvata: '{local.Folder}'): non posso creare l'ambiente di collaudo");
                 var used = state.Where(kv => kv.Key != card.Id && kv.Value.TestSlot is not null).Select(kv => kv.Value.TestSlot!.Value).ToHashSet();
@@ -280,12 +343,75 @@ public sealed class Dispatcher(
             case ResetDeploy:
                 local.RunId = null; local.RunAfterRev = null;
                 break;
+            case ResetCiRed:
+                local.CiRedInARow = 0;
+                break;
+            case CreateFeatureBranch fb:
+            {
+                var feature = _features.TryGetValue(fb.FeatureId, out var fi) ? fi : throw new InvalidOperationException($"La Feature {fb.FeatureId} non e fra quelle lette dal giro: non posso creare il ramo della funzionalita");
+                var bug = names.BugFeatureTag is { } bt && feature.HasTag(bt);
+                // nella cache del giro: la card dopo della stessa Feature non lo ricrea, e il CreaWorktree che segue lo usa come base
+                _featureBranches[fb.FeatureId] = await workspace.PublishFeatureBranchAsync(area, feature, bug, ct);
+                logger.LogInformation("card {Card}: ramo della funzionalita {Branch}", card.Id, _featureBranches[fb.FeatureId]);
+                break;
+            }
+            case UpdateFeature uf:
+                // lo stato della Feature e un riepilogo per chi guarda il backlog: se non si scrive la card non si ferma, il giro dopo riprova
+                try
+                {
+                    await board.SetStateAsync(uf.FeatureId, names[uf.State], ct);
+                    if (uf.CloseLater) local.FeatureToClose = uf.FeatureId;
+                    if (_features.TryGetValue(uf.FeatureId, out var old)) _features[uf.FeatureId] = old with { State = names[uf.State] };
+                }
+                catch (Exception e) when (e is not OperationCanceledException) { logger.LogError("card {Card}: la Feature {Feature} non e passata in {State}: {Error}", card.Id, uf.FeatureId, uf.State, e.Message); }
+                break;
+            case SetClosingBranch cb:
+                if (cb.FromLinkedPr)
+                {
+                    // in Ready to release senza stato locale il ramo e gia cancellato dal merge: lo ricorda la PR della card
+                    if (local.PrId is not { } linkedId || await code.For(area).GetPullRequestByIdAsync(area, linkedId, ct) is not { Status: PrStatuses.Completed } linked)
+                        throw new InvalidOperationException($"La card di chiusura {card.Id} e in Ready to release ma non ha una PR completata nota: non so quale ramo guardare");
+                    local.Branch = linked.Branch;
+                }
+                else local.Branch = cb.Branch;
+                local.Destination = "develop";
+                local.Folder = null;
+                break;
+            case CreateCorrection cc:
+            {
+                var feature = _features.TryGetValue(cc.FeatureId, out var fi) ? fi : throw new InvalidOperationException($"La Feature {cc.FeatureId} non e fra quelle lette dal giro: non posso creare la Bug della correzione");
+                var technical = cc.Nature == "tecnico";
+                var bugText = $"## Descrizione\n{cc.Description}\n\n## Riferimenti\nCorrezione della funzionalita '{feature.Title}' (Feature #{feature.Id}), scritta dal responsabile sulla card di chiusura #{cc.ClosingCardId}.";
+                var bugId = await board.CreateBugAsync(new NewBug(cc.Title, bugText, null, feature.Area ?? area.Area, feature.Id, [names.AgentsTag], technical ? K.New : null, Assignee()), ct);
+                // la marca sulla card di chiusura vale da ogni PC: un secondo tentativo non crea una seconda Bug
+                await board.AddCommentAsync(card.Id, $"[smistatore] Correzione #{cc.Key} -> Bug {bugId}", ct);
+                local.CorrectionsDone.Add(cc.Key);
+                if (!technical)
+                    await board.AddCommentAsync(bugId, $"{Mention(card)}[smistatore] Correzione di prodotto dalla card di chiusura #{card.Id} (Feature {feature.Id}): richiede una scelta tua. La Bug resta in Draft: quando hai deciso, completa descrizione e criteri e portala in New.", ct);
+                break;
+            }
+            case CreateAlignDevelop al:
+            {
+                var feature = _features.TryGetValue(al.FeatureId, out var fi) ? fi : throw new InvalidOperationException($"La Feature {al.FeatureId} non e fra quelle lette dal giro: non posso creare la Bug allinea-develop");
+                var alignText = $"## Descrizione\nLa PR {al.Branch} → develop della funzionalita (Feature #{feature.Id}) ha conflitti con develop e non si puo unire.\n\n" +
+                    $"Unisci origin/develop nel ramo di questa card (nato da {al.Branch}) con un merge, mai con rebase, e risolvi i conflitti tenendo il comportamento di tutte e due le parti. La PR di questa card va verso {al.Branch}.";
+                var tags = new List<string> { names.AgentsTag };
+                if (names.AlignTag is { } at) tags.Add(at);
+                var bugId = await board.CreateBugAsync(new NewBug($"Allinea {al.Branch} a develop", alignText, $"la PR {al.Branch} → develop non ha conflitti", feature.Area ?? area.Area, feature.Id, tags, K.Ready, Assignee()), ct);
+                await board.AddCommentAsync(card.Id, $"[smistatore] Allinea-develop @{al.Commit} -> Bug {bugId}", ct);
+                if (al.Commit.Length > 0) local.AlignDone.Add(al.Commit);
+                break;
+            }
             case MoveCard m:
                 await board.SetStateAsync(card.Id, names[m.State], ct);
                 if (m.State == K.InReview) local.RedInARow = 0;
+                // in Ready to merge il collaudo e superato (o saltato): i respinti di prima non contano piu
+                if (m.State == K.ReadyToMerge) local.TestRounds = 0;
                 break;
             case MoveBack b:
                 await board.SetStateAsync(card.Id, names[b.State], ct);
+                // D52: la testa con cui la card di chiusura e tornata indietro: un secondo ritorno per la stessa e un on-hold
+                if (b.Commit is not null) local.ReturnCommit = b.Commit;
                 await board.AddCommentAsync(card.Id, $"[smistatore] {b.Reason}", ct);
                 break;
             case PutOnHold h:
@@ -303,9 +429,14 @@ public sealed class Dispatcher(
                 local.Notices.Add(n.Key);
                 break;
             case CreateWorktree w:
-                var (branch, folder) = await workspace.CreateWorktreeAsync(area, card, w.Base, ct);
-                local.Branch = branch; local.Folder = folder; local.Destination = w.Base ?? "develop";
+            {
+                // D52: con la base vuota il ramo l'ha appena creato CreaRamoFunzionalita
+                var baseBranch = w.FeatureCard ? w.Base ?? (card.ParentId is { } p && _featureBranches.TryGetValue(p, out var fb) ? fb : null)
+                    ?? throw new InvalidOperationException("Il ramo della funzionalita non c e: non posso creare il worktree della card") : w.Base;
+                var (branch, folder) = await workspace.CreateWorktreeAsync(area, card, baseBranch, ct);
+                local.Branch = branch; local.Folder = folder; local.Destination = baseBranch ?? "develop";
                 break;
+            }
             case RemoveWorktree when local.Folder is { } f:
                 await workspace.RemoveWorktreeAsync(area, f, ct);
                 local.Folder = null;
@@ -336,6 +467,7 @@ public sealed class Dispatcher(
                 await code.For(area).RequeueValidationsAsync(area, br3, local.Destination ?? "develop", true, ct);
                 break;
             case RequeueValidation r when local.Branch is { } br4:
+                if (r.SessionId.Length == 0) local.CiRedRetry = false;
                 await code.For(area).RequeueValidationsAsync(area, br4, local.Destination ?? "develop", false, ct);
                 local.Relaunches++; local.RelaunchOf = r.SessionId;
                 break;
@@ -380,6 +512,9 @@ public sealed class Dispatcher(
     {
         var previous = local.Of(l.Role);
         var message = ComposeMessage(l, s);
+        // D52: il collaudatore della card di chiusura legge il ramo della funzionalita in un worktree in sola lettura, rinnovato a ogni lancio
+        if (l.ClosingWorktree && local.Branch is { } closingBranch) local.Folder = await workspace.UpdateClosingWorktreeAsync(area, s.Card, closingBranch, ct);
+        if (l.Build is not null) { local.CiRedHandled = l.Build; local.CiRedInARow++; local.CiRedRetry = false; }
         var id = await sessions.StartAsync(new SessionRequest(l.Role, s.Card.Id, area, local.Folder, message,
             l.Resume ? previous?.Id : null, l.Resume, l.TaskId, local.Destination), ct);
         local.RunningSession = id;
@@ -412,6 +547,10 @@ public sealed class Dispatcher(
     }
 
     private static string Mention(Card c) => c.AssignedTo is { } p ? $"@{p.Name} " : "";
+
+    /// <summary>Le Bug nuove si assegnano all'utente dello smistatore: senza, nessuno smistatore le prenderebbe.</summary>
+    private string Assignee() => _me?.UniqueName is { Length: > 0 } u ? u
+        : throw new InvalidOperationException("Non trovo l'indirizzo dell'utente dello smistatore: la Bug nascerebbe senza assegnatario e nessuno smistatore la prenderebbe. Non la creo");
 
     public static string Describe(AgentAction a) => a switch
     {

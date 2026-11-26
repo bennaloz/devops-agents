@@ -12,7 +12,7 @@ namespace DevOpsAgents.Core.Tests;
 /// <summary>Un mondo finto in memoria: board, repo, pipeline, worktree, sessioni e stato. Registra ogni scrittura.</summary>
 internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, IWorkspace, ISessionRunner, IStateStore, IClock
 {
-    public static readonly Person Me = new("u-1", "Titolare");
+    public static readonly Person Me = new("u-1", "Titolare", "titolare@example.invalid");
     public List<Card> Cards { get; } = [];
     public Dictionary<int, List<Comment>> Comments { get; } = new();
     public Dictionary<int, List<StateChange>> History { get; } = new();
@@ -58,6 +58,22 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     public Task RemoveTagAsync(int id, string tag, CancellationToken ct = default) { Writes.Add($"togli {id} {tag}"); return Task.CompletedTask; }
     public Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<FeatureInfo>>(Features.ToList());
     public Task SetRankAsync(int id, double rank, CancellationToken ct = default) { Writes.Add($"rank {id} {rank}"); return Task.CompletedTask; }
+    public Dictionary<int, List<Card>> Children { get; } = new();
+    public Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Card>>(Children.GetValueOrDefault(featureId) ?? []);
+    public List<NewBug> Bugs { get; } = [];
+    public Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default) { Bugs.Add(bug); Writes.Add($"bug {bug.Title}"); return Task.FromResult(500 + Bugs.Count); }
+    public List<string> Branches { get; } = [];
+    public Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping a, string prefix, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(Branches.Where(b => b.StartsWith(prefix)).ToList());
+    public Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping a, int id, CancellationToken ct = default) => Task.FromResult<(string, string)?>((PrStatuses.Completed, "feature/f10-x"));
+    public string? BuildErrors { get; set; }
+    public Task<string?> GetBuildErrorsAsync(AreaMapping a, int buildId, CancellationToken ct = default) => Task.FromResult(BuildErrors);
+    public Task<string> PublishFeatureBranchAsync(AreaMapping a, FeatureInfo f, bool bug, CancellationToken ct = default)
+    {
+        var name = $"{(bug ? "bugfix" : "feature")}/f{f.Id}-x";
+        Writes.Add($"ramo {name}"); Branches.Add(name);
+        return Task.FromResult(name);
+    }
+    public Task<string> UpdateClosingWorktreeAsync(AreaMapping a, Card c, string branch, CancellationToken ct = default) { Writes.Add($"chiusura {c.Id} {branch}"); return Task.FromResult($"/wt/{c.Id}"); }
 
     // ICodeHost
     public ICodeHost For(AreaMapping area) => this;
@@ -81,7 +97,7 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     // IWorkspace
     public Task<(string Branch, string Folder)> CreateWorktreeAsync(AreaMapping a, Card c, string? b, CancellationToken ct = default)
     {
-        Writes.Add($"worktree {c.Id}");
+        Writes.Add(b is null ? $"worktree {c.Id}" : $"worktree {c.Id} da {b}");
         return Task.FromResult(($"feature/{c.Id}-card", $"/wt/{c.Id}"));
     }
     public Task RemoveWorktreeAsync(AreaMapping a, string f, CancellationToken ct = default) { Writes.Add($"rimuovi {f}"); return Task.CompletedTask; }

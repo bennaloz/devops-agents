@@ -45,6 +45,45 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
 
     public const string RankField = "Microsoft.VSTS.Common.StackRank";
 
+    public async Task<IReadOnlyList<Card>> GetFeatureChildrenAsync(int featureId, CancellationToken ct = default) =>
+        (await RelatedAsync(featureId, ChildLink, ct)).Select(ToCard).OrderBy(c => c.Id).ToList();
+
+    /// <summary>
+    /// Come New-AdoCard: la Bug nasce con titolo, area, descrizione (ReproSteps, markdown), criteri, assegnatario e padre; poi tag e stato in
+    /// una seconda scrittura (Set-TagCardNata). Se la seconda fallisce la Bug c'e gia: l'errore lo dice, per non ricrearla.
+    /// </summary>
+    public async Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default)
+    {
+        var project = bug.Area.Split('\\')[0];
+        JsonArray ops =
+        [
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.Title", ["value"] = bug.Title },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.AreaPath", ["value"] = bug.Area },
+            new JsonObject { ["op"] = "add", ["path"] = "/multilineFieldsFormat/Microsoft.VSTS.TCM.ReproSteps", ["value"] = "Markdown" },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/Microsoft.VSTS.TCM.ReproSteps", ["value"] = bug.Description },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.AssignedTo", ["value"] = bug.AssignedTo },
+            new JsonObject { ["op"] = "add", ["path"] = "/relations/-", ["value"] = new JsonObject { ["rel"] = ParentLink, ["url"] = $"{ado.Organization}/_apis/wit/workItems/{bug.ParentId}" } },
+        ];
+        if (bug.Criteria is { Length: > 0 } criteria)
+        {
+            ops.Add(new JsonObject { ["op"] = "add", ["path"] = "/multilineFieldsFormat/Microsoft.VSTS.Common.AcceptanceCriteria", ["value"] = "Markdown" });
+            ops.Add(new JsonObject { ["op"] = "add", ["path"] = "/fields/Microsoft.VSTS.Common.AcceptanceCriteria", ["value"] = criteria });
+        }
+        var created = await ado.SendAsync(HttpMethod.Post, $"/{E(project)}/_apis/wit/workitems/$Bug?api-version=7.1", ops, "application/json-patch+json", ct);
+        var id = created.Int("id")!.Value;
+        try
+        {
+            JsonArray then = [new JsonObject { ["op"] = "add", ["path"] = "/fields/System.Tags", ["value"] = string.Join("; ", bug.Tags) }];
+            if (bug.InitialState is { } k) then.Add(new JsonObject { ["op"] = "add", ["path"] = "/fields/System.State", ["value"] = names[k] });
+            await PatchAsync(id, then, ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            throw new InvalidOperationException($"La Bug {id} e nata ma non e a posto: {e.Message}. Non ricrearla: completarla a mano (tag {string.Join(" e ", bug.Tags)}, stato {(bug.InitialState is { } s ? names[s] : names[StateKeys.Draft])})", e);
+        }
+        return id;
+    }
+
     public async Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default)
     {
         if (areas.Count == 0) return [];
@@ -177,7 +216,8 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
     {
         var r = await ado.GetAsync("/_apis/connectionData?api-version=7.1-preview", ct);
         var u = r?["authenticatedUser"];
-        return new Person(u.Str("id") ?? "", u.Str("providerDisplayName") ?? "");
+        // l'indirizzo (properties.Account) serve ad assegnare le Bug che crea lo smistatore
+        return new Person(u.Str("id") ?? "", u.Str("providerDisplayName") ?? "", u?["properties"]?["Account"]?["$value"]?.ToString());
     }
 
     public string CardUrl(int cardId) => $"{ado.Organization}/{E(boardProject)}/_workitems/edit/{cardId}";

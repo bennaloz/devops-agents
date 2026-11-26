@@ -8,7 +8,11 @@ public abstract record AgentAction
 }
 
 /// <summary>LanciaSessione: una sessione claude -p del ruolo, con il motivo e l'allegato.</summary>
-public sealed record LaunchSession(string Role, string Reason, string? Attachment = null, bool Resume = false, int? TaskId = null) : AgentAction
+public sealed record LaunchSession(string Role, string Reason, string? Attachment = null, bool Resume = false, int? TaskId = null,
+    /// <summary>D52: il collaudatore della card di chiusura lavora in un worktree in sola lettura del ramo della funzionalita.</summary>
+    bool ClosingWorktree = false,
+    /// <summary>D52: la build della CI rossa data al responsabile della card di chiusura.</summary>
+    string? Build = null) : AgentAction
 {
     public override string Kind => "LanciaSessione";
 }
@@ -26,18 +30,18 @@ public sealed record MoveCard(string State) : AgentAction
 }
 
 /// <summary>RiportaIndietro: la card torna a uno stato precedente, con un commento che dice perche.</summary>
-public sealed record MoveBack(string State, string Reason) : AgentAction
+public sealed record MoveBack(string State, string Reason, string? Commit = null) : AgentAction
 {
     public override string Kind => "RiportaIndietro";
 }
 
 /// <summary>CreaWorktree: il ramo della card da origin/develop (o dalla base) in un worktree dedicato.</summary>
-public sealed record CreateWorktree(string? Base = null) : AgentAction
+public sealed record CreateWorktree(string? Base = null, bool FeatureCard = false) : AgentAction
 {
     public override string Kind => "CreaWorktree";
 }
 
-public sealed record RemoveWorktree : AgentAction
+public sealed record RemoveWorktree(bool Closing = false) : AgentAction
 {
     public override string Kind => "RimuoviWorktree";
 }
@@ -69,6 +73,41 @@ public sealed record CreateTestEnvironment(int Rev) : AgentAction
 public sealed record DiscardTestEnvironment : AgentAction
 {
     public override string Kind => "ButtaAmbienteCollaudo";
+}
+
+/// <summary>D52: CreaRamoFunzionalita, il ramo della funzionalita da origin/develop, pubblicato (se non c'e gia).</summary>
+public sealed record CreateFeatureBranch(int FeatureId) : AgentAction
+{
+    public override string Kind => "CreaRamoFunzionalita";
+}
+
+/// <summary>D52: AggiornaFeature, lo stato della Feature (chiave di stati.json). CloseLater: ricordarla da chiudere con la card di chiusura.</summary>
+public sealed record UpdateFeature(int FeatureId, string State, bool CloseLater = false) : AgentAction
+{
+    public override string Kind => "AggiornaFeature";
+}
+
+/// <summary>D52: ImpostaRamoChiusura, il ramo della card di chiusura e quello della funzionalita; la PR va verso develop, senza worktree.</summary>
+public sealed record SetClosingBranch(string? Branch, bool FromLinkedPr = false) : AgentAction
+{
+    public override string Kind => "ImpostaRamoChiusura";
+}
+
+/// <summary>D52: CreaCorrezione, la correzione scritta dal responsabile diventa una Bug figlia della Feature.</summary>
+public sealed record CreateCorrection(string Key, string Nature, string Title, string Description, int FeatureId, int ClosingCardId) : AgentAction
+{
+    public override string Kind => "CreaCorrezione";
+}
+
+/// <summary>D52: CreaAllineaDevelop, la PR della funzionalita verso develop e in conflitto: una Bug allinea-develop per quella testa.</summary>
+public sealed record CreateAlignDevelop(int FeatureId, string Branch, string Commit) : AgentAction
+{
+    public override string Kind => "CreaAllineaDevelop";
+}
+
+public sealed record ResetCiRed : AgentAction
+{
+    public override string Kind => "AzzeraCiRosse";
 }
 
 public sealed record RequeueExpiredValidations : AgentAction

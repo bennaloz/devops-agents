@@ -33,7 +33,9 @@ public sealed class GitWorkspace(string worktreeRoot, string git = "git") : IWor
     {
         var folder = Path.Combine(worktreeRoot, area.Repo, $"card-{card.Id}");
         var branch = BranchName(card);
-        await RunAsync(area.Folder, ct, "fetch", "origin");
+        // con la base (D52) si pota: il ramo della card gia unito e cancellato resterebbe come ref remoto vecchio
+        if (baseBranch is not null) await RunAsync(area.Folder, ct, "fetch", "--prune", "origin");
+        else await RunAsync(area.Folder, ct, "fetch", "origin");
         if (Directory.Exists(folder)) return (branch, folder);
         var remote = (await RunAsync(area.Folder, ct, "ls-remote", "--heads", "origin", branch)).Trim();
         if (remote.Length > 0)
@@ -42,6 +44,54 @@ public sealed class GitWorkspace(string worktreeRoot, string git = "git") : IWor
             await RunAsync(area.Folder, ct, "worktree", "add", "-b", branch, folder, $"origin/{baseBranch ?? "develop"}");
         await RunAsync(folder, ct, "push", "-u", "origin", branch);
         return (branch, folder);
+    }
+
+    /// <summary>D52: il nome del ramo della funzionalita: feature/f&lt;id&gt;-&lt;titolo&gt;, o bugfix/ se la Feature ha il tag bug.</summary>
+    public static string FeatureBranchName(FeatureInfo f, bool bug)
+    {
+        var slug = Slug(f.Title);
+        return $"{(bug ? "bugfix" : "feature")}/f{f.Id}{(slug == "card" && f.Title.Trim().Length == 0 ? "" : "-" + slug)}";
+    }
+
+    public static bool IsFeatureBranch(string name, int featureId) => Regex.IsMatch(name, $@"^(feature|bugfix)/f{featureId}(-.*)?$");
+
+    private async Task<string?> FindFeatureBranchAsync(AreaMapping area, int featureId, CancellationToken ct)
+    {
+        await RunAsync(area.Folder, ct, "fetch", "--prune", "origin");
+        var refs = (await RunAsync(area.Folder, ct, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/feature/", "refs/remotes/origin/bugfix/"))
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(r => r.StartsWith("origin/") ? r["origin/".Length..] : r).Where(r => IsFeatureBranch(r, featureId)).ToList();
+        if (refs.Count > 1) throw new InvalidOperationException($"Su origin c'e piu di un ramo della funzionalita {featureId}: {string.Join(", ", refs)}. Quale continuare lo decide una persona");
+        return refs.SingleOrDefault();
+    }
+
+    public async Task<string> PublishFeatureBranchAsync(AreaMapping area, FeatureInfo feature, bool bug, CancellationToken ct = default)
+    {
+        if (await FindFeatureBranchAsync(area, feature.Id, ct) is { } found) return found;
+        var name = FeatureBranchName(feature, bug);
+        try { await RunAsync(area.Folder, ct, "push", "origin", $"refs/remotes/origin/develop:refs/heads/{name}"); return name; }
+        catch (InvalidOperationException e)
+        {
+            // un altro smistatore l'ha pubblicato nel frattempo: si usa il suo; se non c'e il rifiuto e un errore vero
+            return await FindFeatureBranchAsync(area, feature.Id, ct)
+                ?? throw new InvalidOperationException($"git push del ramo {name} della funzionalita {feature.Id} rifiutato: {e.Message}", e);
+        }
+    }
+
+    public async Task<string> UpdateClosingWorktreeAsync(AreaMapping area, Card card, string branch, CancellationToken ct = default)
+    {
+        var folder = Path.Combine(worktreeRoot, area.Repo, $"card-{card.Id}");
+        await RunAsync(area.Folder, ct, "fetch", "--prune", "origin");
+        try { await RunAsync(area.Folder, ct, "rev-parse", "--verify", "--quiet", $"refs/remotes/origin/{branch}"); }
+        catch (InvalidOperationException) { throw new InvalidOperationException($"Su origin non c'e il ramo {branch} della funzionalita: il worktree della card di chiusura {card.Id} non si puo creare"); }
+        if (Directory.Exists(folder))
+        {
+            var current = (await RunAsync(folder, ct, "branch", "--show-current")).Trim();
+            if (current.Length > 0) throw new InvalidOperationException($"Il worktree {folder} e sul ramo '{current}', non e detached: non e quello della card di chiusura, non lo uso");
+            await RunAsync(folder, ct, "checkout", "--detach", "--force", $"origin/{branch}");
+        }
+        else await RunAsync(area.Folder, ct, "worktree", "add", "--detach", folder, $"origin/{branch}");
+        return folder;
     }
 
     public async Task RemoveWorktreeAsync(AreaMapping area, string folder, CancellationToken ct = default)

@@ -102,6 +102,14 @@ export function describeReason(r: BlockReason): string {
     case 'pausa': return r.detail ? `in pausa con la Feature ${r.detail}` : 'in pausa (tag sulla card)';
     case 'senzaFeature': return 'non e figlia di una Feature: collegala a una Feature dalla board';
     case 'pausaSistema': return 'sistema in pausa';
+    case 'funzionalitaIllegibile': return `la funzionalita non si legge: ${r.detail ?? ''}`;
+    case 'funzionalitaPerduta': return `era sul ramo della funzionalita (${r.detail ?? ''}) che non c'e piu: decidi tu dove portarla`;
+    case 'senzaSorelle': return 'card di chiusura senza card sorelle nella Feature';
+    case 'attesaCollaudoFunzionalita': return `aspetta il collaudo della funzionalita (card di chiusura in ${r.detail ?? ''})`;
+    case 'chiusuraInBozza': return r.detail ?? 'la card di chiusura e in Draft';
+    case 'inFeatureSenzaPrUnita': return 'In feature branch ma la PR non risulta completata';
+    case 'conflittiFunzionalita': return `la PR della funzionalita ${r.detail ?? ''} e in conflitto con develop`;
+    case 'ciRossaFunzionalita': return 'la CI della funzionalita e rossa con errori di codice';
     default: return r.type;
   }
 }

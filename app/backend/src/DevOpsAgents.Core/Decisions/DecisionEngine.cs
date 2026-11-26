@@ -63,6 +63,8 @@ public sealed class DecisionEngine
         // D60: una card in pausa (tag sulla card o sulla sua Feature) e una card nuova senza Feature restano ferme. La sessione in
         // corso finisce, ma non ne parte un'altra e la card non si sposta.
         if (PriorityStop(snapshot.Card, ctx) is { } stop) return new Decision([], stop);
+        // D52: la funzionalita della card non si e letta. Non e una card isolata (partirebbe dal ramo sbagliato): aspetta una lettura.
+        if (snapshot.Feature?.Error is { } fe) return new Decision([], new BlockReason("funzionalitaIllegibile", Detail: fe));
 
         var actions = new List<AgentAction>();
         var waiting = local.WaitingFor;
@@ -93,6 +95,8 @@ public sealed class DecisionEngine
                     effective.RunId = null; effective.RunAfterRev = null;
                     resetDeploy = true;
                 }
+                // D52: per la CI rossa della card di chiusura non si rilancia il responsabile sulla stessa build: si rilancia la validazione
+                effective.CiRedRetry = true;
                 reset = true;
             }
             env = new Env(snapshot, ctx, effective);
@@ -104,6 +108,8 @@ public sealed class DecisionEngine
                 actions.AddRange(StateActions(env));
 
             if (resetDeploy) actions.Insert(0, new ResetDeploy());
+            // D52: la CI della card di chiusura e tornata verde: i giri del responsabile per la CI rossa ripartono da zero
+            if (env.IsClosing && env.Local.CiRedInARow > 0 && ClosingCiGreen(env)) actions.Insert(0, new ResetCiRed());
             if (reset) actions.Insert(0, new ResetCounters());
         }
 
@@ -115,13 +121,36 @@ public sealed class DecisionEngine
             return new Decision([], quota with { Role = launches[0].Role });
 
         BlockReason? reason = null;
-        if (env is not null && actions.All(a => a is ResetCounters or ResetDeploy)) reason = StartBlock(env);
+        if (env is not null && actions.All(a => a is ResetCounters or ResetDeploy or ResetCiRed)) reason = StartBlock(env) ?? ClosingInDraft(env);
         return new Decision(actions, reason);
     }
 
     // ---- per stato -----------------------------------------------------------------------------------------------
 
-    private IEnumerable<AgentAction> StateActions(Env a) => a.Key switch
+    private IEnumerable<AgentAction> StateActions(Env a)
+    {
+        // D52: la funzionalita non c'e piu: nessuna regola sa dove portare la card, e il motivo (StartBlock) lo dice a una persona
+        if (a.Path == "perduta") return [];
+        if (a.IsClosing)
+        {
+            // la correzione scritta dal responsabile diventa una Bug figlia della Feature, da sola in questo giro
+            if (CorrectionToDo(a) is { } c)
+                return [new CreateCorrection(c.Key, c.Nature, c.Title, c.Description, a.Feature!.Feature.Id, a.Id)];
+            var inTest = K.InTest.Contains(a.Key!) || a.Key == K.ReadyToMerge;
+            // una sorella non ancora unita cambierebbe il ramo sotto il collaudo: la card torna in Ready to develop e aspetta
+            if (inTest && SiblingsNotMerged(a) is { Count: > 0 } open)
+                return [new MoveBack(K.Ready, $"La sorella {string.Join(", ", open.Select(x => $"#{x.Id}"))} non e ancora unita nel ramo della funzionalita: il ramo cambierebbe sotto il collaudo, la card di chiusura torna in Ready to develop e aspetta")];
+            // in Ready to release senza stato locale il ramo non c'e piu: lo dice la PR collegata alla card
+            if (a.Key == K.ReadyToRelease && a.Local.Branch is null) return [new SetClosingBranch(null, FromLinkedPr: true)];
+            // senza ramo salvato la chiusura lo prende dalla funzionalita; non ha un worktree da creare
+            if ((inTest || a.Key == K.Ready) && a.Local.Branch is null && !(a.Key == K.Ready && StartBlock(a) is not null))
+                return a.Feature!.Branch is { } br ? [new SetClosingBranch(br)]
+                    : [new PutOnHold("il ramo della funzionalita non c e su origin: la card di chiusura non sa quale ramo provare", "limite")];
+        }
+        return StateActionsOf(a);
+    }
+
+    private IEnumerable<AgentAction> StateActionsOf(Env a) => a.Key switch
     {
         K.New => NewCard(a),
         K.NeedsClarification => NeedsClarification(a),
@@ -133,6 +162,7 @@ public sealed class DecisionEngine
         K.HumanTest => HumanTest(a),
         K.ReadyToMerge => ReadyToMerge(a),
         K.ReadyToRelease => ReadyToRelease(a),
+        K.InFeatureBranch => InFeatureBranch(a),
         _ => [], // bozza, inRilascio, chiusa, rimossa: niente da fare
     };
 
@@ -154,8 +184,37 @@ public sealed class DecisionEngine
 
     private IEnumerable<AgentAction> Ready(Env a)
     {
-        if (StartBlock(a) is not null) return [];
-        return [new CreateWorktree(), new MoveCard(K.InDevelopment), new LaunchSession("dev", "pronto", null, false, a.FirstOpenTask)];
+        if (StartBlock(a) is { } block) return a.IsClosing ? ClosingBlockActions(a, block) : [];
+        if (a.IsClosing) return ReadyClosing(a);
+        var actions = new List<AgentAction>();
+        if (a.IsFeatureCard)
+        {
+            // D52: il ramo della funzionalita nasce da origin/develop alla prima card in sviluppo; il worktree parte da li e la PR ci va
+            var f = a.Feature!;
+            if (f.Branch is null) actions.Add(new CreateFeatureBranch(f.Feature.Id));
+            actions.Add(new CreateWorktree(f.Branch, FeatureCard: true));
+            if (string.Equals(f.Feature.State, a.Ctx.Names.Get("featureNuova"), StringComparison.OrdinalIgnoreCase))
+                actions.Add(new UpdateFeature(f.Feature.Id, "featureAttiva"));
+        }
+        else actions.Add(new CreateWorktree());
+        actions.Add(new MoveCard(K.InDevelopment));
+        actions.Add(new LaunchSession("dev", "pronto", null, false, a.FirstOpenTask));
+        return actions;
+    }
+
+    /// <summary>D52: la card di chiusura in Ready to develop apre la PR ramo della funzionalita -> develop e, verde, va al deploy.</summary>
+    private static IEnumerable<AgentAction> ReadyClosing(Env a)
+    {
+        if (a.S.Pr is null) return [new OpenPr()];
+        return a.S.Pr.Validation switch
+        {
+            Validations.Green => [new MoveCard(K.DeployingToTest)],
+            Validations.Expired => [new RequeueExpiredValidations()],
+            Validations.Red => a.Local.Relaunches >= 1
+                ? [new PutOnHold($"la validazione della PR e rossa senza errori di codice anche dopo un rilancio: sembra infrastruttura, guarda la build ({a.S.Pr.LogUrl})", "limite")]
+                : [new RequeueValidation("")],
+            _ => [],
+        };
     }
 
     private IEnumerable<AgentAction> InDevelopment(Env a)
@@ -261,7 +320,7 @@ public sealed class DecisionEngine
     {
         if (a.Entry is null) return [];
         if (a.OpenTasks.Count > 0) return TaskAdded(a).ToList();
-        if (!ReviewPassed(a))
+        if (!a.IsClosing && !ReviewPassed(a))
         {
             var before = PreviousState(a);
             return before is null ? [] : [new MoveBack(before, "La revisione non e superata")];
@@ -276,7 +335,8 @@ public sealed class DecisionEngine
         if (!RunValid(a))
         {
             if (TestSlotBlock(a, null) is { } block)
-                return [new MoveBack(K.InReview, block.Type == "limiteAmbienti" ? "Gli ambienti di collaudo sono tutti occupati" : "Un altra card dello stesso componente e gia in test")];
+                // la card di chiusura non e passata da In review: aspetta in Ready to develop
+                return [new MoveBack(a.IsClosing ? K.Ready : K.InReview, block.Type == "limiteAmbienti" ? "Gli ambienti di collaudo sono tutti occupati" : "Un altra card dello stesso componente e gia in test")];
             // D59: l'ambiente Docker della card al posto del deploy: nessun parametro da scegliere
             if (a.S.Area?.TestEnvironment is not null) return [new CreateTestEnvironment(a.EntryRev)];
             var selected = (a.S.Deploy?.Selected ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
@@ -295,12 +355,15 @@ public sealed class DecisionEngine
         if (a.S.Run is not { Status: "completed" } run) return [];
         if (run.Result != "succeeded")
         {
+            // D52: la card di chiusura con la build o i test falliti non e un deploy da rilanciare: il responsabile scrive la correzione
+            if (a.IsClosing && ClosingCiBlock(a) is { } ci) return ClosingBlockActions(a, ci);
             if (a.S.Area?.TestEnvironment is not null)
                 return [new PutOnHold($"ambiente di collaudo non creato, log: {run.Url}: sistemata la causa, togli il tag e l'ambiente si ricrea", "deploy", WaitKind: "deployFallito")];
             var label = run.Url is not null ? $"[run {a.Local.RunId}]({run.Url})" : $"run {a.Local.RunId}";
             return [new PutOnHold($"deploy in Test fallito ({label}): sistemata la causa, togli il tag e il deploy si rilancia", "deploy", WaitKind: "deployFallito")];
         }
-        return [new MoveCard(HumanTestRequested(a) ? K.HumanTest : K.AutomatedTest)];
+        // la card di chiusura passa sempre dal collaudo automatico (poi, con human-test, dalla persona)
+        return [new MoveCard(HumanTestRequested(a) && !a.IsClosing ? K.HumanTest : K.AutomatedTest)];
     }
 
     private IEnumerable<AgentAction> AutomatedTest(Env a)
@@ -318,7 +381,7 @@ public sealed class DecisionEngine
         {
             switch (test!.Outcome)
             {
-                case "superata": return [new MoveCard(K.ReadyToMerge)];
+                case "superata": return [new MoveCard(a.IsClosing && HumanTestRequested(a) ? K.HumanTest : K.ReadyToMerge)];
                 case "respinta":
                     if (a.Local.TestRounds >= a.Ctx.Limits.TestRounds) return [new PutOnHold("troppi collaudi respinti di fila", "limite")];
                     return [new LaunchSession("responsabile", "collaudoRespinto", test.Text)];
@@ -330,7 +393,7 @@ public sealed class DecisionEngine
         {
             // D59: l'ambiente e quello della card, creato in Deploying to test: gli URL stanno nello stato locale
             var urls = a.Local.TestUrls is { Count: > 0 } u ? string.Join("\n", u.Select(kv => $"- {kv.Key}: {kv.Value}")) : null;
-            return [new LaunchSession("collaudatore", "collaudo", urls is not null
+            return [new LaunchSession("collaudatore", "collaudo", ClosingWorktree: a.IsClosing, Attachment: urls is not null
                 ? $"Ambiente di collaudo della card:\n{urls}"
                 : "Nello stato della card non ci sono gli indirizzi dell'ambiente di collaudo. Non provare a ricavarli: chiudi con ESITO=bloccato e scrivi che mancano gli indirizzi dell'ambiente di collaudo della card.")];
         }
@@ -338,7 +401,7 @@ public sealed class DecisionEngine
         var attachment = url is not null
             ? $"Ambiente di Test: {url}"
             : "Nella mappa non c'e l'indirizzo dell'ambiente di Test (urlTest) per questo repo. Non provare a ricavarlo: chiudi con ESITO=bloccato e scrivi che manca urlTest nella mappa.";
-        return [new LaunchSession("collaudatore", "collaudo", attachment)];
+        return [new LaunchSession("collaudatore", "collaudo", attachment, ClosingWorktree: a.IsClosing)];
     }
 
     private IEnumerable<AgentAction> HumanTest(Env a)
@@ -355,13 +418,32 @@ public sealed class DecisionEngine
         if (a.Entry is null) return [];
         if (a.OpenTasks.Count > 0) return TaskAdded(a);
         var pr = a.S.Pr;
-        if (pr?.Status == PrStatuses.Completed) return [new MoveCard(K.ReadyToRelease)];
+        if (pr?.Status == PrStatuses.Completed)
+        {
+            if (a.IsClosing) return [new MoveCard(K.ReadyToRelease), .. FeatureResolved(a)];
+            // D52: la PR di una card della funzionalita e entrata nel ramo della funzionalita, non in develop
+            return [new MoveCard(a.IsFeatureCard ? K.InFeatureBranch : K.ReadyToRelease)];
+        }
         if (pr?.Status == PrStatuses.Active)
         {
+            if (a.IsClosing && ClosingCiBlock(a) is { Type: "conflittiFunzionalita" or "ciRossaFunzionalita" } ci) return ClosingBlockActions(a, ci);
             if (pr.Validation == Validations.Conflicts)
                 return [new MoveBack(K.InDevelopment, $"La PR e in conflitto con {a.Local.Destination ?? "develop"}: la card torna In development e dev allinea il ramo"), new LaunchSession("dev", "conflitti")];
             if (pr.Validation == Validations.Expired) return [new RequeueExpiredValidations()];
             if (pr.Validation == Validations.Running) return [];
+            if (StartBlock(a) is not null) return [];
+            // D52: la PR della funzionalita si completa solo sul commit provato in Test; se il ramo e cambiato si rifa il giro dal deploy
+            if (a.IsClosing && !WithoutTest(a))
+            {
+                var tested = a.S.Run?.SourceVersion;
+                var head = pr.HeadCommit;
+                if (string.IsNullOrWhiteSpace(tested) || string.IsNullOrWhiteSpace(head) || tested != head)
+                {
+                    if (head is { Length: > 0 } && a.Local.ReturnCommit == head)
+                        return [new PutOnHold($"la card e gia tornata in Ready to develop per la testa {head} della PR e il commit del deploy ({tested}) non coincide ancora: guarda il ramo della funzionalita e il run del deploy", "limite")];
+                    return [new MoveBack(K.Ready, "Il ramo della funzionalita e cambiato dopo il deploy in Test (il commit della PR non e quello provato): la card torna in Ready to develop e si rifa il deploy", head)];
+                }
+            }
             if (a.Local.CompletePrKey == $"{pr.Id}@{a.EntryRev}")
                 return [new PutOnHold($"il completamento della PR {pr.Id} e stato chiesto ma la PR e ancora aperta (validazione: {pr.Validation})", "limite", WaitKind: "prNonCompletata")];
             return [new CompletePr(a.EntryRev, pr.HeadCommit)];
@@ -371,10 +453,154 @@ public sealed class DecisionEngine
 
     private IEnumerable<AgentAction> ReadyToRelease(Env a)
     {
+        if (a.IsClosing)
+        {
+            if (a.S.Pr?.Status != PrStatuses.Completed) return [];
+            return [.. a.Local.Folder is not null ? [new RemoveWorktree(Closing: true)] : Array.Empty<AgentAction>(), .. FeatureResolved(a)];
+        }
         if (a.S.Pr?.Status == PrStatuses.Completed) return a.Local.Folder is not null ? [new RemoveWorktree()] : [];
         if (a.S.Pr is null && a.Local.PrId is not null && a.Local.Branch is null && a.Local.Folder is null) return [];
         if (a.Entry is null) return [];
         return a.OpenTasks.Count > 0 ? TaskAdded(a) : [];
+    }
+
+    /// <summary>D52: la card e nel ramo della funzionalita; quando la card di chiusura e rilasciata, la segue in Ready to release.</summary>
+    private static IEnumerable<AgentAction> InFeatureBranch(Env a)
+    {
+        if (StartBlock(a) is not null) return [];
+        var actions = new List<AgentAction>();
+        if (a.Local.Folder is not null) actions.Add(new RemoveWorktree());
+        if (a.Ctx.Names.KeyOf(a.Feature?.ClosingState) is K.ReadyToRelease or K.Releasing or K.Closed) actions.Add(new MoveCard(K.ReadyToRelease));
+        if (a.OpenTasks.Count > 0 && a.Local.Folder is not null)
+        {
+            var key = $"taskInFeature@{a.EntryRev}";
+            if (!a.Local.Notices.Contains(key))
+                actions.Add(new Notify("titolare", key, "C'e un task aperto su una card In feature branch: il suo lavoro e gia nel ramo della funzionalita, il lavoro nuovo va in una card nuova della funzionalita."));
+        }
+        return actions;
+    }
+
+    private static IEnumerable<AgentAction> FeatureResolved(Env a)
+    {
+        var f = a.Feature!.Feature;
+        var names = a.Ctx.Names;
+        if (string.Equals(f.State, names.Get("featureChiusa"), StringComparison.OrdinalIgnoreCase)) return [];
+        if (string.Equals(f.State, names.Get("featureRisolta"), StringComparison.OrdinalIgnoreCase) && a.Local.FeatureToClose is not null) return [];
+        return [new UpdateFeature(f.Id, "featureRisolta", CloseLater: true)];
+    }
+
+    private static bool SiblingMerged(StateNames names, Sibling s) => names.KeyOf(s.State) is K.InFeatureBranch or K.ReadyToRelease or K.Releasing or K.Closed;
+
+    private static List<Sibling> SiblingsNotMerged(Env a) => (a.Feature?.Siblings ?? []).Where(s => !SiblingMerged(a.Ctx.Names, s)).ToList();
+
+    /// <summary>D52: la CI della card di chiusura (validazione della PR verso develop o build del deploy) che ferma la card, se c'e.</summary>
+    private static BlockReason? ClosingCiBlock(Env a)
+    {
+        var pr = a.S.Pr;
+        BlockReason Conflicts() => new("conflittiFunzionalita", Detail: a.Local.Branch);
+        BlockReason? Red(string source, int? build, string? url) =>
+            string.IsNullOrWhiteSpace(a.S.BuildErrors) ? null : new BlockReason("ciRossaFunzionalita", Detail: $"{source}|{build}|{url}");
+        switch (a.Key)
+        {
+            case K.Ready when pr is not null:
+                return pr.Validation switch
+                {
+                    Validations.Conflicts => Conflicts(),
+                    Validations.Red => Red("validazione", pr.BuildId, pr.LogUrl),
+                    Validations.Green when !WithoutTest(a) => TestSlotBlock(a, null),
+                    _ => null,
+                };
+            case K.DeployingToTest:
+                if (!RunValid(a) || a.S.Run is not { Status: "completed" } run || run.Result == "succeeded") return null;
+                return Red("deploy", a.Local.RunId, run.Url);
+            case K.ReadyToMerge when pr is { Status: PrStatuses.Active }:
+                return pr.Validation switch
+                {
+                    Validations.Conflicts => Conflicts(),
+                    Validations.Red => Red("validazione", pr.BuildId, pr.LogUrl),
+                    _ => null,
+                };
+            default:
+                return null;
+        }
+    }
+
+    private static bool ClosingCiGreen(Env a) =>
+        a.S.Pr?.Validation == Validations.Green ||
+        (K.InTest.Contains(a.Key!) && RunValid(a) && a.S.Run is { Status: "completed", Result: "succeeded" });
+
+    /// <summary>D52: cosa fa la card di chiusura davanti a un blocco della sua CI: il responsabile scrive la correzione, o una Bug allinea-develop.</summary>
+    private static IEnumerable<AgentAction> ClosingBlockActions(Env a, BlockReason block)
+    {
+        switch (block.Type)
+        {
+            case "ciRossaFunzionalita":
+            {
+                var parts = (block.Detail ?? "||").Split('|');
+                var (source, build, url) = (parts[0], parts[1], parts[2]);
+                if (string.IsNullOrWhiteSpace(build)) return [];
+                if (a.Local.CiRedHandled == build)
+                {
+                    if (a.Local.CiRedRetry && source == "validazione") return [new RequeueValidation("")];
+                    if (a.LastRole == "responsabile" && a.Last is { IsFinished: true, Reason: "ciRossa" })
+                        return [new PutOnHold($"il responsabile ha guardato la CI rossa della card di chiusura (build {build}) e non ha scritto una correzione: serve una persona, la sua diagnosi e nel commento sulla card", "limite", Direct: true)];
+                    return [];
+                }
+                if (a.Ctx.Limits.RedInARow > 0 && a.Local.CiRedInARow >= a.Ctx.Limits.RedInARow)
+                    return [new PutOnHold($"troppe sessioni del responsabile per la CI rossa della card di chiusura ({a.Ctx.Limits.RedInARow} di fila): una persona guarda la build ({url})", "limite", Direct: true)];
+                var where = source == "deploy" ? "Il deploy in Test della card di chiusura ha la build o i test falliti" : "La validazione della PR della card di chiusura e rossa";
+                var link = string.IsNullOrEmpty(url) ? "" : $", {url}";
+                return [new LaunchSession("responsabile", "ciRossa",
+                    $"{where} (build {build}{link}), con errori di codice. Scrivi la correzione (card.ps1 correzione) se la causa e nel codice della funzionalita.\n\nErrori:\n{a.S.BuildErrors}", Build: build)];
+            }
+            case "conflittiFunzionalita":
+            {
+                var head = a.S.Pr?.HeadCommit ?? "";
+                var done = a.Local.AlignDone.Concat(BugsCreated(a.S.AllComments, "Allinea-develop @"));
+                if (head.Length > 0 && done.Contains(head))
+                {
+                    var alive = (a.Feature?.Siblings ?? []).Any(s => a.Ctx.Names.AlignTag is { } t && s.Tags.Contains(t, StringComparer.OrdinalIgnoreCase));
+                    return alive ? [] : [new PutOnHold($"la PR {block.Detail} verso develop ha ancora conflitti e la Bug allinea-develop per questo commit non c'e piu (rimossa senza unirla?): una persona decide", "limite", Direct: true)];
+                }
+                return [new CreateAlignDevelop(a.Feature!.Feature.Id, block.Detail ?? "", head)];
+            }
+            default:
+                return [];
+        }
+    }
+
+    // ---- correzioni (D52) ----------------------------------------------------------------------------------------
+
+    public sealed record Correction(string Key, string Nature, string Title, string Description);
+
+    private static readonly Regex CorrectionHead = new(@"^\[responsabile\]\s*Correzione:\s*(tecnico|prodotto)\s*$", RegexOptions.Compiled);
+    private static readonly Regex CorrectionTitle = new(@"^Titolo:\s*(\S.*?)\s*$", RegexOptions.Compiled);
+
+    /// <summary>Le correzioni scritte dal responsabile ("[responsabile] Correzione: tecnico|prodotto", poi "Titolo: ...", poi la descrizione).</summary>
+    public static IEnumerable<Correction> CorrectionsWritten(IEnumerable<Comment>? comments)
+    {
+        foreach (var c in (comments ?? []).OrderBy(c => c.Id))
+        {
+            var lines = WhatToDo.PlainText(c.Text).Split('\n');
+            var m = CorrectionHead.Match(lines[0]);
+            if (!m.Success) continue;
+            var i = 1;
+            while (i < lines.Length && string.IsNullOrWhiteSpace(lines[i])) i++;
+            if (i >= lines.Length || CorrectionTitle.Match(lines[i]) is not { Success: true } t) continue;
+            var body = lines.Skip(i + 1).Where(l => l.Trim() != "\u2014 scritto da Claude (responsabile)");
+            yield return new Correction(c.Id.ToString(), m.Groups[1].Value, t.Groups[1].Value, string.Join("\n", body).Trim());
+        }
+    }
+
+    /// <summary>Le chiavi delle Bug gia create, dai commenti "[smistatore] &lt;marca&gt;&lt;chiave&gt; -&gt; Bug &lt;id&gt;": valgono da ogni PC.</summary>
+    public static IEnumerable<string> BugsCreated(IEnumerable<Comment>? comments, string mark) =>
+        (comments ?? []).Select(c => Regex.Match(WhatToDo.PlainText(c.Text).Split('\n')[0], $@"^\[smistatore\]\s*{Regex.Escape(mark)}(\S+)\s+->\s+Bug\s+\d+\s*$"))
+            .Where(m => m.Success).Select(m => m.Groups[1].Value);
+
+    private static Correction? CorrectionToDo(Env a)
+    {
+        var done = a.Local.CorrectionsDone.Concat(BugsCreated(a.S.AllComments, "Correzione #")).ToHashSet();
+        return CorrectionsWritten(a.S.AllComments).FirstOrDefault(c => !done.Contains(c.Key));
     }
 
     private static IEnumerable<AgentAction> TaskAdded(Env a)
@@ -388,10 +614,24 @@ public sealed class DecisionEngine
     /// <summary>Perche una card che potrebbe partire aspetta: predecessori non uniti, posto occupato nel repo o nel componente.</summary>
     private static BlockReason? StartBlock(Env a)
     {
+        if (a.Path == "perduta") return new BlockReason("funzionalitaPerduta", Detail: a.Local.Destination ?? "develop");
+        if (a.Key == K.InFeatureBranch)
+            return a.Local.Folder is null || a.S.Pr?.Status == PrStatuses.Completed ? null : new BlockReason("inFeatureSenzaPrUnita", Detail: a.Local.Destination);
         if (a.Key == K.InReview) return EntryInTestBlock(a);
+        if (a.Key == K.ReadyToMerge) return a.IsClosing ? ClosingCiBlock(a) : FeatureTestBlock(a);
+        if (a.IsClosing && a.Key == K.DeployingToTest) return ClosingCiBlock(a);
         if (a.Key is not (K.New or K.Ready)) return null;
-        var waiting = a.S.Predecessors.Where(p => !PredecessorMerged(a.Ctx.Names, p)).Select(p => p.Id).ToList();
-        var role = a.Key == K.New ? "responsabile" : "dev";
+        var featureId = a.IsFeatureCard || a.IsClosing ? a.Feature!.Feature.Id : (int?)null;
+        var waiting = a.S.Predecessors.Where(p => !PredecessorMerged(a.Ctx.Names, p, featureId)).Select(p => p.Id).ToList();
+        var role = a.Key == K.New ? "responsabile" : a.IsClosing ? null : "dev";
+        if (a.IsClosing)
+        {
+            // la card di chiusura aspetta tutte le sue sorelle, senza link Predecessor messi a mano
+            if (a.Feature!.Siblings.Count == 0) return new BlockReason("senzaSorelle", role, Detail: a.Feature.Feature.Id.ToString());
+            var all = SiblingsNotMerged(a).Select(x => x.Id).Concat(waiting).ToList();
+            if (all.Count > 0) return new BlockReason("predecessori", role, "sorelle", all);
+            return a.Key == K.Ready ? ClosingCiBlock(a) : null;
+        }
         if (waiting.Count > 0) return new BlockReason("predecessori", role, Cards: waiting);
         if (a.Key != K.Ready) return null;
         var repo = a.S.Area?.Repo ?? "";
@@ -423,9 +663,29 @@ public sealed class DecisionEngine
         return others.Count >= a.Ctx.Limits.CardsInTestPerComponent ? new BlockReason("limiteTest", role, component, others) : null;
     }
 
-    private static bool PredecessorMerged(StateNames names, Predecessor p) => names.KeyOf(p.State) switch
+    /// <summary>D52: una card della funzionalita non completa la sua PR mentre la card di chiusura e in collaudo: il ramo non cambia sotto.</summary>
+    private static BlockReason? FeatureTestBlock(Env a)
+    {
+        if (!a.IsFeatureCard) return null;
+        var closing = a.Ctx.Names.KeyOf(a.Feature!.ClosingState);
+        return closing is not null && (K.InTest.Contains(closing) || closing == K.ReadyToMerge)
+            ? new BlockReason("attesaCollaudoFunzionalita", Detail: a.Feature.ClosingState, Cards: [a.Feature.ClosingCardId]) : null;
+    }
+
+    /// <summary>D52: una card della funzionalita In feature branch, con la card di chiusura ancora in Draft e le sorelle tutte unite.</summary>
+    private static BlockReason? ClosingInDraft(Env a)
+    {
+        if (a.Key != K.InFeatureBranch || !a.IsFeatureCard) return null;
+        var f = a.Feature!;
+        if (a.Ctx.Names.KeyOf(f.ClosingState) != K.Draft || f.Siblings.Count == 0 || SiblingsNotMerged(a).Count > 0) return null;
+        return new BlockReason("chiusuraInBozza", Detail: $"sposta la card #{f.ClosingCardId} in New", Cards: [f.ClosingCardId]);
+    }
+
+    private static bool PredecessorMerged(StateNames names, Predecessor p, int? featureId = null) => names.KeyOf(p.State) switch
     {
         K.Releasing or K.Closed => true,
+        // In feature branch vale come unita solo per una sorella della stessa Feature: solo lei parte dal ramo che la contiene
+        K.InFeatureBranch => featureId is not null && p.ParentId == featureId,
         K.ReadyToRelease => p.PrId is not null && string.IsNullOrWhiteSpace(p.Folder),
         _ => false,
     };
@@ -473,8 +733,10 @@ public sealed class DecisionEngine
         return rev.End > dev.End;
     }
 
+    /// <summary>Senza Test: il tag no-test-deploy, nessuna pipeline di deploy, o una card della funzionalita (D52: va in Test la funzionalita intera).</summary>
     private static bool WithoutTest(Env a) =>
-        (a.Ctx.Names.NoTestTag is { } t && a.S.Card.Tags.Contains(t, StringComparer.OrdinalIgnoreCase)) || a.S.Area?.DeployPipeline is null;
+        (a.Ctx.Names.NoTestTag is { } t && a.S.Card.Tags.Contains(t, StringComparer.OrdinalIgnoreCase)) ||
+        a.S.Area?.DeployPipeline is null || a.IsFeatureCard;
 
     private static bool HumanTestRequested(Env a) =>
         a.Ctx.Names.HumanTestTag is { } t && a.S.Card.Tags.Contains(t, StringComparer.OrdinalIgnoreCase);
@@ -534,5 +796,26 @@ public sealed class DecisionEngine
         public SessionRecord? Last { get; }
         public IReadOnlyList<WorkTask> OpenTasks { get; }
         public int? FirstOpenTask => OpenTasks.Count > 0 ? OpenTasks[0].Id : null;
+        public FeatureContext? Feature => S.Feature;
+        public bool IsClosing => Feature is { Error: null, IsClosing: true };
+        public bool IsFeatureCard => Path == "funzionalita";
+
+        /// <summary>
+        /// D52: la strada della card. "funzionalita" se e una card (non di chiusura) di una funzionalita valida; "isolata" se no; "perduta" se
+        /// la card aveva gia cominciato sul ramo della funzionalita (o e In feature branch) e la funzionalita non c'e piu.
+        /// </summary>
+        public string Path
+        {
+            get
+            {
+                var valid = Feature is { Error: null, IsClosing: false };
+                var traced = Local.Branch is not null || Local.Folder is not null || Local.PrId is not null || Local.Destination is not null;
+                if (Key is K.New or K.NeedsClarification or K.Ready || !traced) return valid ? "funzionalita" : "isolata";
+                var onBranch = (Local.Destination ?? "develop") != "develop";
+                if (onBranch && valid) return "funzionalita";
+                var running = Key is K.InDevelopment or K.InReview or K.DeployingToTest or K.AutomatedTest or K.HumanTest or K.ReadyToMerge or K.InFeatureBranch;
+                return running && (onBranch || Key == K.InFeatureBranch) ? "perduta" : "isolata";
+            }
+        }
     }
 }
