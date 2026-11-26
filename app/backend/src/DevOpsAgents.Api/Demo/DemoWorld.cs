@@ -17,6 +17,7 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
     private readonly StateNames _names;
     private readonly IClock _clock;
     private readonly List<Card> _cards = [];
+    private readonly List<FeatureInfo> _features = [];
     private readonly Dictionary<int, List<Comment>> _comments = new();
     private readonly Dictionary<int, List<StateChange>> _history = new();
     private readonly Dictionary<string, (int Card, string Role, int Polls)> _sessions = new();
@@ -30,18 +31,22 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
         _clock = clock;
         var a = areas.FirstOrDefault()?.Area ?? "DevOps.Agents\\Demo";
         var b = areas.Skip(1).FirstOrDefault()?.Area ?? a;
-        Seed(101, "Importare le stime dal foglio Excel", K.New, a);
-        Seed(102, "Esportare il rapporto finale in PDF", K.Ready, a, deploy: "deployStime");
-        Seed(103, "Filtro per data nelle ricerche", K.Ready, b, deploy: "deployStime");
-        Seed(104, "Correggere il totale delle righe", K.NeedsClarification, b);
-        Seed(105, "Pagina di stato del servizio", K.ReadyToRelease, a);
-        Seed(106, "Card di un collega", K.Ready, b, assigned: new Person("demo-2", "Anna"));
+        _features.Add(new FeatureInfo(10, "Preventivi", "Active", [], a, 1000));
+        _features.Add(new FeatureInfo(20, "Rapporti", "Active", [], a, 2000));
+        _features.Add(new FeatureInfo(30, "Ricerca", "New", [], b, null));
+        Seed(101, "Importare le stime dal foglio Excel", K.New, a, parent: 10);
+        Seed(102, "Esportare il rapporto finale in PDF", K.Ready, a, deploy: "deployStime", parent: 20);
+        Seed(103, "Filtro per data nelle ricerche", K.Ready, b, deploy: "deployStime", parent: 10);
+        Seed(104, "Correggere il totale delle righe", K.NeedsClarification, b, parent: 30);
+        Seed(107, "Card senza Feature", K.New, b);
+        Seed(105, "Pagina di stato del servizio", K.ReadyToRelease, a, parent: 20);
+        Seed(106, "Card di un collega", K.Ready, b, assigned: new Person("demo-2", "Anna"), parent: 30);
         _comments[104].Add(new Comment(_nextComment++, "Titolare", "[responsabile] Domande: il totale include l'IVA?", clock.Now.AddHours(-2)));
     }
 
-    private void Seed(int id, string title, string key, string area, string? deploy = null, Person? assigned = null)
+    private void Seed(int id, string title, string key, string area, string? deploy = null, Person? assigned = null, int? parent = null)
     {
-        _cards.Add(new Card(id, 5, title, _names[key], [_names.AgentsTag], area, assigned ?? Me, Me, "User Story"));
+        _cards.Add(new Card(id, 5, title, _names[key], [_names.AgentsTag], area, assigned ?? Me, Me, "User Story", parent));
         _history[id] = [new StateChange(5, _names[K.Draft], _names[key], _clock.Now.AddHours(-3))];
         _comments[id] = deploy is null ? [] : [new Comment(_nextComment++, "Titolare", $"[responsabile] Parametri del deploy in Test: {deploy}\n\nPerche: demo", _clock.Now.AddHours(-3))];
     }
@@ -68,12 +73,35 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
     public Task SetStateAsync(int id, string state, CancellationToken ct = default) { lock (_lock) Move(id, state); return Task.CompletedTask; }
     public Task AddTagAsync(int id, string tag, CancellationToken ct = default)
     {
-        lock (_lock) { var i = _cards.FindIndex(c => c.Id == id); _cards[i] = _cards[i] with { Tags = _cards[i].Tags.Append(tag).ToList() }; }
+        lock (_lock)
+        {
+            var i = _cards.FindIndex(c => c.Id == id);
+            if (i >= 0) _cards[i] = _cards[i] with { Tags = _cards[i].Tags.Append(tag).ToList() };
+            var f = _features.FindIndex(x => x.Id == id);
+            if (f >= 0) _features[f] = _features[f] with { Tags = _features[f].Tags.Append(tag).ToList() };
+        }
         return Task.CompletedTask;
     }
     public Task AddCommentAsync(int id, string md, CancellationToken ct = default) { lock (_lock) _comments[id].Add(new Comment(_nextComment++, "smistatore", md, _clock.Now)); return Task.CompletedTask; }
     public Task AddLinkAsync(int id, string url, string? comment = null, CancellationToken ct = default) => Task.CompletedTask;
     public Task<Person> GetCurrentUserAsync(CancellationToken ct = default) => Task.FromResult(Me);
+    public Task RemoveTagAsync(int id, string tag, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            var i = _cards.FindIndex(c => c.Id == id);
+            if (i >= 0) _cards[i] = _cards[i] with { Tags = _cards[i].Tags.Where(t => !string.Equals(t, tag, StringComparison.OrdinalIgnoreCase)).ToList() };
+            var f = _features.FindIndex(x => x.Id == id);
+            if (f >= 0) _features[f] = _features[f] with { Tags = _features[f].Tags.Where(t => !string.Equals(t, tag, StringComparison.OrdinalIgnoreCase)).ToList() };
+        }
+        return Task.CompletedTask;
+    }
+    public Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<FeatureInfo>>(_features.ToList()); }
+    public Task SetRankAsync(int id, double rank, CancellationToken ct = default)
+    {
+        lock (_lock) { var f = _features.FindIndex(x => x.Id == id); if (f >= 0) _features[f] = _features[f] with { Rank = rank }; }
+        return Task.CompletedTask;
+    }
     public string CardUrl(int id) => $"#card-{id}";
 
     // ---- ICodeHost ----

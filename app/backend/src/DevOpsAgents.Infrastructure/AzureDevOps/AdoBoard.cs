@@ -23,7 +23,7 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
         var cards = new List<Card>();
         foreach (var chunk in ids.Chunk(200))
         {
-            var batch = await ado.GetAsync($"/_apis/wit/workitems?ids={string.Join(',', chunk)}&errorPolicy=Omit&api-version=7.1", ct);
+            var batch = await ado.GetAsync($"/_apis/wit/workitems?ids={string.Join(',', chunk)}&$expand=relations&errorPolicy=Omit&api-version=7.1", ct);
             cards.AddRange(batch.Items("value").Select(ToCard).Where(c => !string.Equals(c.State, names[StateKeys.Removed], StringComparison.OrdinalIgnoreCase)));
         }
         return cards.OrderBy(c => c.Id).ToList();
@@ -35,7 +35,53 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
         return new Card(
             wi.Int("id")!.Value, wi.Int("rev") ?? 0, f.Str("System.Title") ?? "", f.Str("System.State") ?? "",
             (f.Str("System.Tags") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            f.Str("System.AreaPath"), ToPerson(f?["System.AssignedTo"]), ToPerson(f?["System.CreatedBy"]), f.Str("System.WorkItemType"));
+            f.Str("System.AreaPath"), ToPerson(f?["System.AssignedTo"]), ToPerson(f?["System.CreatedBy"]), f.Str("System.WorkItemType"), ParentOf(wi));
+    }
+
+    /// <summary>Il padre dalla relazione Hierarchy-Reverse, o dal campo System.Parent se la lettura non porta le relazioni.</summary>
+    private static int? ParentOf(JsonNode wi) =>
+        wi.Items("relations").Where(r => r.Str("rel") == ParentLink).Select(r => int.TryParse(r.Str("url")?.Split('/').Last(), out var id) ? id : (int?)null).FirstOrDefault()
+        ?? wi["fields"].Int("System.Parent");
+
+    public const string RankField = "Microsoft.VSTS.Common.StackRank";
+
+    public async Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default)
+    {
+        if (areas.Count == 0) return [];
+        var under = string.Join(" OR ", areas.Select(a => $"[System.AreaPath] UNDER '{a.Replace("'", "''")}'"));
+        var q = $"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '{boardProject}' AND [System.WorkItemType] = 'Feature' " +
+                $"AND [System.State] <> '{names["featureChiusa"]}' AND [System.State] <> '{names["featureRimossa"]}' AND ({under}) ORDER BY [System.Id]";
+        var r = await ado.SendAsync(HttpMethod.Post, $"/{E(boardProject)}/_apis/wit/wiql?api-version=7.1", new { query = q }, ct: ct);
+        var ids = r.Items("workItems").Select(w => w.Int("id")!.Value).ToList();
+        var features = new List<FeatureInfo>();
+        foreach (var chunk in ids.Chunk(200))
+        {
+            var batch = await ado.GetAsync($"/_apis/wit/workitems?ids={string.Join(',', chunk)}&errorPolicy=Omit&api-version=7.1", ct);
+            foreach (var w in batch.Items("value"))
+            {
+                var f = w["fields"];
+                var rank = f?[RankField] is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<double>(out var d) ? d : (double?)null;
+                features.Add(new FeatureInfo(w.Int("id")!.Value, f.Str("System.Title") ?? "", f.Str("System.State") ?? "",
+                    (f.Str("System.Tags") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), f.Str("System.AreaPath"), rank));
+            }
+        }
+        return features;
+    }
+
+    public Task SetRankAsync(int workItemId, double rank, CancellationToken ct = default) =>
+        PatchAsync(workItemId, [new JsonObject { ["op"] = "add", ["path"] = $"/fields/{RankField}", ["value"] = rank }], ct);
+
+    public async Task RemoveTagAsync(int cardId, string tag, CancellationToken ct = default)
+    {
+        var wi = await ado.GetAsync($"/_apis/wit/workitems/{cardId}?api-version=7.1", ct);
+        var card = ToCard(wi!);
+        var rest = card.Tags.Where(t => !string.Equals(t, tag, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (rest.Count == card.Tags.Count) return;
+        JsonArray ops = [new JsonObject { ["op"] = "test", ["path"] = "/rev", ["value"] = card.Rev }];
+        ops.Add(rest.Count > 0
+            ? new JsonObject { ["op"] = "replace", ["path"] = "/fields/System.Tags", ["value"] = string.Join("; ", rest) }
+            : new JsonObject { ["op"] = "remove", ["path"] = "/fields/System.Tags" });
+        await PatchAsync(cardId, ops, ct);
     }
 
     private static Person? ToPerson(JsonNode? u) => u is null ? null : new Person(u.Str("id") ?? "", u.Str("displayName") ?? "", u.Str("uniqueName"));

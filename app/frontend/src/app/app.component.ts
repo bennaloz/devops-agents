@@ -56,6 +56,37 @@ export class AppComponent implements OnInit {
     await this.api.connect();
   }
 
+  /** Quante card ha ogni Feature nel giro, per la riga della Feature. */
+  readonly cardsPerFeature = computed(() => {
+    const m = new Map<number, number>();
+    for (const c of this.api.round()?.cards ?? []) if (c.featureId != null) m.set(c.featureId, (m.get(c.featureId) ?? 0) + 1);
+    return m;
+  });
+
+  async act(work: () => Promise<void>): Promise<void> {
+    this.busy.set(true);
+    try { await work(); } finally { this.busy.set(false); }
+  }
+
+  toggleSystemPause(paused: boolean): Promise<void> {
+    return this.act(() => this.api.setSystemPaused(!paused));
+  }
+
+  toggleFeaturePause(id: number, paused: boolean): Promise<void> {
+    return this.act(() => this.api.setFeaturePaused(id, !paused));
+  }
+
+  /** Su di un posto: dopo la Feature che sta due posti sopra (0 = in cima). Giu: dopo quella che sta sotto. */
+  moveUp(i: number): Promise<void> {
+    const f = this.api.features();
+    return this.act(() => this.api.moveFeature(f[i].id, i >= 2 ? f[i - 2].id : 0));
+  }
+
+  moveDown(i: number): Promise<void> {
+    const f = this.api.features();
+    return this.act(() => this.api.moveFeature(f[i].id, f[i + 1].id));
+  }
+
   async run(whatIf: boolean): Promise<void> {
     this.busy.set(true);
     try { await this.api.runRound(whatIf); } finally { this.busy.set(false); }

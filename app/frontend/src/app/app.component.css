@@ -69,3 +69,17 @@ button.piccolo { padding: 2px 8px; font-size: 12px; font-weight: 500; }
 .log dd { margin: 0; }
 .log ol { margin: 0; padding-left: 18px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); }
 .niente { color: var(--testo-tenue); list-style: none; margin-left: -18px; }
+
+.banner.pausa { background: var(--accento-sfondo); color: var(--accento); border-color: var(--accento-bordo); }
+button.attivo { border-color: var(--arancio); color: var(--arancio); }
+
+.feature { margin: 0 20px 14px; background: var(--superficie); border: 1px solid var(--bordo); border-radius: 10px; padding: 10px 12px; }
+.feature h2 { font-size: 13px; margin: 0 0 6px; color: var(--testo-tenue); font-weight: 600; }
+.feature ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.feature li { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--bordo); font-size: 13px; flex-wrap: wrap; }
+.feature li:first-child { border-top: 0; }
+.feature li.ferma .nome { color: var(--testo-tenue); }
+.feature .pos { width: 20px; text-align: right; color: var(--testo-tenue); font-variant-numeric: tabular-nums; }
+.feature .nome { flex: 1 1 180px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.feature .quante { color: var(--testo-tenue); font-size: 12px; }
+.feature .tasti { display: flex; gap: 4px; margin-left: auto; }

@@ -19,6 +19,25 @@ export interface CardReport {
   reason?: BlockReason;
   runningRole?: string;
   error?: string;
+  featureId?: number;
+}
+
+/** D60: una Feature aperta, in ordine di priorita (l'ordine del backlog). */
+export interface FeatureReport {
+  id: number;
+  title: string;
+  state: string;
+  rank?: number;
+  paused: boolean;
+  area?: string;
+}
+
+export interface QuotaInfo {
+  pauseUntil?: string;
+  weeklyUtilization?: number;
+  weeklyResetsAt?: string;
+  fiveHourUtilization?: number;
+  fiveHourResetsAt?: string;
 }
 
 export interface RoundReport {
@@ -27,9 +46,13 @@ export interface RoundReport {
   whatIf: boolean;
   cards: CardReport[];
   log: string[];
+  systemPaused?: boolean;
+  features?: FeatureReport[];
+  quota?: QuotaInfo;
 }
 
 export interface Status {
+  systemPaused: boolean;
   mode: 'demo' | 'live';
   allowWrites: boolean;
   autoRun: boolean;
@@ -73,6 +96,9 @@ export function describeReason(r: BlockReason): string {
     case 'limiteSessioni': return `limite di sessioni ${r.detail ?? ''}`;
     case 'quota': return `quota: ${r.detail ?? ''}`;
     case 'areaNonMappata': return `area non in config/mappa.json: ${r.detail ?? ''}`;
+    case 'pausa': return r.detail ? `in pausa con la Feature ${r.detail}` : 'in pausa (tag sulla card)';
+    case 'senzaFeature': return 'non e figlia di una Feature: collegala a una Feature dalla board';
+    case 'pausaSistema': return 'sistema in pausa';
     default: return r.type;
   }
 }

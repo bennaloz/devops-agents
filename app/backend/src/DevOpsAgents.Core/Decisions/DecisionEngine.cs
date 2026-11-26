@@ -15,8 +15,13 @@ public sealed record DecisionContext(
     IReadOnlyDictionary<string, IReadOnlyList<int>>? InDevelopmentByRepo = null,
     IReadOnlyDictionary<string, IReadOnlyList<int>>? InTestByComponent = null,
     QuotaInfo? Quota = null,
-    /// <summary>D51: la soglia della riserva settimanale ignorata fino al reset (override dalla vista).</summary>
-    bool IgnoreWeeklyReserve = false);
+    /// <summary>Gli override della vista sulle soglie di quota (D51, D60), validi fino al reset della loro finestra.</summary>
+    QuotaOverrides? QuotaOverrides = null,
+    /// <summary>
+    /// D60: le Feature aperte delle aree della mappa, per id. Con l'elenco, una card in New senza Feature non parte e la pausa di una
+    /// Feature ferma le sue card; senza (null) le regole D60 sulle Feature non valgono.
+    /// </summary>
+    IReadOnlyDictionary<int, FeatureInfo>? Features = null);
 
 /// <summary>
 /// Il motore decisionale: dato lo stato di una card, cosa fare adesso. Funzione pura, nessun modello, nessuna chiamata:
@@ -40,6 +45,9 @@ public sealed class DecisionEngine
         if (tags.Contains(names.OnHoldTag, StringComparer.OrdinalIgnoreCase))
             return new Decision([], new BlockReason("onHold", Detail: local.WaitingFor));
         if (local.RunningSession is not null) return Decision.Nothing;
+        // D60: una card in pausa (tag sulla card o sulla sua Feature) e una card nuova senza Feature restano ferme. La sessione in
+        // corso finisce, ma non ne parte un'altra e la card non si sposta.
+        if (PriorityStop(snapshot.Card, ctx) is { } stop) return new Decision([], stop);
 
         var actions = new List<AgentAction>();
         var waiting = local.WaitingFor;
@@ -384,12 +392,35 @@ public sealed class DecisionEngine
         _ => false,
     };
 
-    private static BlockReason? QuotaBlock(DecisionContext ctx)
+    /// <summary>D60: pausa (della card o della sua Feature) o card nuova senza una Feature aperta come padre.</summary>
+    public static BlockReason? PriorityStop(Card card, DecisionContext ctx)
+    {
+        if (ctx.Names.PausedTag is { } paused && card.Tags.Contains(paused, StringComparer.OrdinalIgnoreCase)) return new BlockReason("pausa");
+        if (ctx.Features is null) return null;
+        var feature = card.ParentId is { } p && ctx.Features.TryGetValue(p, out var f) ? f : null;
+        if (feature is not null && feature.HasTag(ctx.Names.PausedTag)) return new BlockReason("pausa", Detail: feature.Title, Cards: [feature.Id]);
+        // in New serve una Feature aperta: un padre che non lo e (Epic, Feature chiusa o fuori dalle aree) vale come nessun padre
+        if (feature is null && ctx.Names.KeyOf(card.State) == K.New) return new BlockReason("senzaFeature");
+        return null;
+    }
+
+    public static bool IsPaused(Card card, DecisionContext ctx) => PriorityStop(card, ctx) is { Type: "pausa" };
+
+    /// <summary>D51, D60: la pausa dopo il limite di token, la finestra di 5 ore oltre la sua soglia, la riserva settimanale.</summary>
+    public static BlockReason? QuotaBlock(DecisionContext ctx)
     {
         if (ctx.Quota is not { } q) return null;
-        if (q.PauseUntil is { } pause && pause > ctx.Now) return new BlockReason("quota", Detail: $"limite fino a {pause:o}");
-        if (!ctx.IgnoreWeeklyReserve && q.WeeklyUtilization is { } use && use >= ctx.Limits.WeeklyQuotaThreshold && q.WeeklyResetsAt is { } reset && reset > ctx.Now)
-            return new BlockReason("quota", Detail: $"riserva settimanale ({use:P0}) fino a {reset:o}");
+        if (q.PauseUntil is { } pause && pause > ctx.Now) return new BlockReason("quota", Detail: $"limite di token fino a {pause:o}");
+        var o = ctx.QuotaOverrides;
+        // la soglia sulle 5 ore: quella della vista vale fino al reset della finestra; ignorare la riserva settimanale non la salta
+        var five = o?.FiveHourThreshold is { } ft && o.FiveHourUntil > ctx.Now ? ft : ctx.Limits.FiveHourQuotaThreshold;
+        if (five is { } t5 && q.FiveHourUtilization is { } u5 && u5 >= t5 && q.FiveHourResetsAt is { } r5 && r5 > ctx.Now)
+            return new BlockReason("quota", Detail: $"finestra di 5 ore al {u5:P0} (soglia {t5:P0}) fino a {r5:o}");
+        var weeklyValid = o?.WeeklyUntil > ctx.Now;
+        var weekly = weeklyValid && o!.WeeklyThreshold is { } wt ? wt : ctx.Limits.WeeklyQuotaThreshold;
+        var ignore = weeklyValid && o!.IgnoreWeeklyReserve;
+        if (!ignore && q.WeeklyUtilization is { } use && use >= weekly && q.WeeklyResetsAt is { } reset && reset > ctx.Now)
+            return new BlockReason("quota", Detail: $"riserva settimanale al {use:P0} (soglia {weekly:P0}) fino a {reset:o}");
         return null;
     }
 

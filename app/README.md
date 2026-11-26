@@ -77,8 +77,8 @@ hanno stati locali separati e farebbero partire due volte le stesse sessioni.
 cd app/backend && dotnet test
 ```
 
-98 test: 58 sul motore decisionale (i casi di `tests/Decisioni.Tests.ps1` per le card isolate), 9 sull'orchestratore con un mondo
-finto, 31 sull'infrastruttura (Azure DevOps e GitHub con un server HTTP finto, un repo git vero in una cartella temporanea, uno
+I test coprono il motore decisionale (i casi di `tests/Decisioni.Tests.ps1` e `tests/Priorita.Tests.ps1`), l'orchestratore con un
+mondo finto e l'infrastruttura (Azure DevOps e GitHub con un server HTTP finto, un repo git vero in una cartella temporanea, uno
 script al posto di claude).
 
 ## Cosa c'e e cosa manca rispetto alla versione PowerShell
@@ -89,6 +89,8 @@ script al posto di claude).
 | Limiti: sessioni attive, card per repo, card in Test per componente, giri di revisione e collaudo, rosse di fila; predecessori; on-hold e ripresa della sessione; quota (pausa e riserva) | portato |
 | Board Azure DevOps, Azure Repos, Azure Pipelines, GitHub (PR, controlli, merge, rilanci, link sulla card) | portato |
 | Worktree, sessioni claude -p con brief, strumenti, advisor e token in lettura; silenzio; esito dalla riga ESITO | portato, semplificato |
+| Pausa e priorita delle Feature, pausa di sistema, soglia sulla finestra di 5 ore, Feature obbligatoria in New (D60) | portato, con test; dashboard con ordine, pausa/riprendi e pausa del sistema |
+| Quota letta dai `rate_limit_event` delle sessioni, pausa dopo il limite di token (D51) | portato |
 | Funzionalita di piu card con card di chiusura (D52) | **manca**: le card di una Feature sono trattate come isolate |
 | Passata del responsabile prima di un on-hold (D42), on-hold sciolti da soli (D51), riprese automatiche dopo silenzio | **manca** |
 | Mentore e memoria dei ruoli (D46), presa in carico da un altro PC (`AdottaCard`), sessione altrui recente | **manca** |

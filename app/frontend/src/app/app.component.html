@@ -10,6 +10,12 @@
     }
   </div>
   <div class="comandi">
+    @if (api.status(); as s) {
+      <button type="button" [class.attivo]="s.systemPaused" (click)="toggleSystemPause(s.systemPaused)" [disabled]="busy()"
+              title="Il sistema in pausa chiude le sessioni che finiscono ma non lancia niente e non sposta card">
+        {{ s.systemPaused ? 'riprendi il sistema' : 'metti in pausa il sistema' }}
+      </button>
+    }
     @if (api.round(); as r) {
       <span class="quando">ultimo giro {{ r.finished | date: 'HH:mm:ss' }}{{ r.whatIf ? ' (di prova)' : '' }}</span>
     }
@@ -24,6 +30,9 @@
 @if (api.error(); as e) {
   <div class="banner">{{ e }}</div>
 }
+@if (api.status()?.systemPaused) {
+  <div class="banner pausa">Sistema in pausa: le sessioni in corso finiscono, ma nessuna card parte o si sposta finché non lo riprendi.</div>
+}
 
 <section class="numeri">
   <div><b>{{ counts().total }}</b> card</div>
@@ -31,6 +40,29 @@
   <div><b>{{ counts().blocked }}</b> ferme</div>
   <div [class.rosso]="counts().errors > 0"><b>{{ counts().errors }}</b> errori</div>
 </section>
+
+@if (api.features().length) {
+  <section class="feature" aria-label="Feature in ordine di priorita">
+    <h2>Feature, in ordine di priorità</h2>
+    <ol>
+      @for (f of api.features(); track f.id; let i = $index, last = $last) {
+        <li [class.ferma]="f.paused">
+          <span class="pos">{{ i + 1 }}</span>
+          <span class="nome">{{ f.title }} <span class="id">#{{ f.id }}</span></span>
+          <span class="quante">{{ cardsPerFeature().get(f.id) ?? 0 }} card</span>
+          @if (f.paused) { <span class="pillola spenta">in pausa</span> }
+          <span class="tasti">
+            <button type="button" class="piccolo" (click)="moveUp(i)" [disabled]="busy() || i === 0" [attr.aria-label]="'Sposta su ' + f.title">↑</button>
+            <button type="button" class="piccolo" (click)="moveDown(i)" [disabled]="busy() || last" [attr.aria-label]="'Sposta giu ' + f.title">↓</button>
+            <button type="button" class="piccolo" (click)="toggleFeaturePause(f.id, f.paused)" [disabled]="busy()">
+              {{ f.paused ? 'riprendi' : 'pausa' }}
+            </button>
+          </span>
+        </li>
+      }
+    </ol>
+  </section>
+}
 
 <main class="corpo">
   <div class="kanban">

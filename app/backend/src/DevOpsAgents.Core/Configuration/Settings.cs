@@ -53,6 +53,8 @@ public sealed class StateNames
     public string OnHoldTag => this["tagAttesa"];
     public string? NoTestTag => Get("tagSenzaTest");
     public string? HumanTestTag => Get("tagProvaUmana");
+    /// <summary>D60: il tag della pausa, su una Feature o su una card sola.</summary>
+    public string? PausedTag => Get("tagPausa");
     public IEnumerable<string> ClosedTaskStates => new[] { Get("taskChiuso"), Get("taskRimosso") }.Where(s => s is not null)!;
 }
 
@@ -69,6 +71,10 @@ public sealed record Limits
     public int ValidationMinutes { get; init; } = 60;
     public int IntervalMinutes { get; init; } = 2;
     public double WeeklyQuotaThreshold { get; init; } = 0.70;
+    /// <summary>D60: oltre questa parte della finestra di 5 ore non parte nessuna sessione nuova fino al suo reset.</summary>
+    public double? FiveHourQuotaThreshold { get; init; } = 0.60;
+    /// <summary>D59: quanti ambienti Docker di collaudo insieme, per i componenti con la voce collaudo.</summary>
+    public int TestEnvironments { get; init; } = 3;
 }
 
 /// <summary>Un ruolo di config/ruoli.json: modello, sforzo, brief e strumenti della sessione claude -p.</summary>

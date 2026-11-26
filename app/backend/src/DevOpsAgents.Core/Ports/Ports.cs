@@ -17,6 +17,11 @@ public interface IBoard
     /// <summary>Un link sulla card (la PR di GitHub, che la board non collega da sola).</summary>
     Task AddLinkAsync(int cardId, string url, string? comment = null, CancellationToken ct = default);
     Task<Person> GetCurrentUserAsync(CancellationToken ct = default);
+    Task RemoveTagAsync(int cardId, string tag, CancellationToken ct = default);
+    /// <summary>D60: le Feature aperte delle aree date, con rank e tag. Un errore ferma il giro: senza, una Feature in pausa ripartirebbe.</summary>
+    Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default);
+    /// <summary>D60: l'ordine del backlog (Microsoft.VSTS.Common.StackRank).</summary>
+    Task SetRankAsync(int workItemId, double rank, CancellationToken ct = default);
     string CardUrl(int cardId);
 }
 
@@ -56,7 +61,7 @@ public interface IWorkspace
 }
 
 /// <summary>Il risultato di una sessione finita: la riga ESITO, il testo, e se e finita sul limite di token.</summary>
-public sealed record SessionResult(string? Outcome, string? Text, bool HitTokenLimit = false, DateTimeOffset? LimitResetsAt = null);
+public sealed record SessionResult(string? Outcome, string? Text, bool HitTokenLimit = false, DateTimeOffset? LimitResetsAt = null, QuotaInfo? Quota = null);
 
 /// <summary>Le sessioni dei ruoli (claude -p): avvio e controllo. Non decide niente.</summary>
 public interface ISessionRunner
@@ -86,4 +91,22 @@ public interface IClock
 public sealed class SystemClock : IClock
 {
     public DateTimeOffset Now => DateTimeOffset.UtcNow;
+}
+
+/// <summary>Le impostazioni che cambiano dalla dashboard (impostazioni.json): per ora la pausa del sistema (D60).</summary>
+public sealed record SystemSettings(bool Paused = false);
+
+public interface ISettingsStore
+{
+    Task<SystemSettings> LoadAsync(CancellationToken ct = default);
+    Task SaveAsync(SystemSettings settings, CancellationToken ct = default);
+}
+
+/// <summary>La quota (quota.json) e i suoi override (soglia-quota.json): una per tutti i ruoli.</summary>
+public interface IQuotaStore
+{
+    Task<QuotaInfo?> LoadAsync(CancellationToken ct = default);
+    Task SaveAsync(QuotaInfo quota, CancellationToken ct = default);
+    Task<QuotaOverrides?> LoadOverridesAsync(CancellationToken ct = default);
+    Task SaveOverridesAsync(QuotaOverrides overrides, CancellationToken ct = default);
 }

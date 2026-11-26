@@ -215,6 +215,38 @@ public class AdoBoardTests
     }
 
     [Fact]
+    public async Task Le_Feature_aperte_si_leggono_solo_dalle_aree_della_mappa_con_il_rank_e_il_padre_delle_card_dalla_relazione()
+    {
+        var h = new FakeHttp((r, _) => r.RequestUri!.ToString().Contains("/wiql")
+            ? FakeHttp.Ok("""{ "workItems": [ { "id": 10 } ] }""")
+            : FakeHttp.Ok("""{ "value": [ { "id": 10, "rev": 2, "fields": { "System.Title": "Preventivi", "System.State": "Active", "System.Tags": "paused", "Microsoft.VSTS.Common.StackRank": 1500.5 } } ] }"""));
+        var f = Assert.Single(await new AdoBoard(Tx.Ado(h), "DevOps.Agents", Names).GetOpenFeaturesAsync(["DevOps.Agents\\AI\\Stime", "D'Area"]));
+        Assert.Equal((10, "Preventivi", 1500.5, true), (f.Id, f.Title, f.Rank!.Value, f.HasTag("paused")));
+        var wiql = JsonNode.Parse(h.Calls[0].Body)!["query"]!.GetValue<string>();
+        Assert.Contains("[System.WorkItemType] = 'Feature'", wiql);
+        Assert.Contains("[System.AreaPath] UNDER 'D''Area'", wiql);
+        Assert.Contains("[System.State] <> 'Closed'", wiql);
+
+        var card = AdoBoard.ToCard(JsonNode.Parse("""{ "id": 42, "rev": 1, "fields": { "System.State": "New" }, "relations": [ { "rel": "System.LinkTypes.Hierarchy-Reverse", "url": "https://x/_apis/wit/workItems/10" } ] }""")!);
+        Assert.Equal(10, card.ParentId);
+    }
+
+    [Fact]
+    public async Task Il_rank_si_scrive_nel_campo_StackRank_e_il_tag_si_toglie_con_il_test_sulla_revisione()
+    {
+        var h = new FakeHttp((r, _) => r.Method == HttpMethod.Get
+            ? FakeHttp.Ok("""{ "id": 10, "rev": 4, "fields": { "System.Tags": "agents; paused" } }""") : FakeHttp.Ok("{}"));
+        var b = new AdoBoard(Tx.Ado(h), "DevOps.Agents", Names);
+        await b.SetRankAsync(10, 2500);
+        var rank = JsonNode.Parse(h.Calls.Last().Body)!.AsArray()[0]!;
+        Assert.Equal(("/fields/Microsoft.VSTS.Common.StackRank", 2500.0), (rank["path"]!.GetValue<string>(), rank["value"]!.GetValue<double>()));
+        await b.RemoveTagAsync(10, "PAUSED");
+        var ops = JsonNode.Parse(h.Calls.Last().Body)!.AsArray();
+        Assert.Equal(("test", 4), (ops[0]!["op"]!.GetValue<string>(), ops[0]!["value"]!.GetValue<int>()));
+        Assert.Equal("agents", ops[1]!["value"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Il_link_alla_PR_si_aggiunge_una_volta_sola()
     {
         var has = false;
@@ -395,10 +427,55 @@ public class LocalTests
             """{"type":"system","subtype":"task_summary"}""",
         ]);
         Assert.Equal("fatto", ClaudeSessionRunner.ParseResult(log).Outcome);
+        // un testo che parla di limiti senza evento rejected ne finestra piena non e un limite di token
         File.WriteAllLines(log, ["""{"type":"result","result":"Claude usage limit reached"}"""]);
+        Assert.False(ClaudeSessionRunner.ParseResult(log).HitTokenLimit);
+    }
+
+    [Fact]
+    public void La_quota_viene_dall_ultimo_rate_limit_event_e_il_limite_dall_evento_rejected_con_il_suo_reset()
+    {
+        var log = Path.GetTempFileName();
+        File.WriteAllLines(log, [
+            """{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.2,"resetsAt":1700000000},"seven_day":{"utilization":0.1,"resetsAt":1700500000}}}}""",
+            """{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1700003600,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":1.0,"resetsAt":1700003600},"seven_day":{"utilization":0.3,"resetsAt":1700500000}}}}""",
+            """{"type":"result","result":"You've hit your limit"}""",
+        ]);
         var r = ClaudeSessionRunner.ParseResult(log);
-        Assert.Null(r.Outcome);
         Assert.True(r.HitTokenLimit);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700003600), r.LimitResetsAt);
+        Assert.Equal((1.0, 0.3), (r.Quota!.FiveHourUtilization!.Value, r.Quota.WeeklyUtilization!.Value));
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700500000), r.Quota.WeeklyResetsAt);
+        // senza rejected: "hit your ... limit" e una finestra piena
+        File.WriteAllLines(log, [
+            """{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":1.0,"resetsAt":1700003600}}}}""",
+            """{"type":"result","result":"You've hit your session limit"}""",
+        ]);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700003600), ClaudeSessionRunner.ParseResult(log).LimitResetsAt);
+    }
+
+    [Fact]
+    public async Task Impostazioni_e_quota_si_salvano_nel_formato_della_versione_PowerShell()
+    {
+        var dir = Directory.CreateTempSubdirectory("dati").FullName;
+        File.WriteAllText(Path.Combine(dir, "impostazioni.json"), """{ "canale": "main", "pausaSistema": false }""");
+        var s = new JsonSettingsStore(Path.Combine(dir, "impostazioni.json"));
+        Assert.False((await s.LoadAsync()).Paused);
+        await s.SaveAsync(new SystemSettings(true));
+        var json = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "impostazioni.json")))!;
+        Assert.True(json["pausaSistema"]!.GetValue<bool>());
+        Assert.Equal("main", json["canale"]!.GetValue<string>());
+
+        var q = new JsonQuotaStore(dir);
+        Assert.Null(await q.LoadAsync());
+        var reset = new DateTimeOffset(2026, 11, 27, 10, 0, 0, TimeSpan.Zero);
+        await q.SaveAsync(new QuotaInfo(reset, 0.5, reset.AddDays(3), 0.7, reset));
+        var back = (await q.LoadAsync())!;
+        Assert.Equal((reset, 0.5, 0.7), (back.PauseUntil!.Value, back.WeeklyUtilization!.Value, back.FiveHourUtilization!.Value));
+        Assert.Equal(0.5, JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "quota.json")))!["sevenDay"]!["utilization"]!.GetValue<double>());
+        File.WriteAllText(Path.Combine(dir, "soglia-quota.json"), """{ "soglia": 0.9, "ignoraRiserva": true, "fino": "2026-11-30T00:00:00Z", "soglia5Ore": 0.8, "fino5Ore": "2026-11-27T10:00:00Z" }""");
+        var o = (await q.LoadOverridesAsync())!;
+        Assert.Equal((0.9, true, 0.8), (o.WeeklyThreshold!.Value, o.IgnoreWeeklyReserve, o.FiveHourThreshold!.Value));
     }
 
     [Fact]

@@ -42,6 +42,8 @@ public sealed record SuiteConfig(
             ValidationMinutes = I("validazioneMinuti", 60),
             IntervalMinutes = I("intervalloMinuti", 2),
             WeeklyQuotaThreshold = l["sogliaQuotaSettimanale"]?.GetValue<double>() ?? 0.70,
+            FiveHourQuotaThreshold = l["sogliaQuota5Ore"]?.GetValue<double>(),
+            TestEnvironments = I("ambientiCollaudo", 3),
         };
 
         var roles = new Dictionary<string, RoleSettings>();

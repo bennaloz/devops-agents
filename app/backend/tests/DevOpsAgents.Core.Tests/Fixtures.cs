@@ -52,9 +52,11 @@ internal sealed class CardBuilder(string stateKey)
     private DeployChoice? _deploy;
     private AreaMapping? _area = Fx.Area;
     private string? _from = StateKeys.Ready;
+    private int? _parent;
     public CardLocalState Local { get; } = new();
 
     public CardBuilder Tag(string tag) { _tags.Add(tag); return this; }
+    public CardBuilder Parent(int featureId) { _parent = featureId; return this; }
     public CardBuilder NoAgentsTag() { _tags.Remove(Fx.Names.AgentsTag); return this; }
     public CardBuilder OnHold(string? per = null) { _tags.Add(Fx.Names.OnHoldTag); Local.WaitingFor = per; return this; }
     public CardBuilder WaitingFor(string per) { Local.WaitingFor = per; return this; }
@@ -87,7 +89,7 @@ internal sealed class CardBuilder(string stateKey)
     {
         var history = new List<StateChange>(_history);
         if (_from is not null) history.Add(new StateChange(10, Fx.N(_from), Fx.N(stateKey), Fx.T0));
-        var card = new Card(42, 12, "Importare le stime", Fx.N(stateKey), _tags, _area?.Area);
+        var card = new Card(42, 12, "Importare le stime", Fx.N(stateKey), _tags, _area?.Area, ParentId: _parent);
         return new Snapshot(card, Local, _area, _comments, history, _tasks, _preds, _pr, _run, _deploy);
     }
 }

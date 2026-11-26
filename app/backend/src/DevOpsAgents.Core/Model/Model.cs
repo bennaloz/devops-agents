@@ -15,7 +15,15 @@ public sealed record Card(
     string? Area,
     Person? AssignedTo = null,
     Person? CreatedBy = null,
-    string? WorkItemType = null);
+    string? WorkItemType = null,
+    /// <summary>Il padre (la Feature, D60): l'ordine e la pausa delle card vengono da li.</summary>
+    int? ParentId = null);
+
+/// <summary>Una Feature aperta delle aree della mappa (D60): la priorita e l'ordine del backlog (StackRank), la pausa e il tag paused.</summary>
+public sealed record FeatureInfo(int Id, string Title, string State, IReadOnlyList<string> Tags, string? Area, double? Rank)
+{
+    public bool HasTag(string? tag) => tag is not null && Tags.Contains(tag, StringComparer.OrdinalIgnoreCase);
+}
 
 public sealed record Comment(int Id, string Author, string Text, DateTimeOffset When);
 
@@ -71,8 +79,16 @@ public sealed record AreaMapping(
 /// <summary>La scelta del deploy in Test fatta dal responsabile, e i parametri che lo YAML ammette (se letti).</summary>
 public sealed record DeployChoice(IReadOnlyList<string> Selected, IReadOnlyList<string>? Allowed = null, string? AllowedError = null);
 
-/// <summary>La quota dell'abbonamento: pausa dopo il limite di token, e l'uso settimanale (D51).</summary>
-public sealed record QuotaInfo(DateTimeOffset? PauseUntil, double? WeeklyUtilization, DateTimeOffset? WeeklyResetsAt);
+/// <summary>
+/// La quota dell'abbonamento (quota.json): la pausa dopo il limite di token (D51), l'uso della finestra settimanale e di quella
+/// di 5 ore (D60) letti dall'ultimo rate_limit_event di una sessione.
+/// </summary>
+public sealed record QuotaInfo(DateTimeOffset? PauseUntil, double? WeeklyUtilization, DateTimeOffset? WeeklyResetsAt,
+    double? FiveHourUtilization = null, DateTimeOffset? FiveHourResetsAt = null);
+
+/// <summary>Gli override della vista sulle soglie di quota, validi fino al reset della loro finestra (soglia-quota.json).</summary>
+public sealed record QuotaOverrides(double? WeeklyThreshold = null, bool IgnoreWeeklyReserve = false, DateTimeOffset? WeeklyUntil = null,
+    double? FiveHourThreshold = null, DateTimeOffset? FiveHourUntil = null);
 
 /// <summary>Una sessione di un ruolo sulla card, come la registra lo smistatore.</summary>
 public sealed class SessionRecord

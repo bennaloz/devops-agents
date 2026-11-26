@@ -52,6 +52,10 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     public Task AddLinkAsync(int id, string url, string? comment = null, CancellationToken ct = default) { Writes.Add($"link {id} {url}"); return Task.CompletedTask; }
     public Task<Person> GetCurrentUserAsync(CancellationToken ct = default) => Task.FromResult(Me);
     public string CardUrl(int id) => $"https://board/{id}";
+    public List<FeatureInfo> Features { get; } = [];
+    public Task RemoveTagAsync(int id, string tag, CancellationToken ct = default) { Writes.Add($"togli {id} {tag}"); return Task.CompletedTask; }
+    public Task<IReadOnlyList<FeatureInfo>> GetOpenFeaturesAsync(IReadOnlyList<string> areas, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<FeatureInfo>>(Features.ToList());
+    public Task SetRankAsync(int id, double rank, CancellationToken ct = default) { Writes.Add($"rank {id} {rank}"); return Task.CompletedTask; }
 
     // ICodeHost
     public ICodeHost For(AreaMapping area) => this;
@@ -216,5 +220,113 @@ public class DispatcherTests
         ]);
         Assert.Equal(["deployB", "deployC"], c!.Selected);
         Assert.Null(Dispatcher.ParseDeployChoice([new Comment(1, "x", "ciao", Fx.T0)]));
+    }
+}
+
+public class DispatcherPriorityTests
+{
+    private sealed class Settings(bool paused) : ISettingsStore
+    {
+        public SystemSettings Value { get; private set; } = new(paused);
+        public Task<SystemSettings> LoadAsync(CancellationToken ct = default) => Task.FromResult(Value);
+        public Task SaveAsync(SystemSettings s, CancellationToken ct = default) { Value = s; return Task.CompletedTask; }
+    }
+
+    private sealed class Quota : IQuotaStore
+    {
+        public QuotaInfo? Value { get; set; }
+        public Task<QuotaInfo?> LoadAsync(CancellationToken ct = default) => Task.FromResult(Value);
+        public Task SaveAsync(QuotaInfo q, CancellationToken ct = default) { Value = q; return Task.CompletedTask; }
+        public Task<QuotaOverrides?> LoadOverridesAsync(CancellationToken ct = default) => Task.FromResult<QuotaOverrides?>(null);
+        public Task SaveOverridesAsync(QuotaOverrides o, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private static Dispatcher D(World w, ISettingsStore? s = null, IQuotaStore? q = null) =>
+        new(w, w, w, w, w, w, new DecisionEngine(), Fx.Names, new Limits(), [Fx.Area], w, NullLogger<Dispatcher>.Instance, null, s, q);
+
+    private static Card WithParent(World w, int id, string state, int parent)
+    {
+        var c = w.Add(id, state);
+        w.Cards[w.Cards.FindIndex(x => x.Id == id)] = c with { ParentId = parent };
+        return c;
+    }
+
+    [Fact]
+    public async Task Il_sistema_in_pausa_chiude_le_sessioni_finite_ma_non_lancia_e_non_sposta_niente()
+    {
+        var w = new World();
+        w.Features.Add(new FeatureInfo(10, "F", "Active", [], null, 1000));
+        WithParent(w, 42, K.Ready, 10);
+        WithParent(w, 43, K.InDevelopment, 10);
+        w.State[43] = new CardLocalState { Branch = "b", LastRole = "dev", RunningSession = "s9" };
+        w.State[43].LastSessionByRole["dev"] = Fx.Session("dev", null, finished: false);
+        w.Results["s9"] = new SessionResult("fatto", "ok");
+        var r = await D(w, new Settings(true)).RunRoundAsync(whatIf: false);
+        Assert.True(r.SystemPaused);
+        Assert.Empty(w.Writes);
+        Assert.Empty(w.Started);
+        Assert.All(r.Cards, c => Assert.Equal("pausaSistema", c.Reason!.Type));
+        Assert.Null(w.State[43].RunningSession);
+        Assert.Equal("fatto", w.State[43].Of("dev")!.Outcome);
+    }
+
+    [Fact]
+    public async Task Il_posto_libero_del_repo_va_alla_card_della_Feature_piu_in_alto()
+    {
+        var w = new World();
+        w.Features.Add(new FeatureInfo(10, "Bassa", "Active", [], null, 2000));
+        w.Features.Add(new FeatureInfo(20, "Alta", "Active", [], null, 1000));
+        WithParent(w, 42, K.Ready, 10);
+        WithParent(w, 43, K.Ready, 20);
+        var r = await D(w).RunRoundAsync(whatIf: false);
+        Assert.Equal(43, Assert.Single(w.Started).CardId);
+        Assert.Equal([43, 42], r.Cards.Select(c => c.Id));
+        Assert.Equal([20, 10], r.Features!.Select(f => f.Id));
+    }
+
+    [Fact]
+    public async Task Una_card_in_pausa_non_tiene_il_posto_in_sviluppo_del_suo_repo()
+    {
+        var w = new World();
+        w.Features.Add(new FeatureInfo(10, "Ferma", "Active", [Fx.Names.PausedTag!], null, 1000));
+        w.Features.Add(new FeatureInfo(20, "Va", "Active", [], null, 2000));
+        WithParent(w, 42, K.InDevelopment, 10);
+        WithParent(w, 43, K.Ready, 20);
+        var r = await D(w).RunRoundAsync(whatIf: false);
+        Assert.Equal("pausa", r.Cards.Single(c => c.Id == 42).Reason!.Type);
+        Assert.Equal(43, Assert.Single(w.Started).CardId);
+    }
+
+    [Fact]
+    public async Task La_quota_letta_da_una_sessione_finita_si_salva_e_sul_limite_di_token_scrive_la_pausa()
+    {
+        var w = new World();
+        w.Add(43, K.InDevelopment);
+        w.State[43] = new CardLocalState { Branch = "b", LastRole = "dev", RunningSession = "s9" };
+        w.State[43].LastSessionByRole["dev"] = Fx.Session("dev", null, finished: false);
+        var reset = Fx.T0.AddHours(4);
+        w.Results["s9"] = new SessionResult(null, "hit your limit", true, reset, new QuotaInfo(null, 0.4, Fx.T0.AddDays(3), 1.0, reset));
+        var q = new Quota();
+        await D(w, null, q).RunRoundAsync(whatIf: false);
+        Assert.Equal((0.4, 1.0, reset.AddMinutes(5)), (q.Value!.WeeklyUtilization!.Value, q.Value.FiveHourUtilization!.Value, q.Value.PauseUntil!.Value));
+        Assert.Equal("quota", w.State[43].WaitingFor);
+        Assert.Empty(w.Started);
+    }
+
+    [Fact]
+    public async Task Il_servizio_di_priorita_mette_in_pausa_riprende_e_riordina_scrivendo_solo_il_necessario()
+    {
+        var w = new World();
+        w.Features.AddRange([new FeatureInfo(1, "A", "Active", [], null, 1000), new FeatureInfo(2, "B", "Active", [Fx.Names.PausedTag!], null, 2000)]);
+        var s = new Settings(false);
+        var p = new PriorityService(w, s, Fx.Names, [Fx.Area]);
+        await p.SetFeaturePausedAsync(1, true);
+        await p.SetFeaturePausedAsync(2, false);
+        await p.SetFeaturePausedAsync(2, true); // gia in pausa: niente
+        Assert.Equal([$"tag 1 {Fx.Names.PausedTag}", $"togli 2 {Fx.Names.PausedTag}"], w.Writes);
+        Assert.Equal([2], await p.MoveAsync(2, 0));
+        Assert.Contains("rank 2 0", w.Writes);
+        await p.SetSystemPausedAsync(true);
+        Assert.True(await p.IsSystemPausedAsync());
     }
 }

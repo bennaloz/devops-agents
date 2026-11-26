@@ -25,7 +25,6 @@ public sealed record ClaudeRunnerOptions
 public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, ClaudeRunnerOptions options) : ISessionRunner
 {
     private static readonly Regex Esito = new(@"(?m)^[\s`*]*ESITO=([^\s`*]+)[\s`*]*$", RegexOptions.Compiled);
-    private static readonly Regex TokenLimit = new(@"(?i)(usage limit|limit reached|rate limit)", RegexOptions.Compiled);
     private readonly ConcurrentDictionary<string, Process> _processes = new();
     // chi copia l'uscita del processo nel file: si aspetta prima di leggere l'esito, o l'ultima riga puo mancare
     private readonly ConcurrentDictionary<string, Task> _pumps = new();
@@ -104,23 +103,48 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
         return ParseResult(log);
     }
 
-    /// <summary>L'esito dalla riga "type":"result" del flusso: l'ultima riga ESITO= del testo, e se la sessione e finita sul limite di token.</summary>
+    /// <summary>
+    /// L'esito della sessione dal suo flusso, come Get-EsitoSessione: l'ultima riga ESITO= dell'evento result, la quota dall'ultimo
+    /// rate_limit_event (finestre five_hour e seven_day), il limite di token dall'evento rejected o, in mancanza, dal testo
+    /// "hit your ... limit" con una finestra piena. Un limite senza un reset leggibile non e un limite.
+    /// </summary>
     public static SessionResult ParseResult(string logPath)
     {
         if (!File.Exists(logPath)) return new SessionResult(null, "la sessione non ha scritto niente");
         string? text = null;
+        Core.Model.QuotaInfo? quota = null;
+        JsonNode? rejected = null;
         foreach (var line in File.ReadLines(logPath))
         {
-            if (!line.Contains("\"result\"")) continue;
+            if (string.IsNullOrWhiteSpace(line)) continue;
             JsonNode? n;
             try { n = JsonNode.Parse(line); } catch (System.Text.Json.JsonException) { continue; }
-            if (n?["type"]?.GetValue<string>() == "result") text = n["result"]?.GetValue<string>() ?? "";
+            var type = n?["type"]?.GetValue<string>();
+            if (type == "result") text = n!["result"]?.GetValue<string>() ?? "";
+            else if (type == "rate_limit_event")
+            {
+                var info = n!["rate_limit_info"];
+                if (info?["unifiedWindows"] is JsonObject w)
+                    quota = new Core.Model.QuotaInfo(null, Utilization(w["seven_day"]), Epoch(w["seven_day"]?["resetsAt"]), Utilization(w["five_hour"]), Epoch(w["five_hour"]?["resetsAt"]));
+                if (info?["status"]?.GetValue<string>() == "rejected") rejected = info;
+            }
         }
-        if (text is null) return new SessionResult(null, "la sessione e terminata senza evento result");
+        if (text is null) return new SessionResult(null, "la sessione e terminata senza evento result", Quota: quota);
         var m = Esito.Matches(text);
         var outcome = m.Count > 0 ? m[^1].Groups[1].Value : null;
-        return new SessionResult(outcome, text, outcome is null && TokenLimit.IsMatch(text));
+        DateTimeOffset? reset = null;
+        if (rejected is not null) reset = Epoch(rejected["resetsAt"]);
+        else if (text.Contains("hit your", StringComparison.OrdinalIgnoreCase) && text.Contains("limit", StringComparison.OrdinalIgnoreCase) && quota is not null)
+            reset = quota.FiveHourUtilization >= 1 ? quota.FiveHourResetsAt : quota.WeeklyUtilization >= 1 ? quota.WeeklyResetsAt : null;
+        return new SessionResult(outcome, text, reset is not null, reset, quota);
     }
+
+    private static double? Utilization(JsonNode? w) => w?["utilization"] is JsonValue v && v.TryGetValue<double>(out var d) ? d : null;
+
+    /// <summary>I resetsAt dei rate_limit_event sono secondi dal 1970.</summary>
+    private static DateTimeOffset? Epoch(JsonNode? n) =>
+        n is JsonValue v && (v.TryGetValue<double>(out var d) || (v.TryGetValue<string>(out var s) && double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)))
+            ? DateTimeOffset.FromUnixTimeSeconds((long)d) : null;
 }
 
 /// <summary>Lo stato locale delle card su file JSON, nella cartella dati (scrittura atomica: un file temporaneo e poi lo scambio).</summary>

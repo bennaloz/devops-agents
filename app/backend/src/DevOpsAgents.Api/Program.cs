@@ -57,10 +57,16 @@ else
     builder.Services.AddSingleton<IStateStore>(sp => sp.GetRequiredService<DemoWorld>());
 }
 
+// impostazioni.json e quota.json nella cartella dati (la demo nella sua sottocartella, per non toccare quelle vere)
+var storeDir = options.Mode == "live" ? dataDir : Path.Combine(dataDir, "demo");
+builder.Services.AddSingleton<ISettingsStore>(new JsonSettingsStore(Path.Combine(storeDir, "impostazioni.json")));
+builder.Services.AddSingleton<IQuotaStore>(new JsonQuotaStore(storeDir));
+builder.Services.AddSingleton(sp => new PriorityService(sp.GetRequiredService<IBoard>(), sp.GetRequiredService<ISettingsStore>(), suite.Names, suite.Areas));
 builder.Services.AddSingleton(sp => new Dispatcher(
     sp.GetRequiredService<IBoard>(), sp.GetRequiredService<ICodeHostResolver>(), sp.GetRequiredService<ICiService>(), sp.GetRequiredService<IWorkspace>(),
     sp.GetRequiredService<ISessionRunner>(), sp.GetRequiredService<IStateStore>(), sp.GetRequiredService<DecisionEngine>(), suite.Names, suite.Limits,
-    suite.Areas, sp.GetRequiredService<IClock>(), sp.GetRequiredService<ILogger<Dispatcher>>(), new DispatcherOptions { OnlyMine = options.OnlyMine }));
+    suite.Areas, sp.GetRequiredService<IClock>(), sp.GetRequiredService<ILogger<Dispatcher>>(), new DispatcherOptions { OnlyMine = options.OnlyMine },
+    sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IQuotaStore>()));
 builder.Services.AddSingleton(sp => new DispatcherService(sp.GetRequiredService<Dispatcher>(), sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<LiveHub>>(),
     options, TimeSpan.FromMinutes(Math.Max(1, suite.Limits.IntervalMinutes)), sp.GetRequiredService<ILogger<DispatcherService>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());
@@ -75,8 +81,9 @@ const string Header = "X-DevOps-Agents";
 static bool Allowed(HttpRequest r) => r.Headers.ContainsKey(Header);
 
 var api = app.MapGroup("/api");
-api.MapGet("/status", (DispatcherService svc, ApiOptions o, SuiteConfig s) => new
+api.MapGet("/status", async (DispatcherService svc, ApiOptions o, SuiteConfig s, PriorityService p) => new
 {
+    systemPaused = await p.IsSystemPausedAsync(),
     mode = o.Mode,
     allowWrites = o.AllowWrites,
     autoRun = o.AutoRun,
@@ -93,6 +100,30 @@ api.MapPost("/round", async (HttpRequest req, DispatcherService svc, bool? whatI
     if (!Allowed(req)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var r = await svc.RunNowAsync(whatIf ?? true, card, ct);
     return r is null ? Results.Conflict(new { error = "un giro e gia in corso" }) : Results.Ok(r);
+});
+// D60: le Feature in ordine di priorita, la loro pausa, il riordino e la pausa del sistema. Dopo ogni cambio un giro di prova
+// aggiorna la dashboard (le card in pausa mostrano subito il motivo).
+api.MapGet("/features", (PriorityService p, CancellationToken ct) => p.GetFeaturesAsync(ct));
+api.MapPost("/features/{id:int}/pause", async (HttpRequest req, PriorityService p, DispatcherService svc, int id, bool active, CancellationToken ct) =>
+{
+    if (!Allowed(req)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    try { await p.SetFeaturePausedAsync(id, active, ct); } catch (ArgumentException e) { return Results.BadRequest(new { error = e.Message }); }
+    _ = await svc.RunNowAsync(true, ct: ct);
+    return Results.Ok(await p.GetFeaturesAsync(ct));
+});
+api.MapPost("/features/{id:int}/move", async (HttpRequest req, PriorityService p, DispatcherService svc, int id, int after, CancellationToken ct) =>
+{
+    if (!Allowed(req)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    try { await p.MoveAsync(id, after, ct); } catch (ArgumentException e) { return Results.BadRequest(new { error = e.Message }); }
+    _ = await svc.RunNowAsync(true, ct: ct);
+    return Results.Ok(await p.GetFeaturesAsync(ct));
+});
+api.MapPost("/system/pause", async (HttpRequest req, PriorityService p, DispatcherService svc, bool active, CancellationToken ct) =>
+{
+    if (!Allowed(req)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    await p.SetSystemPausedAsync(active, ct);
+    _ = await svc.RunNowAsync(true, ct: ct);
+    return Results.Ok(new { systemPaused = active });
 });
 api.MapGet("/config", (SuiteConfig s) => new
 {

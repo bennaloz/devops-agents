@@ -16,9 +16,13 @@ public sealed record DispatcherOptions
 
 /// <summary>Cosa e successo a una card in un giro: le azioni decise (ed eseguite, se non e un giro di prova), il motivo, l'errore.</summary>
 public sealed record CardReport(int Id, string Title, string State, string? StateKey, string? Area, string? AssignedTo, string? Url,
-    IReadOnlyList<string> Actions, BlockReason? Reason, string? RunningRole, string? Error);
+    IReadOnlyList<string> Actions, BlockReason? Reason, string? RunningRole, string? Error, int? FeatureId = null);
 
-public sealed record RoundReport(DateTimeOffset Started, DateTimeOffset Finished, bool WhatIf, IReadOnlyList<CardReport> Cards, IReadOnlyList<string> Log);
+/// <summary>Una Feature come la vede la dashboard: in ordine di priorita, con la pausa.</summary>
+public sealed record FeatureReport(int Id, string Title, string State, double? Rank, bool Paused, string? Area);
+
+public sealed record RoundReport(DateTimeOffset Started, DateTimeOffset Finished, bool WhatIf, IReadOnlyList<CardReport> Cards, IReadOnlyList<string> Log,
+    bool SystemPaused = false, IReadOnlyList<FeatureReport>? Features = null, QuotaInfo? Quota = null);
 
 /// <summary>
 /// Lo smistatore: un giro legge le card, chiude le sessioni finite, decide con <see cref="DecisionEngine"/> ed esegue.
@@ -37,7 +41,9 @@ public sealed class Dispatcher(
     IReadOnlyList<AreaMapping> areas,
     IClock clock,
     ILogger<Dispatcher> logger,
-    DispatcherOptions? options = null)
+    DispatcherOptions? options = null,
+    ISettingsStore? settingsStore = null,
+    IQuotaStore? quotaStore = null)
 {
     private readonly DispatcherOptions _options = options ?? new DispatcherOptions();
     private const string DeployMark = "Parametri del deploy in Test:";
@@ -52,23 +58,42 @@ public sealed class Dispatcher(
         var state = await store.LoadAsync(ct);
         if (!whatIf) await CloseFinishedSessionsAsync(state, Log, ct);
 
-        var me = _options.OnlyMine ? await board.GetCurrentUserAsync(ct) : null;
-        var cards = (await board.GetActiveCardsAsync(ct))
-            .Where(c => onlyCard is null || c.Id == onlyCard)
-            .Where(c => me is null || c.AssignedTo?.Id == me.Id)
-            .OrderBy(c => c.Id).ToList();
+        // D60: le Feature aperte, per la pausa e per l'ordine. Se non si leggono il giro si ferma: senza, una Feature in pausa ripartirebbe.
+        var features = await board.GetOpenFeaturesAsync(areas.Select(a => a.Area).ToList(), ct);
+        var featureMap = features.ToDictionary(f => f.Id);
+        var settings = settingsStore is null ? new SystemSettings() : await settingsStore.LoadAsync(ct);
+        var quota = quotaStore is null ? null : await quotaStore.LoadAsync(ct);
+        var overrides = quotaStore is null ? null : await quotaStore.LoadOverridesAsync(ct);
+        var featureReports = FeaturePriority.Order(features).Select(f => new FeatureReport(f.Id, f.Title, f.State, f.Rank, f.HasTag(names.PausedTag), f.Area)).ToList();
 
+        var me = _options.OnlyMine ? await board.GetCurrentUserAsync(ct) : null;
+        // D60: un posto libero (sessioni, repo, Test) va alla card della Feature piu in alto
+        var cards = FeaturePriority.OrderCards((await board.GetActiveCardsAsync(ct))
+            .Where(c => onlyCard is null || c.Id == onlyCard)
+            .Where(c => me is null || c.AssignedTo?.Id == me.Id), features).ToList();
+
+        var baseCtx = new DecisionContext(names, limits, clock.Now, Quota: quota, QuotaOverrides: overrides, Features: featureMap);
         var inDev = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         var inTest = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in cards)
         {
             var key = names.KeyOf(c.State);
             if (FindArea(c) is not { } area) continue;
-            if (key == K.InDevelopment) Add(inDev, area.Repo, c.Id);
+            // D60: una card in pausa non tiene il posto in sviluppo del suo repo; in Test si, l'ambiente resta occupato
+            if (key == K.InDevelopment && !DecisionEngine.IsPaused(c, baseCtx)) Add(inDev, area.Repo, c.Id);
             if (key is not null && K.InTest.Contains(key)) Add(inTest, area.Component, c.Id);
         }
 
         var reports = new List<CardReport>();
+        if (settings.Paused)
+        {
+            // D60: il sistema in pausa chiude le sessioni finite (sopra) ma non lancia niente e non sposta card
+            Log("sistema in pausa: nessuna card avanza");
+            foreach (var card in cards)
+                reports.Add(Report(card, [], new BlockReason("pausaSistema"), state.TryGetValue(card.Id, out var ls) && ls.RunningSession is not null ? ls.LastRole : null, null));
+            if (!whatIf) await store.SaveAsync(state, ct);
+            return new RoundReport(started, clock.Now, whatIf, reports, log, true, featureReports, quota);
+        }
         foreach (var card in cards)
         {
             var local = state.TryGetValue(card.Id, out var l) ? l : state[card.Id] = new CardLocalState();
@@ -83,10 +108,13 @@ public sealed class Dispatcher(
                 }
                 var snapshot = await BuildSnapshotAsync(card, local, area, ct);
                 var active = state.Values.Count(s => s.RunningSession is not null);
-                var ctx = new DecisionContext(names, limits, clock.Now, active,
-                    state.Where(kv => kv.Value.RunningSession is not null).Select(kv => kv.Key).ToList(),
-                    inDev.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase),
-                    inTest.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase));
+                var ctx = baseCtx with
+                {
+                    ActiveSessions = active,
+                    CardsWithSession = state.Where(kv => kv.Value.RunningSession is not null).Select(kv => kv.Key).ToList(),
+                    InDevelopmentByRepo = inDev.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase),
+                    InTestByComponent = inTest.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase),
+                };
                 var decision = engine.Decide(snapshot, ctx);
                 var described = decision.Actions.Select(Describe).ToList();
                 if (!whatIf)
@@ -112,11 +140,11 @@ public sealed class Dispatcher(
         }
 
         if (!whatIf) await store.SaveAsync(state, ct);
-        return new RoundReport(started, clock.Now, whatIf, reports, log);
+        return new RoundReport(started, clock.Now, whatIf, reports, log, false, featureReports, quota);
     }
 
     private CardReport Report(Card c, IReadOnlyList<string> actions, BlockReason? reason, string? running, string? error) =>
-        new(c.Id, c.Title, c.State, names.KeyOf(c.State), c.Area, c.AssignedTo?.Name, board.CardUrl(c.Id), actions, reason, running, error);
+        new(c.Id, c.Title, c.State, names.KeyOf(c.State), c.Area, c.AssignedTo?.Name, board.CardUrl(c.Id), actions, reason, running, error, c.ParentId);
 
     private AreaMapping? FindArea(Card c) => areas.FirstOrDefault(a => string.Equals(a.Area, c.Area, StringComparison.OrdinalIgnoreCase));
 
@@ -140,6 +168,18 @@ public sealed class Dispatcher(
             if (result is null) continue;
             if (s is not null) { s.End = clock.Now; s.Outcome = result.Outcome; s.Text = result.Text; }
             local.RunningSession = null;
+            if (quotaStore is not null && (result.Quota is not null || result.HitTokenLimit))
+            {
+                // D51: la quota e una sola per tutti i ruoli; vale l'ultima letta. Sul limite di token, pausa fino al reset (piu un margine).
+                var current = await quotaStore.LoadAsync(ct) ?? new QuotaInfo(null, null, null);
+                var q = result.Quota is { } r ? current with
+                {
+                    WeeklyUtilization = r.WeeklyUtilization ?? current.WeeklyUtilization, WeeklyResetsAt = r.WeeklyResetsAt ?? current.WeeklyResetsAt,
+                    FiveHourUtilization = r.FiveHourUtilization ?? current.FiveHourUtilization, FiveHourResetsAt = r.FiveHourResetsAt ?? current.FiveHourResetsAt,
+                } : current;
+                if (result.HitTokenLimit) q = q with { PauseUntil = (result.LimitResetsAt ?? clock.Now).AddMinutes(5) };
+                await quotaStore.SaveAsync(q, ct);
+            }
             if (result.HitTokenLimit) local.WaitingFor = "quota";
             log($"card {id}: sessione di {role} finita, ESITO={result.Outcome ?? "(nessuno)"}");
         }
