@@ -59,6 +59,18 @@ public sealed record QueueTestDeploy(int Rev, IReadOnlyList<string> Parameters, 
     public override string Kind => "AccodaDeployTest";
 }
 
+/// <summary>D59: CreaAmbienteCollaudo, l'ambiente Docker della card al posto del deploy in Test. Rev vale come runDopoRev.</summary>
+public sealed record CreateTestEnvironment(int Rev) : AgentAction
+{
+    public override string Kind => "CreaAmbienteCollaudo";
+}
+
+/// <summary>D59: ButtaAmbienteCollaudo, quando la card lascia gli stati di Test.</summary>
+public sealed record DiscardTestEnvironment : AgentAction
+{
+    public override string Kind => "ButtaAmbienteCollaudo";
+}
+
 public sealed record RequeueExpiredValidations : AgentAction
 {
     public override string Kind => "RilanciaScadute";

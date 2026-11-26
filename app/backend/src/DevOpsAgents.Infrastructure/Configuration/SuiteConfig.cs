@@ -75,9 +75,22 @@ public sealed record SuiteConfig(
             areas.Add(new AreaMapping(
                 a["area"]!.GetValue<string>(), a["repo"]!.GetValue<string>(), a["cartella"]?.GetValue<string>() ?? "",
                 a["progettoAdo"]!.GetValue<string>(), a["componente"]?.GetValue<string>() ?? "",
-                a["pipelineDeploy"]?.GetValue<int>(), a["urlTest"]?.GetValue<string>(), kind, gh));
+                a["pipelineDeploy"]?.GetValue<int>(), a["urlTest"]?.GetValue<string>(), kind, gh, TestEnvironmentOf(a)));
         }
         return new SuiteConfig(root, org, board!, new StateNames(stati), limits, roles, areas);
+    }
+
+    /// <summary>D59: la voce collaudo di un'area (compose, porte, url); ogni URL deve nominare una porta dell'elenco.</summary>
+    private static TestEnvironmentSpec? TestEnvironmentOf(JsonNode a)
+    {
+        if (a["collaudo"] is not JsonObject c) return null;
+        var compose = c["compose"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(compose)) throw new InvalidDataException($"mappa.json: la voce collaudo dell'area '{a["area"]}' non ha 'compose'");
+        var ports = c["porte"]?.AsArray().Select(p => p!.GetValue<string>()).ToList() ?? [];
+        var urls = c["url"]?.AsObject().ToDictionary(kv => kv.Key, kv => kv.Value!.GetValue<string>()) ?? [];
+        foreach (var (name, port) in urls)
+            if (!ports.Contains(port)) throw new InvalidDataException($"mappa.json: l'URL '{name}' del collaudo dell'area '{a["area"]}' usa la porta '{port}', che non e fra le porte");
+        return new TestEnvironmentSpec(compose, ports, urls);
     }
 
     /// <summary>La radice del repo: la cartella che contiene config/stati.json, risalendo da <paramref name="start"/>.</summary>

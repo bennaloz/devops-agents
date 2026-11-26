@@ -93,6 +93,7 @@ export function describeReason(r: BlockReason): string {
     case 'predecessori': return `aspetta le card precedenti${cards}`;
     case 'limiteRepo': return `repo ${r.detail ?? ''} occupato${cards}`;
     case 'limiteTest': return `Test di ${r.detail ?? ''} occupato${cards}`;
+    case 'limiteAmbienti': return `ambienti di collaudo tutti occupati (${r.detail ?? ''})${cards}`;
     case 'limiteSessioni': return `limite di sessioni ${r.detail ?? ''}`;
     case 'quota': return `quota: ${r.detail ?? ''}`;
     case 'areaNonMappata': return `area non in config/mappa.json: ${r.detail ?? ''}`;

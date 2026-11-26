@@ -519,3 +519,112 @@ public class LocalTests
         Assert.Empty(await new JsonStateStore(path + ".nonce").LoadAsync());
     }
 }
+
+
+public class DockerTestEnvironmentTests
+{
+    private static readonly TestEnvironmentSpec Spec = new("collaudo/compose.yml", ["web", "api"], new Dictionary<string, string> { ["app"] = "web" });
+
+    [Fact]
+    public void Porte_URL_e_variabili_vengono_dallo_slot_e_le_credenziali_dal_file_del_repo()
+    {
+        Assert.Equal(21201, DockerTestEnvironments.Ports(Spec, 21000, 2)["api"]);
+        Assert.Equal("http://localhost:21200", DockerTestEnvironments.Urls(Spec, "localhost", 21000, 2)["app"]);
+        var file = Path.GetTempFileName();
+        File.WriteAllText(file, """{ "utente": "prova", "password-admin": "x", "annidato": { "no": 1 } }""");
+        var v = DockerTestEnvironments.Variables(Spec, "localhost", 21000, 1, file);
+        Assert.Equal(("localhost", "21100", "21101", "prova", "x"), (v["COLLAUDO_HOST"], v["COLLAUDO_PORTA_WEB"], v["COLLAUDO_PORTA_API"], v["COLLAUDO_UTENTE"], v["COLLAUDO_PASSWORD_ADMIN"]));
+        Assert.False(v.ContainsKey("COLLAUDO_ANNIDATO"));
+        File.WriteAllText(file, "non json segreto");
+        var e = Assert.Throws<InvalidDataException>(() => DockerTestEnvironments.Variables(Spec, "h", 1, 1, file));
+        Assert.DoesNotContain("segreto", e.Message);
+    }
+
+    [Fact]
+    public void La_voce_collaudo_della_mappa_si_legge_e_un_URL_su_una_porta_sconosciuta_e_un_errore()
+    {
+        var root = Directory.CreateTempSubdirectory("cfg").FullName;
+        Directory.CreateDirectory(Path.Combine(root, "config"));
+        foreach (var f in Directory.GetFiles(Path.Combine(Tx.Root, "config"))) File.Copy(f, Path.Combine(root, "config", Path.GetFileName(f)));
+        Directory.CreateDirectory(Path.Combine(root, "ruoli"));
+        foreach (var f in Directory.GetFiles(Path.Combine(Tx.Root, "ruoli"))) File.Copy(f, Path.Combine(root, "ruoli", Path.GetFileName(f)));
+        var p = Path.Combine(root, "config", "mappa.json");
+        var orig = File.ReadAllText(p);
+        File.WriteAllText(p, orig.Replace("\"repo\": \"Acme.AI\",", "\"repo\": \"Acme.AI\", \"collaudo\": { \"compose\": \"collaudo/c.yml\", \"porte\": [\"web\"], \"url\": { \"app\": \"web\" } },"));
+        var area = SuiteConfig.Load(root).Areas.First(a => a.Repo == "Acme.AI");
+        Assert.Equal(("collaudo/c.yml", "web"), (area.TestEnvironment!.Compose, area.TestEnvironment.Urls["app"]));
+        File.WriteAllText(p, orig.Replace("\"repo\": \"Acme.AI\",", "\"repo\": \"Acme.AI\", \"collaudo\": { \"compose\": \"c.yml\", \"porte\": [\"web\"], \"url\": { \"app\": \"db\" } },"));
+        Assert.Contains("'db'", Assert.Throws<InvalidDataException>(() => SuiteConfig.Load(root)).Message);
+        Assert.NotNull(DockerSettings.Load(Tx.Root));
+    }
+
+    /// <summary>Un docker finto: scrive gli argomenti e le variabili che vede, ed esce con il codice deciso dal file "esito".</summary>
+    private static (DockerTestEnvironments Envs, string Calls, string Dir) FakeDocker(int code = 0, double creationMinutes = 1)
+    {
+        var dir = Directory.CreateTempSubdirectory("docker").FullName;
+        var calls = Path.Combine(dir, "chiamate.txt");
+        var script = Path.Combine(dir, "docker.sh");
+        File.WriteAllText(script, $"""
+            #!/bin/sh
+            echo "$* | porta=$COLLAUDO_PORTA_WEB utente=$COLLAUDO_UTENTE wslenv=$WSLENV" >> "{calls}"
+            case "$*" in *"ps -a"*) echo "com.docker.compose.project=card-9,acme.collaudo=1";; esac
+            case "$*" in *"volume ls -q"*) echo "card-9_db";; esac
+            exit {code}
+            """.Replace("\r\n", "\n"));
+        var claude = Path.Combine(dir, "claude");
+        Directory.CreateDirectory(Path.Combine(claude, "collaudo"));
+        File.WriteAllText(Path.Combine(claude, "collaudo", "Acme.AI.json"), """{ "utente": "prova" }""");
+        var settings = new DockerSettings(["/bin/sh", script], "localhost", 21000, creationMinutes, 1);
+        return (new DockerTestEnvironments(settings, Path.Combine(dir, "dati"), claude), calls, dir);
+    }
+
+    [Fact]
+    public async Task La_creazione_fa_down_e_up_con_le_variabili_solo_al_figlio_e_l_esito_si_legge_come_un_run()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var (envs, calls, dir) = FakeDocker();
+        var area = Tx.AzureArea with { TestEnvironment = Spec };
+        var started = await envs.StartAsync(area, 42, 1, dir);
+        Assert.Equal("card-42", started.Project);
+        PipelineRun status;
+        var i = 0;
+        do { await Task.Delay(100); status = await envs.GetStatusAsync(42, started.StartedAt); } while (status.Status != "completed" && ++i < 50);
+        Assert.Equal("succeeded", status.Result);
+        var lines = File.ReadAllLines(calls);
+        Assert.StartsWith("compose -p card-42 -f collaudo/compose.yml down -v | porta=21100 utente=prova", lines[0]);
+        Assert.StartsWith("compose -p card-42 -f collaudo/compose.yml up -d --build --wait", lines[1]);
+        Assert.Contains("COLLAUDO_UTENTE/u", lines[1]);
+        Assert.Null(Environment.GetEnvironmentVariable("COLLAUDO_UTENTE"));
+        // un esito di un avvio diverso non vale per questo
+        Assert.Equal("failed", (await new DockerTestEnvironments(new DockerSettings(["/bin/sh"], "h", 1, 1, 1), Path.Combine(dir, "dati")).GetStatusAsync(42, started.StartedAt.AddMinutes(5))).Result);
+    }
+
+    [Fact]
+    public async Task Un_up_che_fallisce_e_un_ambiente_non_creato()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var (envs, _, dir) = FakeDocker(code: 1);
+        var started = await envs.StartAsync(Tx.AzureArea with { TestEnvironment = Spec }, 42, 1, dir);
+        PipelineRun status;
+        var i = 0;
+        do { await Task.Delay(100); status = await envs.GetStatusAsync(42, started.StartedAt); } while (status.Status != "completed" && ++i < 50);
+        Assert.Equal("failed", status.Result);
+        Assert.Contains("compose up: codice 1", File.ReadAllText(started.LogPath));
+    }
+
+    [Fact]
+    public async Task Buttare_fa_down_v_e_toglie_i_volumi_rimasti_elencare_trova_i_progetti_card()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var (envs, calls, _) = FakeDocker();
+        Assert.True(await envs.RemoveAsync("card-9", null));
+        var lines = File.ReadAllLines(calls);
+        Assert.StartsWith("compose -p card-9 down -v", lines[0]);
+        Assert.StartsWith("volume ls -q --filter label=com.docker.compose.project=card-9", lines[1]);
+        Assert.StartsWith("volume rm card-9_db", lines[2]);
+        Assert.Equal(["card-9"], await envs.ListProjectsAsync());
+        var (broken, _, _) = FakeDocker(code: 1);
+        Assert.False(await broken.RemoveAsync("card-9", null));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => broken.ListProjectsAsync());
+    }
+}

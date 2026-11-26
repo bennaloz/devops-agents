@@ -43,7 +43,8 @@ public sealed class Dispatcher(
     ILogger<Dispatcher> logger,
     DispatcherOptions? options = null,
     ISettingsStore? settingsStore = null,
-    IQuotaStore? quotaStore = null)
+    IQuotaStore? quotaStore = null,
+    ITestEnvironments? testEnvironments = null)
 {
     private readonly DispatcherOptions _options = options ?? new DispatcherOptions();
     private const string DeployMark = "Parametri del deploy in Test:";
@@ -75,13 +76,18 @@ public sealed class Dispatcher(
         var baseCtx = new DecisionContext(names, limits, clock.Now, Quota: quota, QuotaOverrides: overrides, Features: featureMap);
         var inDev = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         var inTest = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        var withEnv = new List<int>();
         foreach (var c in cards)
         {
             var key = names.KeyOf(c.State);
             if (FindArea(c) is not { } area) continue;
             // D60: una card in pausa non tiene il posto in sviluppo del suo repo; in Test si, l'ambiente resta occupato
             if (key == K.InDevelopment && !DecisionEngine.IsPaused(c, baseCtx)) Add(inDev, area.Repo, c.Id);
-            if (key is not null && K.InTest.Contains(key)) Add(inTest, area.Component, c.Id);
+            if (key is not null && K.InTest.Contains(key))
+            {
+                Add(inTest, area.Component, c.Id);
+                if (area.TestEnvironment is not null) withEnv.Add(c.Id);
+            }
         }
 
         var reports = new List<CardReport>();
@@ -114,6 +120,7 @@ public sealed class Dispatcher(
                     CardsWithSession = state.Where(kv => kv.Value.RunningSession is not null).Select(kv => kv.Key).ToList(),
                     InDevelopmentByRepo = inDev.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase),
                     InTestByComponent = inTest.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value, StringComparer.OrdinalIgnoreCase),
+                    CardsWithTestEnvironment = withEnv.ToList(),
                 };
                 var decision = engine.Decide(snapshot, ctx);
                 var described = decision.Actions.Select(Describe).ToList();
@@ -121,10 +128,14 @@ public sealed class Dispatcher(
                 {
                     foreach (var action in decision.Actions)
                     {
-                        await ExecuteAsync(action, snapshot, area, local, ct);
+                        await ExecuteAsync(action, snapshot, area, local, state, ct);
                         // i posti si aggiornano nel giro: la card dopo vede quello appena occupato
                         if (action is MoveCard { State: K.InDevelopment } or MoveBack { State: K.InDevelopment }) Add(inDev, area.Repo, card.Id);
-                        if (action is MoveCard m && K.InTest.Contains(m.State)) Add(inTest, area.Component, card.Id);
+                        if (action is MoveCard m && K.InTest.Contains(m.State))
+                        {
+                            Add(inTest, area.Component, card.Id);
+                            if (area.TestEnvironment is not null && !withEnv.Contains(card.Id)) withEnv.Add(card.Id);
+                        }
                     }
                     if (local.RunningSession is not null) running = local.LastRole;
                 }
@@ -139,6 +150,7 @@ public sealed class Dispatcher(
             }
         }
 
+        if (!whatIf) await RemoveOrphanEnvironmentsAsync(state, cards, Log, ct);
         if (!whatIf) await store.SaveAsync(state, ct);
         return new RoundReport(started, clock.Now, whatIf, reports, log, false, featureReports, quota);
     }
@@ -197,7 +209,10 @@ public sealed class Dispatcher(
         PullRequestInfo? pr = null;
         if (local.Branch is not null && key is not null && K.WithBranch.Contains(key))
             pr = await code.For(area).GetPullRequestAsync(area, local.Branch, local.Destination ?? "develop", key is K.ReadyToMerge or K.ReadyToRelease, ct);
-        var run = local.RunId is { } runId ? await ci.GetRunAsync(area, runId, ct) : null;
+        // D59: l'ambiente di collaudo si legge come un run: in creazione, creato, non creato
+        var run = local.TestProject is not null && local.TestStartedAt is { } envStart && testEnvironments is not null
+            ? await testEnvironments.GetStatusAsync(card.Id, envStart, ct)
+            : local.RunId is { } runId ? await ci.GetRunAsync(area, runId, ct) : null;
         var deploy = ParseDeployChoice(comments);
         var fresh = comments.Where(c => c.Id > local.LastCommentId).ToList();
         return new Snapshot(card, local, area, fresh, history, tasks, preds, pr, run, deploy);
@@ -221,11 +236,38 @@ public sealed class Dispatcher(
 
     // ---- esecuzione --------------------------------------------------------------------------------------------------
 
-    private async Task ExecuteAsync(AgentAction action, Snapshot s, AreaMapping area, CardLocalState local, CancellationToken ct)
+    private async Task ExecuteAsync(AgentAction action, Snapshot s, AreaMapping area, CardLocalState local, Dictionary<int, CardLocalState> state, CancellationToken ct)
     {
         var card = s.Card;
         switch (action)
         {
+            case CreateTestEnvironment env:
+            {
+                var envs = testEnvironments ?? throw new InvalidOperationException("Gli ambienti di collaudo non sono configurati (config/collaudo.json)");
+                if (local.Folder is not { } wt || !workspace.Exists(wt))
+                    throw new InvalidOperationException($"La card non ha un worktree utilizzabile (cartella salvata: '{local.Folder}'): non posso creare l'ambiente di collaudo");
+                var used = state.Where(kv => kv.Key != card.Id && kv.Value.TestSlot is not null).Select(kv => kv.Value.TestSlot!.Value).ToHashSet();
+                var slot = local.TestSlot ?? Enumerable.Range(1, limits.TestEnvironments).FirstOrDefault(n => !used.Contains(n));
+                if (slot == 0) throw new InvalidOperationException("Nessuno slot libero per l'ambiente di collaudo");
+                var started = await envs.StartAsync(area, card.Id, slot, wt, ct);
+                local.TestSlot = slot; local.TestProject = started.Project; local.TestStartedAt = started.StartedAt;
+                local.TestUrls = new Dictionary<string, string>(started.Urls);
+                local.RunId = null; local.RunAfterRev = env.Rev;
+                await board.AddCommentAsync(card.Id, "[smistatore] Ambiente di collaudo in creazione...", ct);
+                break;
+            }
+            case DiscardTestEnvironment:
+            {
+                var project = local.TestProject ?? $"card-{card.Id}";
+                if (testEnvironments is not null && await testEnvironments.RemoveAsync(project, local.Folder, ct))
+                {
+                    local.TestSlot = null; local.TestProject = null; local.TestStartedAt = null; local.TestUrls = null;
+                    await board.AddCommentAsync(card.Id, $"[smistatore] Ambiente di collaudo buttato ({project}).", ct);
+                }
+                // un docker che non risponde non ferma la card: i campi restano e al giro dopo si riprova
+                else logger.LogWarning("card {Card}: ambiente {Project} non buttato, riprovo al giro dopo", card.Id, project);
+                break;
+            }
             case ResetCounters:
                 local.ResetCounters();
                 break;
@@ -283,6 +325,35 @@ public sealed class Dispatcher(
                 break;
             default:
                 throw new InvalidOperationException($"azione {action.Kind} non eseguibile con lo stato locale della card (ramo {local.Branch ?? "nessuno"})");
+        }
+    }
+
+    /// <summary>
+    /// D59: gli ambienti che docker conosce o che lo stato ricorda, di card che non sono piu in Test, si buttano. Docker che non
+    /// risponde e un avviso, non un errore del giro.
+    /// </summary>
+    private async Task RemoveOrphanEnvironmentsAsync(Dictionary<int, CardLocalState> state, IReadOnlyList<Card> cards, Action<string> log, CancellationToken ct)
+    {
+        if (testEnvironments is null) return;
+        var withState = state.Where(kv => kv.Value.TestProject is not null || kv.Value.TestSlot is not null).Select(kv => kv.Key).ToList();
+        if (withState.Count == 0 && !areas.Any(a => a.TestEnvironment is not null)) return;
+        var projects = new SortedSet<string>(withState.Select(id => $"card-{id}"));
+        if (areas.Any(a => a.TestEnvironment is not null))
+        {
+            try { foreach (var p in await testEnvironments.ListProjectsAsync(ct)) projects.Add(p); }
+            catch (Exception e) when (e is not OperationCanceledException) { log($"ambienti di collaudo orfani: docker non risponde ({e.Message})"); }
+        }
+        var inTest = cards.Where(c => names.KeyOf(c.State) is { } k && K.InTest.Contains(k)).Select(c => c.Id).ToHashSet();
+        foreach (var project in projects)
+        {
+            if (!int.TryParse(project.Replace("card-", ""), out var id) || inTest.Contains(id)) continue;
+            log($"ambiente di collaudo orfano {project} (la card {id} non e in Test): lo butto");
+            var folder = state.TryGetValue(id, out var ls) ? ls.Folder : null;
+            if (await testEnvironments.RemoveAsync(project, folder, ct))
+            {
+                if (ls is not null) { ls.TestSlot = null; ls.TestProject = null; ls.TestStartedAt = null; ls.TestUrls = null; }
+            }
+            else log($"ambiente di collaudo orfano {project} non buttato: riprovo al giro dopo");
         }
     }
 

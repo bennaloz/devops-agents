@@ -58,6 +58,7 @@ public interface IWorkspace
 {
     Task<(string Branch, string Folder)> CreateWorktreeAsync(AreaMapping area, Card card, string? baseBranch, CancellationToken ct = default);
     Task RemoveWorktreeAsync(AreaMapping area, string folder, CancellationToken ct = default);
+    bool Exists(string folder) => Directory.Exists(folder);
 }
 
 /// <summary>Il risultato di una sessione finita: la riga ESITO, il testo, e se e finita sul limite di token.</summary>
@@ -109,4 +110,21 @@ public interface IQuotaStore
     Task SaveAsync(QuotaInfo quota, CancellationToken ct = default);
     Task<QuotaOverrides?> LoadOverridesAsync(CancellationToken ct = default);
     Task SaveOverridesAsync(QuotaOverrides overrides, CancellationToken ct = default);
+}
+
+/// <summary>D59: un ambiente di collaudo appena avviato: il progetto compose, gli URL per il collaudatore, il log.</summary>
+public sealed record TestEnvironmentStarted(string Project, IReadOnlyDictionary<string, string> Urls, string LogPath, DateTimeOffset StartedAt);
+
+/// <summary>
+/// D59: gli ambienti Docker di collaudo delle card. La creazione e lunga (build, database, Keycloak): parte e si controlla ai giri dopo,
+/// come un run di pipeline. Lo stato si legge nella forma di un run (inProgress, completed con succeeded o failed).
+/// </summary>
+public interface ITestEnvironments
+{
+    Task<TestEnvironmentStarted> StartAsync(AreaMapping area, int cardId, int slot, string folder, CancellationToken ct = default);
+    Task<PipelineRun> GetStatusAsync(int cardId, DateTimeOffset startedAt, CancellationToken ct = default);
+    /// <summary>Ferma la creazione se e in corso e fa compose down -v con i volumi rimasti; false se docker non risponde (si riprova).</summary>
+    Task<bool> RemoveAsync(string project, string? folder, CancellationToken ct = default);
+    /// <summary>I progetti card-&lt;id&gt; che docker conosce (contenitori con l'etichetta e volumi del progetto).</summary>
+    Task<IReadOnlyList<string>> ListProjectsAsync(CancellationToken ct = default);
 }

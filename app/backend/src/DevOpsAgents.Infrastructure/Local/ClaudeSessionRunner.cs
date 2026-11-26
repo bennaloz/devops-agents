@@ -16,6 +16,8 @@ public sealed record ClaudeRunnerOptions
     /// <summary>Argomenti messi davanti a quelli della sessione (per uno script finto: il suo percorso).</summary>
     public IReadOnlyList<string> PrefixArguments { get; init; } = [];
     public required string DataDir { get; init; }
+    /// <summary>La cartella ~/.claude (le credenziali di prova del collaudatore); nei test una finta.</summary>
+    public string? ClaudeDir { get; init; }
 }
 
 /// <summary>
@@ -68,6 +70,11 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
         foreach (var k in new[] { "AZURE_DEVOPS_EXT_PAT", "GH_TOKEN", "GITHUB_TOKEN", "DEVOPS_AGENTS_ADO_PAT", "DEVOPS_AGENTS_GITHUB_TOKEN" }) env.Remove(k);
         if (tokens.AzureDevOpsReadOnly is { } adoRead) env["AZURE_DEVOPS_EXT_PAT"] = adoRead;
         if (tokens.GitHubReadOnly is { } ghRead) env["GH_TOKEN"] = ghRead;
+        // le COLLAUDO_* di chi lancia non passano mai; il collaudatore riceve le credenziali di prova del repo (~/.claude/collaudo/<repo>.json)
+        foreach (var k in env.Keys.Where(k => k.StartsWith("COLLAUDO_", StringComparison.Ordinal)).ToList()) env.Remove(k);
+        if (r.Role == "collaudatore")
+            foreach (var (k, v) in DockerTestEnvironments.Credentials(Path.Combine(options.ClaudeDir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"), "collaudo", $"{r.Area.Repo}.json")))
+                env[k] = v;
 
         var p = Process.Start(psi) ?? throw new InvalidOperationException($"{options.Executable} non parte");
         var log = LogPath(id);

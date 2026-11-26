@@ -45,6 +45,8 @@ if (options.Mode == "live")
     builder.Services.AddSingleton<IWorkspace>(new GitWorkspace(options.WorktreeRoot));
     builder.Services.AddSingleton<ISessionRunner>(new ClaudeSessionRunner(suite, tokens, new ClaudeRunnerOptions { Executable = options.ClaudeExecutable, DataDir = dataDir }));
     builder.Services.AddSingleton<IStateStore>(new JsonStateStore(Path.Combine(dataDir, "stato.json")));
+    // D59: gli ambienti Docker di collaudo, se config/collaudo.json c'e
+    if (DockerSettings.Load(root) is { } docker) builder.Services.AddSingleton<ITestEnvironments>(new DockerTestEnvironments(docker, dataDir));
 }
 else
 {
@@ -66,7 +68,7 @@ builder.Services.AddSingleton(sp => new Dispatcher(
     sp.GetRequiredService<IBoard>(), sp.GetRequiredService<ICodeHostResolver>(), sp.GetRequiredService<ICiService>(), sp.GetRequiredService<IWorkspace>(),
     sp.GetRequiredService<ISessionRunner>(), sp.GetRequiredService<IStateStore>(), sp.GetRequiredService<DecisionEngine>(), suite.Names, suite.Limits,
     suite.Areas, sp.GetRequiredService<IClock>(), sp.GetRequiredService<ILogger<Dispatcher>>(), new DispatcherOptions { OnlyMine = options.OnlyMine },
-    sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IQuotaStore>()));
+    sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IQuotaStore>(), sp.GetService<ITestEnvironments>()));
 builder.Services.AddSingleton(sp => new DispatcherService(sp.GetRequiredService<Dispatcher>(), sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<LiveHub>>(),
     options, TimeSpan.FromMinutes(Math.Max(1, suite.Limits.IntervalMinutes)), sp.GetRequiredService<ILogger<DispatcherService>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());

@@ -21,7 +21,9 @@ public sealed record DecisionContext(
     /// D60: le Feature aperte delle aree della mappa, per id. Con l'elenco, una card in New senza Feature non parte e la pausa di una
     /// Feature ferma le sue card; senza (null) le regole D60 sulle Feature non valgono.
     /// </summary>
-    IReadOnlyDictionary<int, FeatureInfo>? Features = null);
+    IReadOnlyDictionary<int, FeatureInfo>? Features = null,
+    /// <summary>D59: le card in uno stato di Test il cui componente ha l'ambiente di collaudo (i posti di ambientiCollaudo).</summary>
+    IReadOnlyList<int>? CardsWithTestEnvironment = null);
 
 /// <summary>
 /// Il motore decisionale: dato lo stato di una card, cosa fare adesso. Funzione pura, nessun modello, nessuna chiamata:
@@ -35,7 +37,20 @@ public sealed class DecisionEngine
 
     public static bool IsPersonComment(Comment c) => !AgentComment.IsMatch(c.Text);
 
+    /// <summary>
+    /// La decisione su una card. D59: l'ambiente di collaudo di una card che non e piu in uno stato di Test si butta prima di tutto il
+    /// resto, anche in on-hold, con una sessione, in pausa o senza il tag: occupa un posto e delle porte.
+    /// </summary>
     public Decision Decide(Snapshot snapshot, DecisionContext ctx)
+    {
+        var d = DecideCard(snapshot, ctx);
+        if (snapshot.Local.TestProject is null && snapshot.Local.TestSlot is null) return d;
+        var key = ctx.Names.KeyOf(snapshot.Card.State);
+        if (key is null || K.InTest.Contains(key)) return d;
+        return d with { Actions = [new DiscardTestEnvironment(), .. d.Actions] };
+    }
+
+    private Decision DecideCard(Snapshot snapshot, DecisionContext ctx)
     {
         var names = ctx.Names;
         var tags = snapshot.Card.Tags;
@@ -72,7 +87,7 @@ public sealed class DecisionEngine
                 // contatori a zero, poi si decide come se non fossero mai stati raggiunti
                 effective = local.Clone();
                 effective.ResetCounters();
-                if (local.RunId is not null && snapshot.Run is { Status: "completed" } run && run.Result != "succeeded")
+                if ((local.RunId is not null || local.TestProject is not null) && snapshot.Run is { Status: "completed" } run && run.Result != "succeeded")
                 {
                     // dopo un deploy fallito chi toglie il tag ha sistemato la causa: si riaccoda il deploy
                     effective.RunId = null; effective.RunAfterRev = null;
@@ -260,9 +275,10 @@ public sealed class DecisionEngine
         if (CommonInTest(a) is { } common) return common;
         if (!RunValid(a))
         {
-            var component = a.S.Area?.Component ?? "";
-            if (Others(a.Ctx.InTestByComponent, component, a.Id).Count >= a.Ctx.Limits.CardsInTestPerComponent)
-                return [new MoveBack(K.InReview, "Un altra card dello stesso componente e gia in test")];
+            if (TestSlotBlock(a, null) is { } block)
+                return [new MoveBack(K.InReview, block.Type == "limiteAmbienti" ? "Gli ambienti di collaudo sono tutti occupati" : "Un altra card dello stesso componente e gia in test")];
+            // D59: l'ambiente Docker della card al posto del deploy: nessun parametro da scegliere
+            if (a.S.Area?.TestEnvironment is not null) return [new CreateTestEnvironment(a.EntryRev)];
             var selected = (a.S.Deploy?.Selected ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
             if (selected.Count == 0) return [new PutOnHold("manca la scelta del deploy in Test del responsabile", "deploy")];
             if (!string.IsNullOrEmpty(a.S.Deploy!.AllowedError))
@@ -279,6 +295,8 @@ public sealed class DecisionEngine
         if (a.S.Run is not { Status: "completed" } run) return [];
         if (run.Result != "succeeded")
         {
+            if (a.S.Area?.TestEnvironment is not null)
+                return [new PutOnHold($"ambiente di collaudo non creato, log: {run.Url}: sistemata la causa, togli il tag e l'ambiente si ricrea", "deploy", WaitKind: "deployFallito")];
             var label = run.Url is not null ? $"[run {a.Local.RunId}]({run.Url})" : $"run {a.Local.RunId}";
             return [new PutOnHold($"deploy in Test fallito ({label}): sistemata la causa, togli il tag e il deploy si rilancia", "deploy", WaitKind: "deployFallito")];
         }
@@ -307,6 +325,14 @@ public sealed class DecisionEngine
                 case "bloccato": return [new PutOnHold("il collaudatore non riesce a provare: il suo resoconto e nel commento sulla card", "sessione")];
                 default: return [new PutOnHold($"il collaudatore ha chiuso con un esito che non conosco ('{test.Outcome}')", "sessione", WaitKind: "esitoCollaudoSconosciuto")];
             }
+        }
+        if (a.S.Area?.TestEnvironment is not null)
+        {
+            // D59: l'ambiente e quello della card, creato in Deploying to test: gli URL stanno nello stato locale
+            var urls = a.Local.TestUrls is { Count: > 0 } u ? string.Join("\n", u.Select(kv => $"- {kv.Key}: {kv.Value}")) : null;
+            return [new LaunchSession("collaudatore", "collaudo", urls is not null
+                ? $"Ambiente di collaudo della card:\n{urls}"
+                : "Nello stato della card non ci sono gli indirizzi dell'ambiente di collaudo. Non provare a ricavarli: chiudi con ESITO=bloccato e scrivi che mancano gli indirizzi dell'ambiente di collaudo della card.")];
         }
         var url = a.S.Area?.TestUrl;
         var attachment = url is not null
@@ -378,11 +404,23 @@ public sealed class DecisionEngine
     {
         if (WithoutTest(a)) return null;
         if (a.LastRole != "reviewer" || a.Last?.Outcome != "superata" || !ReviewPassed(a) || a.OpenTasks.Count > 0) return null;
+        return TestSlotBlock(a, HumanTestRequested(a) ? null : "collaudatore");
+    }
+
+    /// <summary>
+    /// Il posto in Test: per un componente con l'ambiente di collaudo (D59) uno degli ambientiCollaudo, comuni a tutti i componenti;
+    /// altrimenti uno per componente (cardInTestPerComponente).
+    /// </summary>
+    private static BlockReason? TestSlotBlock(Env a, string? role)
+    {
+        if (a.S.Area?.TestEnvironment is not null)
+        {
+            var busy = (a.Ctx.CardsWithTestEnvironment ?? []).Where(x => x != a.Id).ToList();
+            return busy.Count >= a.Ctx.Limits.TestEnvironments ? new BlockReason("limiteAmbienti", role, $"{busy.Count}/{a.Ctx.Limits.TestEnvironments}", busy) : null;
+        }
         var component = a.S.Area?.Component ?? "";
         var others = Others(a.Ctx.InTestByComponent, component, a.Id);
-        if (others.Count >= a.Ctx.Limits.CardsInTestPerComponent)
-            return new BlockReason("limiteTest", HumanTestRequested(a) ? null : "collaudatore", component, others);
-        return null;
+        return others.Count >= a.Ctx.Limits.CardsInTestPerComponent ? new BlockReason("limiteTest", role, component, others) : null;
     }
 
     private static bool PredecessorMerged(StateNames names, Predecessor p) => names.KeyOf(p.State) switch
@@ -441,7 +479,8 @@ public sealed class DecisionEngine
     private static bool HumanTestRequested(Env a) =>
         a.Ctx.Names.HumanTestTag is { } t && a.S.Card.Tags.Contains(t, StringComparer.OrdinalIgnoreCase);
 
-    private static bool RunValid(Env a) => a.Local.RunId is not null && a.Local.RunAfterRev is { } r && a.Entry is not null && r == a.Entry.Rev;
+    // un run salvato e un run di pipeline o un ambiente di collaudo (D59, Test-RunSalvato)
+    private static bool RunValid(Env a) => (a.Local.RunId is not null || a.Local.TestProject is not null) && a.Local.RunAfterRev is { } r && a.Entry is not null && r == a.Entry.Rev;
 
     private static string? PreviousState(Env a)
     {

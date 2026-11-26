@@ -74,7 +74,15 @@ public sealed record AreaMapping(
     int? DeployPipeline,
     string? TestUrl,
     SourceControl Source = SourceControl.AzureRepos,
-    string? GitHubRepo = null);
+    string? GitHubRepo = null,
+    /// <summary>D59: la voce collaudo della mappa. Con questa, la card si collauda nel suo ambiente Docker invece che in Test.</summary>
+    TestEnvironmentSpec? TestEnvironment = null);
+
+/// <summary>
+/// D59: l'ambiente di collaudo di un componente (voce collaudo di config/mappa.json): il file compose (relativo al worktree), i nomi
+/// delle porte (nell'ordine: portaBase + slot*100 + indice) e gli URL da dare al collaudatore (nome -> nome della porta).
+/// </summary>
+public sealed record TestEnvironmentSpec(string Compose, IReadOnlyList<string> Ports, IReadOnlyDictionary<string, string> Urls);
 
 /// <summary>La scelta del deploy in Test fatta dal responsabile, e i parametri che lo YAML ammette (se letti).</summary>
 public sealed record DeployChoice(IReadOnlyList<string> Selected, IReadOnlyList<string>? Allowed = null, string? AllowedError = null);
@@ -135,6 +143,11 @@ public sealed class CardLocalState
     public int? HandledRedBuild { get; set; }
     public string? CompletePrKey { get; set; }
     public int LastCommentId { get; set; }
+    /// <summary>D59: lo slot, il progetto compose, il processo che lo crea e gli URL dell'ambiente di collaudo della card.</summary>
+    public int? TestSlot { get; set; }
+    public string? TestProject { get; set; }
+    public DateTimeOffset? TestStartedAt { get; set; }
+    public Dictionary<string, string>? TestUrls { get; set; }
     public List<string> Notices { get; set; } = new();
 
     [JsonIgnore] public SessionRecord? LastSession => LastRole is not null && LastSessionByRole.TryGetValue(LastRole, out var s) ? s : null;
@@ -144,6 +157,7 @@ public sealed class CardLocalState
     public CardLocalState Clone()
     {
         var c = (CardLocalState)MemberwiseClone();
+        if (TestUrls is not null) c.TestUrls = new Dictionary<string, string>(TestUrls);
         c.LastSessionByRole = new Dictionary<string, SessionRecord>(LastSessionByRole);
         c.Notices = new List<string>(Notices);
         return c;

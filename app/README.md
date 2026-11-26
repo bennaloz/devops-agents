@@ -90,6 +90,7 @@ script al posto di claude).
 | Board Azure DevOps, Azure Repos, Azure Pipelines, GitHub (PR, controlli, merge, rilanci, link sulla card) | portato |
 | Worktree, sessioni claude -p con brief, strumenti, advisor e token in lettura; silenzio; esito dalla riga ESITO | portato, semplificato |
 | Pausa e priorita delle Feature, pausa di sistema, soglia sulla finestra di 5 ore, Feature obbligatoria in New (D60) | portato, con test; dashboard con ordine, pausa/riprendi e pausa del sistema |
+| Collaudo nell'ambiente Docker della card (D59): creazione da compose nel worktree, slot e porte, limite `ambientiCollaudo`, URL al collaudatore, ambiente buttato all'uscita dal Test e orfani; credenziali di prova `COLLAUDO_*` al collaudatore | portato, con test (docker finto) |
 | Quota letta dai `rate_limit_event` delle sessioni, pausa dopo il limite di token (D51) | portato |
 | Funzionalita di piu card con card di chiusura (D52) | **manca**: le card di una Feature sono trattate come isolate |
 | Passata del responsabile prima di un on-hold (D42), on-hold sciolti da soli (D51), riprese automatiche dopo silenzio | **manca** |

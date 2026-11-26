@@ -27,6 +27,8 @@ internal static class Fx
         Dictionary<string, IReadOnlyList<int>>? inDev = null, Dictionary<string, IReadOnlyList<int>>? inTest = null) =>
         new(Names, limits ?? new Limits(), T0.AddHours(1), active, [], inDev, inTest, quota);
 
+    public static readonly TestEnvironmentSpec Env = new("collaudo/compose.yml", ["web", "api"], new Dictionary<string, string> { ["app"] = "web", ["api"] = "api" });
+
     public static readonly AreaMapping Area = new("DevOps.Agents\\AI\\Stime", "Acme.AI", "C:/develop/GIT/Acme.AI", "Acme.AI", "stime", 115, "https://srv-app-test:5480");
 
     /// <summary>Una card in quello stato, entrata alla revisione 10 un'ora fa, con il tag agents.</summary>
@@ -71,6 +73,7 @@ internal sealed class CardBuilder(string stateKey)
     public CardBuilder Deploy(string[] selected, string[] allowed) { _deploy = new DeployChoice(selected, allowed); return this; }
     public CardBuilder NoPipeline() { _area = Fx.Area with { DeployPipeline = null }; return this; }
     public CardBuilder NoTestUrl() { _area = Fx.Area with { TestUrl = null }; return this; }
+    public CardBuilder WithTestEnvironment() { _area = Fx.Area with { TestEnvironment = Fx.Env }; return this; }
     public CardBuilder NoHistory() { _from = null; return this; }
 
     public CardBuilder Last(SessionRecord s)
