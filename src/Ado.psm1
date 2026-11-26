@@ -1,6 +1,8 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'Comune.psm1') -Global
+# Il codice sorgente puo stare su GitHub (area con "sorgente": "github"): le funzioni sui repo qui sotto passano da GitHub.psm1.
+Import-Module (Join-Path $PSScriptRoot 'GitHub.psm1') -Global
 
 # Le chiamate REST ad Azure DevOps. Nessuna regola: solo lettura e scrittura.
 # Il PAT lo carica soltanto Get-AdoIntestazione, dentro il processo che fa la chiamata.
@@ -342,6 +344,47 @@ function Add-AdoCommento {
     [int]$r.id
 }
 
+# ---- sorgente del codice -------------------------------------------------------------------------------------------
+# La board e sempre Azure DevOps; il codice di un'area sta su Azure Repos (il default) o su GitHub. La sorgente e un fatto
+# della mappa: chiave "sorgente" ("ado" o "github") e, per GitHub, "repoGithub" (<owner>/<repo>) nella voce dell'area, o
+# nella voce "attrezzi" per il repo di questa suite (la PR della memoria, D46). Un repo che la mappa non conosce e su Azure Repos.
+function Get-AdoMappaLetta {
+    $p = Join-Path (Split-Path -Parent $PSScriptRoot) 'config/mappa.json'
+    try { Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $null }
+}
+
+function Get-VociRepoMappa($Mappa) {
+    if (-not $Mappa) { return @() }
+    $voci = @(if ($Mappa.PSObject.Properties['aree']) { @($Mappa.aree) })
+    if ($Mappa.PSObject.Properties['attrezzi'] -and $Mappa.attrezzi) {
+        $a = $Mappa.attrezzi
+        $progetto = if ($a.PSObject.Properties['progettoAdo'] -and $a.progettoAdo) { $a.progettoAdo } elseif ($Mappa.PSObject.Properties['progettoBoard']) { $Mappa.progettoBoard } else { $null }
+        $voci += [pscustomobject]@{ repo = (Get-Campo $a 'repo'); progettoAdo = $progetto; sorgente = (Get-Campo $a 'sorgente'); repoGithub = (Get-Campo $a 'repoGithub') }
+    }
+    @($voci | Where-Object { $_ })
+}
+
+function Get-SorgenteRepo {
+    [CmdletBinding()]
+    param([string]$Progetto, [Parameter(Mandatory)][string]$Repo)
+    $voce = Get-VociRepoMappa (Get-AdoMappaLetta) |
+        Where-Object { [string](Get-Campo $_ 'repo') -eq $Repo -and (-not $Progetto -or [string](Get-Campo $_ 'progettoAdo') -eq $Progetto) } |
+        Select-Object -First 1
+    if ($voce -and [string](Get-Campo $voce 'sorgente') -eq 'github') {
+        $gh = [string](Get-Campo $voce 'repoGithub')
+        if (-not $gh) { throw "config/mappa.json: il repo $Repo ha sorgente github ma manca 'repoGithub'" }
+        return [pscustomobject]@{ Tipo = 'github'; RepoGh = $gh }
+    }
+    [pscustomobject]@{ Tipo = 'ado'; RepoGh = $null }
+}
+
+# Il contrario: da owner/repo di GitHub il progetto e il nome del repo come li conosce la mappa (null se non c'e).
+function Find-RepoDaGitHub([string]$RepoGh) {
+    Get-VociRepoMappa (Get-AdoMappaLetta) |
+        Where-Object { [string](Get-Campo $_ 'sorgente') -eq 'github' -and [string](Get-Campo $_ 'repoGithub') -eq $RepoGh } |
+        Select-Object -First 1 | ForEach-Object { [pscustomobject]@{ Progetto = [string]$_.progettoAdo; Repo = [string]$_.repo } }
+}
+
 function Get-AdoRepoUrl($Progetto, $Repo) {
     "$script:Org/$([uri]::EscapeDataString($Progetto))/_apis/git/repositories/$([uri]::EscapeDataString($Repo))"
 }
@@ -356,6 +399,8 @@ function Get-AdoPrDelRamo {
         # il ramo verso cui vanno le PR: develop, o il ramo della funzionalita (D52)
         [string]$Destinazione = 'develop'
     )
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') { return @(Get-GhPrDelRamo $src.RepoGh $Ramo $Destinazione) }
     $url = (Get-AdoRepoUrl $Progetto $Repo) + "/pullrequests?searchCriteria.sourceRefName=refs/heads/$Ramo" +
         "&searchCriteria.targetRefName=refs/heads/$Destinazione&searchCriteria.status=all&api-version=7.1"
     $r = Invoke-Ado -Metodo Get -Url $url
@@ -379,6 +424,13 @@ function Get-AdoPr {
         # il ramo verso cui va la PR: develop, o il ramo della funzionalita (D52)
         [string]$Destinazione = 'develop'
     )
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') {
+        $g = Get-GhPr $src.RepoGh $Ramo -AncheCompletate:$AncheCompletate -Destinazione $Destinazione
+        # il log di un controllo di Azure Pipelines si apre sulla pagina della build, come per Azure Repos
+        if ($g -and $g.BuildId) { $g.UrlLog = Get-AdoUrlBuild -Progetto $Progetto -Id $g.BuildId }
+        return $g
+    }
     $stato = if ($AncheCompletate) { 'all' } else { 'active' }
     $url = (Get-AdoRepoUrl $Progetto $Repo) + "/pullrequests?searchCriteria.sourceRefName=refs/heads/$Ramo" +
         "&searchCriteria.targetRefName=refs/heads/$Destinazione&searchCriteria.status=$stato&api-version=7.1"
@@ -456,6 +508,13 @@ function New-AdoPr {
         # il ramo verso cui va la PR: develop, o il ramo della funzionalita (D52)
         [string]$Destinazione = 'develop'
     )
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') {
+        $g = New-GhPr $src.RepoGh $Ramo $Titolo (Add-FirmaPr $Descrizione) $CardId $Destinazione
+        # Il collegamento fra la card e la PR, che Get-AdoPrCollegata ritrova: un link sulla card (sulle PR di Azure Repos lo fa workItemRefs).
+        if ($CardId -gt 0) { Add-AdoLinkCard -Id $CardId -Url $g.Url -Commento "PR $($g.Id) su GitHub" }
+        return [int]$g.Id
+    }
     $corpo = @{
         sourceRefName = "refs/heads/$Ramo"
         targetRefName = "refs/heads/$Destinazione"
@@ -470,6 +529,8 @@ function New-AdoPr {
 function Get-AdoDescrizionePr {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Progetto, [Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Id)
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') { return Get-GhDescrizionePr $src.RepoGh $Id }
     $r = Invoke-Ado -Metodo Get -Url ((Get-AdoRepoUrl $Progetto $Repo) + "/pullrequests/$($Id)?api-version=7.1")
     [string]$r.description
 }
@@ -477,12 +538,16 @@ function Get-AdoDescrizionePr {
 function Set-AdoDescrizionePr {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Progetto, [Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Id, [Parameter(Mandatory)][string]$Descrizione)
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') { return Set-GhPr $src.RepoGh $Id @{ body = (Add-FirmaPr $Descrizione) } }
     [void](Invoke-Ado -Metodo Patch -Url ((Get-AdoRepoUrl $Progetto $Repo) + "/pullrequests/$($Id)?api-version=7.1") -Corpo @{ description = (Add-FirmaPr $Descrizione) })
 }
 
 function Set-AdoTitoloPr {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Progetto, [Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Id, [Parameter(Mandatory)][string]$Titolo)
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') { return Set-GhPr $src.RepoGh $Id @{ title = $Titolo } }
     [void](Invoke-Ado -Metodo Patch -Url ((Get-AdoRepoUrl $Progetto $Repo) + "/pullrequests/$($Id)?api-version=7.1") -Corpo @{ title = $Titolo })
 }
 
@@ -492,6 +557,8 @@ function Complete-AdoPr {
         # D52: il commit di testa che chi decide ha verificato. Se la testa e cambiata dopo, Azure DevOps rifiuta il completamento: il
         # commit riletto qui non deve prendere il posto di quello verificato. Senza, si legge l'ultimo (come prima).
         [string]$Commit)
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') { return Complete-GhPr $src.RepoGh $Id $Commit }
     $url = (Get-AdoRepoUrl $Progetto $Repo) + "/pullrequests/$($Id)?api-version=7.1"
     if (-not $Commit) { $Commit = [string](Invoke-Ado -Metodo Get -Url $url).lastMergeSourceCommit.commitId }
     # Il ramo sorgente lo cancella Azure DevOps al completamento: niente push di cancellazione da fare da noi.
@@ -513,6 +580,16 @@ function Start-AdoRivalutazione {
         [switch]$Scadute,
         # il ramo verso cui va la PR: develop, o il ramo della funzionalita (D52)
         [string]$Destinazione = 'develop')
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') {
+        # GitHub Actions li rilancia GitHub.psm1; le build di Azure Pipelines che validano un repo GitHub si rilanciano qui
+        # (retry dei job falliti), con il PAT di Azure DevOps.
+        $g = Start-GhRivalutazione $src.RepoGh $Ramo -Scadute:$Scadute -Destinazione $Destinazione
+        foreach ($b in @($g.BuildAdo)) {
+            [void](Invoke-Ado -Metodo Patch -Url "$script:Org/$([uri]::EscapeDataString($Progetto))/_apis/build/builds/$($b)?retry=true&api-version=7.1")
+        }
+        return ([int]$g.Actions + @($g.BuildAdo).Count)
+    }
     $url = (Get-AdoRepoUrl $Progetto $Repo) + "/pullrequests?searchCriteria.sourceRefName=refs/heads/$Ramo" +
         "&searchCriteria.targetRefName=refs/heads/$Destinazione&searchCriteria.status=active&api-version=7.1"
     $pr = @((Invoke-Ado -Metodo Get -Url $url).value) | Where-Object { $_.status -eq 'active' } | Select-Object -First 1
@@ -597,6 +674,12 @@ function Get-AdoParametriDeploy {
     }
     $url = "$base/_apis/git/repositories/$([uri]::EscapeDataString($repo))/items?path=$([uri]::EscapeDataString($percorso))" +
         "&versionDescriptor.version=$([uri]::EscapeDataString($Ramo))&versionDescriptor.versionType=branch&includeContent=true&`$format=json&api-version=7.1"
+    # Una pipeline di Azure Pipelines su un repo GitHub: lo YAML si legge da GitHub (repository.type gitHub, id = owner/repo).
+    if ([string](Get-Campo (Get-Campo $conf 'repository') 'type') -eq 'gitHub') {
+        $full = [string](Get-Campo (Get-Campo $conf 'repository') 'fullName')
+        if (-not $full) { $full = $repo }
+        return ConvertFrom-YamlParametriDeploy (Get-GhFile $full $percorso $Ramo)
+    }
     $item = Invoke-Ado -Metodo Get -Url $url
     ConvertFrom-YamlParametriDeploy ([string](Get-Campo $item 'content'))
 }
@@ -614,10 +697,14 @@ function Get-AdoRamoCard {
     $daFeature = $PSCmdlet.ParameterSetName -eq 'DaFeature'
     $prefissi = if ($daFeature) { Get-PrefissiRamoFunzionalita } else { 'feature', 'fix' }
     $nomeId = if ($daFeature) { Get-SiglaFunzionalita $FeatureId } else { "$CardId" }
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
     $rami = @(foreach ($tipo in $prefissi) {
-        $r = Invoke-Ado -Metodo Get -Url ((Get-AdoRepoUrl $Progetto $Repo) + "/refs?filter=$([uri]::EscapeDataString("heads/$tipo/$nomeId"))&api-version=7.1")
-        foreach ($x in @($r.value)) {
-            $nome = [string](Get-Campo $x 'name') -replace '^refs/heads/', ''
+        $nomi = if ($src.Tipo -eq 'github') { @(Get-GhRami $src.RepoGh "$tipo/$nomeId") }
+                else {
+                    $r = Invoke-Ado -Metodo Get -Url ((Get-AdoRepoUrl $Progetto $Repo) + "/refs?filter=$([uri]::EscapeDataString("heads/$tipo/$nomeId"))&api-version=7.1")
+                    @(@($r.value) | ForEach-Object { [string](Get-Campo $_ 'name') -replace '^refs/heads/', '' })
+                }
+        foreach ($nome in $nomi) {
             if ($daFeature) { if ($nome -match (Get-RegexRamoFunzionalita $FeatureId)) { $nome } }
             elseif ($nome -match "^($($prefissi -join '|'))/$nomeId(-.*)?$") { $nome }
         }
@@ -650,6 +737,8 @@ function Get-AdoUrlBuild {
 function Get-AdoUrlPr {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Progetto, [Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Id)
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') { return Get-GhUrlPr $src.RepoGh $Id }
     "$script:Org/$([uri]::EscapeDataString($Progetto))/_git/$([uri]::EscapeDataString($Repo))/pullrequest/$Id"
 }
 
@@ -888,6 +977,19 @@ function Start-AdoRilancioRun {
 
 # La PR collegata alla card piu recente (la crea New-AdoPr con il collegamento al work item), con il suo stato, o
 # $null. Serve quando il ramo non c'e piu, per esempio dopo il merge: la card la ricorda comunque.
+# Un link (relazione Hyperlink) sulla card: la PR di GitHub collegata. Un link che c'e gia non si aggiunge due volte.
+function Add-AdoLinkCard {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$Id, [Parameter(Mandatory)][string]$Url, [string]$Commento)
+    $w = Invoke-Ado -Metodo Get -Url "$script:Org/_apis/wit/workitems/$($Id)?`$expand=relations&api-version=7.1"
+    $rel = if ($w.PSObject.Properties['relations']) { @($w.relations) } else { @() }
+    if (@($rel | Where-Object { $_ -and $_.rel -eq 'Hyperlink' -and [string]$_.url -eq $Url }).Count -gt 0) { return }
+    $valore = [ordered]@{ rel = 'Hyperlink'; url = $Url }
+    if ($Commento) { $valore.attributes = @{ comment = $Commento } }
+    [void](Invoke-Ado -Metodo Patch -Url "$script:Org/_apis/wit/workitems/$($Id)?api-version=7.1" -ContentType 'application/json-patch+json' `
+        -Corpo (ConvertTo-Json -InputObject @([ordered]@{ op = 'add'; path = '/relations/-'; value = $valore }) -Depth 10 -Compress))
+}
+
 function Get-AdoPrCollegata {
     [CmdletBinding()]
     param([Parameter(Mandatory)][int]$CardId)
@@ -895,7 +997,17 @@ function Get-AdoPrCollegata {
     $rel = if ($w.PSObject.Properties['relations']) { @($w.relations) } else { @() }
     $ids = @($rel | Where-Object { $_ -and $_.rel -eq 'ArtifactLink' -and [string]$_.url -match '^vstfs:///Git/PullRequestId/.*%2[fF](\d+)$' } |
             ForEach-Object { [int]([regex]::Match([string]$_.url, '%2[fF](\d+)$').Groups[1].Value) } | Sort-Object)
-    if ($ids.Count -eq 0) { return $null }
+    if ($ids.Count -eq 0) {
+        # Le PR di GitHub sono collegate con un link sulla card (New-AdoPr): l'ultima, per numero.
+        $gh = @($rel | Where-Object { $_ -and $_.rel -eq 'Hyperlink' } | ForEach-Object { ConvertFrom-GhUrlPr ([string]$_.url) } | Where-Object { $_ } | Sort-Object Id)
+        if ($gh.Count -eq 0) { return $null }
+        $ultimo = $gh[-1]
+        $dove = Find-RepoDaGitHub $ultimo.RepoGh
+        if (-not $dove) { throw "La card $CardId e collegata alla PR $($ultimo.Id) di $($ultimo.RepoGh), che non e un repo di config/mappa.json" }
+        $p = Get-GhPrSingola $ultimo.RepoGh $ultimo.Id
+        return [pscustomobject]@{ Id = [int]$p.number; Stato = (ConvertTo-StatoPrGh $p); Titolo = [string]$p.title
+            Progetto = $dove.Progetto; Repo = $dove.Repo; Ramo = [string](Get-Campo (Get-Campo $p 'head') 'ref') }
+    }
     $pr = Invoke-Ado -Metodo Get -Url "$script:Org/_apis/git/pullrequests/$($ids[-1])?api-version=7.1"
     [pscustomobject]@{ Id = [int]$pr.pullRequestId; Stato = [string]$pr.status; Titolo = [string]$pr.title
         Progetto = [string]$pr.repository.project.name; Repo = [string]$pr.repository.name; Ramo = ([string]$pr.sourceRefName -replace '^refs/heads/', '') }
@@ -1167,6 +1279,6 @@ function Get-AdoBuildPipeline {
     }
 }
 
-Export-ModuleMember -Function Get-AdoMotivoFallimento, Start-AdoRilancioRun, Get-AdoUltimoRun, Get-AdoAgentiPool, Get-AdoBuildPipeline, Get-AdoLimiteTestoPr, Set-AdoTitoloPr, Get-AdoDescrizionePr, Set-AdoDescrizionePr, Start-AdoRivalutazione, Get-AdoPrCollegata, Get-AdoErroriBuild, Get-AdoCampiConsumi, Get-AdoUrlCard, New-AdoCard, Get-AdoCardAttive, Get-AdoCard, Set-AdoCard, Get-AdoStoriaStato, Get-AdoCommenti,
+Export-ModuleMember -Function Get-SorgenteRepo, Find-RepoDaGitHub, Add-AdoLinkCard, Get-AdoMotivoFallimento, Start-AdoRilancioRun, Get-AdoUltimoRun, Get-AdoAgentiPool, Get-AdoBuildPipeline, Get-AdoLimiteTestoPr, Set-AdoTitoloPr, Get-AdoDescrizionePr, Set-AdoDescrizionePr, Start-AdoRivalutazione, Get-AdoPrCollegata, Get-AdoErroriBuild, Get-AdoCampiConsumi, Get-AdoUrlCard, New-AdoCard, Get-AdoCardAttive, Get-AdoCard, Set-AdoCard, Get-AdoStoriaStato, Get-AdoCommenti,
     Add-AdoCommento, Get-AdoPr, Get-AdoPrDelRamo, New-AdoPr, Complete-AdoPr, Start-AdoDeployTest, Get-AdoParametriDeploy, Get-AdoRamoCard, Get-AdoRun, Get-AdoUrlBuild, Get-AdoUrlPr, Get-AdoUtenteCorrente, Get-AdoUrlOrganizzazione,
     New-AdoTask, Get-AdoTaskFigli, Get-AdoCardPredecessori, Set-AdoTaskStato, Get-AdoFeature, Get-AdoFigliFeature, Set-AdoStatoFeature

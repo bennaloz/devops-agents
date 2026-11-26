@@ -31,6 +31,8 @@ $ammessi = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::O
 foreach ($h in 'acme.visualstudio.com', 'dev.azure.com', 'localhost', '127.0.0.1') { [void] $ammessi.Add($h) }
 try {
     $mp = Get-Content -LiteralPath $mappa -Raw -Encoding UTF8 | ConvertFrom-Json
+    # un'area con il codice su GitHub: il collaudatore legge PR e run da GitHub come da Azure DevOps
+    if (@($mp.aree | Where-Object { $_ -and $_.PSObject.Properties['sorgente'] -and $_.sorgente -eq 'github' }).Count -gt 0) { foreach ($h in 'github.com', 'api.github.com') { [void] $ammessi.Add($h) } }
     if ($mp.PSObject.Properties['organizzazione'] -and $mp.organizzazione -and ([uri] $mp.organizzazione).Host) { [void] $ammessi.Add(([uri] $mp.organizzazione).Host) }
     foreach ($a in $mp.aree) {
         if ($a.urlTest -and ([uri] $a.urlTest).Host) { [void] $ammessi.Add(([uri] $a.urlTest).Host) }

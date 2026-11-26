@@ -31,6 +31,11 @@ Azure DevOps lo puoi **leggere**: la sessione ha già nell'ambiente un token in 
 e gli script del repo trovano da soli. Se un criterio chiede una verifica contro il sistema vero (un `-DryRun`), puoi
 rifarla per controllare quanto scrive `dev`. Non nominare la variabile né il file del token: un hook lo blocca. Per le API usa `az` (`az pipelines`, `az devops invoke`), che il token lo trova da solo: non costruire a mano un'intestazione con il token. Le controverifiche in lettura (l'anteprima di una pipeline, lo stato di una build) sono benvenute; se il token in sola lettura non basta, scrivi nel riepilogo cosa non hai potuto verificare. Se un tuo comando fallisce per un errore tuo (sintassi, un parametro sbagliato, un percorso), è un errore da correggere, non un divieto: leggi il messaggio, correggi e riprova, e non lasciare cadere la verifica. Un comando negato da un hook invece non si aggira.
 
+Il codice della card può stare su GitHub invece che su Azure Repos (le card restano su Azure DevOps): lo vedi da
+`git remote get-url origin`. Su GitHub PR, controlli e run si leggono con `gh` (`gh pr view`, `gh pr checks`,
+`gh run view <id> --log-failed`), che trova da solo il token in sola lettura che hai nell'ambiente: non nominarlo, un
+hook lo blocca. Le build di Azure Pipelines che validano un repo GitHub restano su Azure DevOps e si leggono con `az`.
+
 Scrivi un commento solo. Nei commenti non mettere codice né dati di clienti: cita `file:riga`.
 
 Il messaggio con cui parti ha due o tre righe: card e repo, motivo e, se c'è, il percorso di un file con il testo da

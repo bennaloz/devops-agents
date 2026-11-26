@@ -65,6 +65,17 @@ function Get-Config {
         }
     }
 
+    # La sorgente del codice di un'area (e del repo degli attrezzi): Azure Repos se manca, GitHub con il suo owner/repo.
+    $vociRepo = @(@($mappa.aree) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Nome = "l'area '$($_.area)'"; Voce = $_ } })
+    if ($mappa.PSObject.Properties['attrezzi'] -and $mappa.attrezzi) { $vociRepo += [pscustomobject]@{ Nome = "la voce 'attrezzi'"; Voce = $mappa.attrezzi } }
+    foreach ($v in $vociRepo) {
+        $sorgente = if ($v.Voce.PSObject.Properties['sorgente']) { [string]$v.Voce.sorgente } else { 'ado' }
+        if ($sorgente -notin 'ado', 'github') { throw "mappa.json: $($v.Nome) ha sorgente '$sorgente': valori ammessi ado o github" }
+        if ($sorgente -eq 'github' -and -not ($v.Voce.PSObject.Properties['repoGithub'] -and [string]$v.Voce.repoGithub -match '^[\w.-]+/[\w.-]+$')) {
+            throw "mappa.json: $($v.Nome) ha sorgente github ma 'repoGithub' manca o non e nella forma <owner>/<repo>"
+        }
+    }
+
     [pscustomobject]@{ Stati = $stati; Ruoli = $ruoli; Limiti = $limiti; Mappa = $mappa }
 }
 

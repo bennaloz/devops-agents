@@ -22,6 +22,11 @@
              tuo: -Pat non lo tocca. Gira per ultimo, cosi un login interrotto non blocca -Regole e -Hook.
              Serve az: se non c'e un login lo fa lo script e alla fine lo toglie; se c'era, lo lascia com'e. Rilanciato,
              crea PAT nuovi e revoca i vecchi. Il login az non resta mai: lo smistatore lavora coi PAT.
+    -PatGitHub  salva i due token di GitHub per le aree con il codice su GitHub (config/mappa.json, "sorgente": "github"),
+             cifrati come i PAT: <ClaudeDir>/pat-github.txt (lo smistatore: Contents, Pull requests, Checks e Actions in
+             scrittura sui repo della mappa) e pat-github-lettura.txt (le sessioni, come GH_TOKEN: gli stessi permessi in
+             lettura). GitHub non li crea via API: si creano a mano come fine-grained PAT e lo script li chiede senza mostrarli.
+             -TokenGitHub e -TokenGitHubLettura servono ai test.
     -ClaudeDir serve ai test (cartella finta); di norma e' ~/.claude. Hook e operazione pianificata puntano sempre
     alla working copy principale, -RadicePrincipale.
 #>
@@ -32,6 +37,9 @@ param(
     [switch]$Pianificazione,
     [switch]$RimuoviPianificazione,
     [switch]$Pat,
+    [switch]$PatGitHub,
+    [securestring]$TokenGitHub,
+    [securestring]$TokenGitHubLettura,
     [string]$ClaudeDir = (Join-Path $HOME '.claude'),
     # Scope, durata e nomi dei PAT; serve ai test.
     [string]$ConfigPat = (Join-Path $PSScriptRoot '../config/pat.json'),
@@ -42,7 +50,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 
-if (-not ($Hook -or $Regole -or $Pianificazione -or $RimuoviPianificazione -or $Pat)) { throw 'Indica cosa installare: -Hook, -Regole, -Pianificazione, -RimuoviPianificazione o -Pat' }
+if (-not ($Hook -or $Regole -or $Pianificazione -or $RimuoviPianificazione -or $Pat -or $PatGitHub)) { throw 'Indica cosa installare: -Hook, -Regole, -Pianificazione, -RimuoviPianificazione, -Pat o -PatGitHub' }
 
 
 if ($Regole) {
@@ -215,4 +223,19 @@ if ($RimuoviPianificazione) {
 if ($Pat) {
     Import-Module (Join-Path $repo 'src/Pat.psm1') -Force
     Install-Pat -ClaudeDir $ClaudeDir -PercorsoConfig $ConfigPat
+}
+
+# -PatGitHub: i token di GitHub non si creano via API. Si chiedono senza eco e si salvano cifrati come i PAT; niente si stampa.
+if ($PatGitHub) {
+    Import-Module (Join-Path $repo 'src/GitHub.psm1') -Force
+    $chiedi = { param($gia, [string]$cosa) if ($gia) { $gia } else { Read-Host -AsSecureString "Incolla il token di GitHub $cosa (non si vede)" } }
+    foreach ($t in @(
+            @{ Tipo = 'smistatore'; Valore = (& $chiedi $TokenGitHub 'per lo smistatore (scrittura)') },
+            @{ Tipo = 'lettura'; Valore = (& $chiedi $TokenGitHubLettura 'per le sessioni (sola lettura)') })) {
+        $chiaro = [System.Net.NetworkCredential]::new('', $t.Valore).Password
+        if ([string]::IsNullOrWhiteSpace($chiaro)) { throw "Token di GitHub ($($t.Tipo)) vuoto: niente salvato" }
+        $dove = Get-PercorsoFilePatGitHub $t.Tipo -ClaudeDir $ClaudeDir
+        Write-FilePat $dove $chiaro.Trim()
+        Write-Host "PatGitHub: salvato $dove"
+    }
 }

@@ -31,6 +31,54 @@ scritto in PowerShell 7 e usa le attività pianificate e DPAPI di Windows.
 
 I test si lanciano con `pwsh -NoProfile -File ci/Invoke-PrValidation.ps1` (Pester, test degli hook, PSScriptAnalyzer).
 
+### Il codice su Azure Repos o su GitHub
+
+La board resta sempre su Azure DevOps. Il codice di ogni area può stare su Azure Repos (il default) o su GitHub: lo dice
+la voce dell'area in `config/mappa.json`.
+
+```json
+{
+  "area": "DevOps.Agents\\Web",
+  "repo": "Acme.Web",
+  "cartella": "C:/develop/GIT/Acme.Web",
+  "progettoAdo": "Acme.Web",
+  "sorgente": "github",
+  "repoGithub": "acme/web",
+  "componente": "web",
+  "pipelineDeploy": 120,
+  "urlTest": "https://srv-app-test:5600"
+}
+```
+
+Senza `sorgente`, o con `"ado"`, non cambia niente. Per il repo di questa suite (la PR della memoria dei ruoli) vale la
+voce facoltativa `"attrezzi": { "repo": "DevOps.Agents", "sorgente": "github", "repoGithub": "<owner>/<repo>" }`.
+Chi decide (`Decisioni.psm1`) non sa dove sta il codice: le funzioni sui repo di `src/Ado.psm1` guardano la sorgente
+dell'area e passano da `src/GitHub.psm1`, che restituisce gli stessi oggetti.
+
+| Cosa | Azure Repos | GitHub |
+| --- | --- | --- |
+| PR della card | `workItemRefs` la collega alla card | un link (Hyperlink) sulla card verso la PR, più `AB#<id>` nella descrizione per l'app Azure Boards |
+| Validazione | le policy di build della PR | i check run e gli status sul commit di testa (GitHub Actions, Azure Pipelines o altre app) |
+| Conflitti | `mergeStatus` | `mergeable` / `mergeable_state` |
+| Errori per `dev` | il log della build di validazione | uguale se a validare è Azure Pipelines; con GitHub Actions il link al run, che `dev` legge con `gh run view --log-failed` |
+| Rilancio delle validazioni rosse | re-queue della policy | `rerun-failed-jobs` per Actions, retry della build per Azure Pipelines |
+| Validazioni scadute (D47) | rilanciate | non esistono: un controllo è legato al commit |
+| Merge | merge commit, ramo cancellato | merge commit sul commit verificato, poi il ramo cancellato |
+| Deploy in Test | pipeline di Azure Pipelines | la stessa: una pipeline di Azure Pipelines su un repo GitHub (lo YAML dei parametri si legge da GitHub) |
+
+I token di GitHub non si creano via API: si creano a mano due fine-grained PAT sui repo della mappa, uno per lo
+smistatore (Contents, Pull requests, Checks e Actions in scrittura) e uno per le sessioni (gli stessi in lettura), e si
+salvano cifrati, da un terminale proprio perché lo script li chiede senza mostrarli:
+
+```powershell
+pwsh -NoProfile -File setup/Install-Attrezzi.ps1 -PatGitHub
+```
+
+Finiscono in `~/.claude/pat-github.txt` e `pat-github-lettura.txt`; le sessioni ricevono il secondo come `GH_TOKEN` e
+l'hook `deny-pat` impedisce di nominarlo. Limiti: il branch protection su `develop` non deve chiedere approvazioni umane
+né il ramo aggiornato («Require branches to be up to date»), perché lo smistatore unisce da solo dopo la revisione; la
+sezione Pipeline della vista e i controlli del supervisore sui run falliti guardano solo Azure Pipelines.
+
 ## Com'è fatto il repo
 
 Repo degli attrezzi del sistema di agenti di sviluppo.

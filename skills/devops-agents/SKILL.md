@@ -50,8 +50,8 @@ Se l'area manca la predispone questa sessione, non gli agenti (finché l'area no
 
 1. L'area sulla board `DevOps.Agents`: è una modifica ad Azure DevOps, si fa solo con il sì dell'utente e la fa chi amministra il progetto ADO.
 2. La voce in `config/mappa.json` (repo, cartella, progetto ADO, componente, pipeline di deploy in Test e suo
-   parametro, `urlTest` cioè l'indirizzo dell'ambiente di Test che il collaudatore prova), con una PR in
-   `DevOps.Agents`.
+   parametro, `urlTest` cioè l'indirizzo dell'ambiente di Test che il collaudatore prova; se il codice sta su GitHub,
+   anche `"sorgente": "github"` e `"repoGithub": "<owner>/<repo>"`), con una PR in `DevOps.Agents`.
    Se l'app di Test vuole un login, prepara insieme all'utente un account di prova dedicato all'ambiente di Test e salvane le
    credenziali in `~/.claude/collaudo/<repo>.json` (chiave e valore, per esempio `utente`, `password`, `urlLogin`), fuori
    da ogni repo: il collaudatore le riceve come `COLLAUDO_<CHIAVE>`. Senza, ogni collaudo che chiede il login finisce

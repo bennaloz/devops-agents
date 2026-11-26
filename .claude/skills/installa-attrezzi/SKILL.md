@@ -43,7 +43,8 @@ di questo repo: leggilo prima di cominciare, perché i dettagli che seguono lo r
 3. **I repo.** Questo repo deve stare in `C:\develop\GIT\DevOps.Agents`, sul ramo `main` e allineato a
    `origin/main` (un collega nuovo lo clona con `git clone -b main`). Se c'è già su un altro ramo non lo cambi: dici
    all'utente cosa hai trovato e chiedi. Per ogni area di `config/mappa.json` clona il repo nella sua `cartella`, se non c'è già, da
-   `https://acme.visualstudio.com/<progettoAdo>/_git/<repo>`. Le cartelle che esistono già non le tocchi.
+   `https://acme.visualstudio.com/<progettoAdo>/_git/<repo>`, o da `https://github.com/<repoGithub>.git` se la voce ha
+   `"sorgente": "github"`. Le cartelle che esistono già non le tocchi.
 4. **Skill e hook.** Dalla copia principale:
 
    ```powershell
@@ -62,6 +63,18 @@ di questo repo: leggilo prima di cominciare, perché i dettagli che seguono lo r
    Fa `az login` se non c'è (si apre il browser: avvisa l'utente e aspetta), crea i due PAT con scope e durata di
    `config/pat.json`, li salva cifrati in `~/.claude/pat-smistatore.txt` e `pat-smistatore-lettura.txt` e toglie il
    login se l'aveva fatto lui. A fine passo controlla che i due file e `~/.claude/pat-info.json` ci siano, senza aprirli.
+   Se in `config/mappa.json` c'è almeno un'area con `"sorgente": "github"`, servono anche i due token di GitHub. Questa è
+   l'unica eccezione alla regola sui PAT: GitHub non li crea via API. Spiega all'utente come creare nel browser (Settings,
+   Developer settings, Fine-grained tokens) due token limitati ai repo GitHub della mappa: uno con Contents, Pull
+   requests, Checks e Actions in lettura e scrittura, l'altro con gli stessi permessi in sola lettura. Poi chiedigli di
+   lanciare lui, in un suo terminale (lo script li chiede senza mostrarli, e da qui non puoi rispondere al prompt):
+
+   ```powershell
+   pwsh -NoProfile -File setup/Install-Attrezzi.ps1 -PatGitHub
+   ```
+
+   Non chiedere mai che il token sia incollato nella conversazione. A fine passo controlla che `~/.claude/pat-github.txt`
+   e `pat-github-lettura.txt` ci siano, senza aprirli.
 6. **Il giro di prova.**
 
    ```powershell

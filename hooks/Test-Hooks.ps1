@@ -56,6 +56,14 @@ $cases = @(
        Input = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-Content $HOME\.claude\pat.txt -Raw' } } }
     @{ Hook = 'deny-pat.ps1'; Expected = 2; Env = @{ ATTREZZI_RUOLO = 'dev' }; What = 'variabile del PAT (PowerShell)'
        Input = @{ tool_name = 'PowerShell'; tool_input = @{ command = '$env:AZURE_DEVOPS_EXT_PAT' } } }
+    @{ Hook = 'deny-pat.ps1'; Expected = 2; Env = @{ ATTREZZI_RUOLO = 'dev' }; What = 'variabile del token GitHub (Bash)'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'echo $GH_TOKEN' } } }
+    @{ Hook = 'deny-pat.ps1'; Expected = 2; Env = @{ ATTREZZI_RUOLO = 'dev' }; What = 'gh auth token'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'gh auth token' } } }
+    @{ Hook = 'deny-pat.ps1'; Expected = 2; Env = @{ ATTREZZI_RUOLO = 'dev' }; What = 'file del token GitHub in lettura'
+       Input = @{ tool_name = 'Read'; tool_input = @{ file_path = 'C:/Users/x/.claude/pat-github-lettura.txt' } } }
+    @{ Hook = 'deny-pat.ps1'; Expected = 0; Env = @{ ATTREZZI_RUOLO = 'dev' }; What = 'gh run view usa il token senza nominarlo'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'gh run view 123 --log-failed -R acme/web' } } }
     @{ Hook = 'deny-pat.ps1'; Expected = 2; Env = @{ ATTREZZI_RUOLO = 'dev' }; What = 'Read del file del PAT'
        Input = @{ tool_name = 'Read'; tool_input = @{ file_path = 'C:/Users/x/.claude/pat.txt' } } }
     # le credenziali di collaudo arrivano al collaudatore nell'ambiente: il file non si legge

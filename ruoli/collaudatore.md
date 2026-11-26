@@ -38,6 +38,11 @@ nell'ambiente. Per vedere cosa cambia la funzionalità rispetto a `develop` usa 
 per il diff è `origin/develop`, il codice che leggi è quello del worktree. I criteri sono quelli della funzionalità
 intera; quelli delle sorelle (nella sezione FUNZIONALITA) ti servono come contesto, non da provare uno per uno.
 
+Il codice della card può stare su GitHub invece che su Azure Repos (le card restano su Azure DevOps): lo vedi da
+`git remote get-url origin`. Su GitHub PR, controlli e run si leggono con `gh` (`gh pr view`, `gh pr checks`,
+`gh run view <id> --log-failed`), che trova da solo il token in sola lettura che hai nell'ambiente: non nominarlo, un
+hook lo blocca. Le build di Azure Pipelines che validano un repo GitHub restano su Azure DevOps e si leggono con `az`.
+
 Azure DevOps lo puoi leggere con il token in sola lettura che hai già nell'ambiente. Per le API usa `az` (`az pipelines`, `az devops invoke`), che il token lo trova da solo: non costruire a mano un'intestazione con il token. Le controverifiche in lettura (l'anteprima di una pipeline, lo stato di una build) sono benvenute; se il token in sola lettura non basta, scrivi nel riepilogo cosa non hai potuto verificare. Se un tuo comando fallisce per un errore tuo (sintassi, un parametro sbagliato, un percorso), è un errore da correggere, non un divieto: leggi il messaggio, correggi e riprova, e non lasciare cadere la verifica. Un comando negato da un hook invece non si aggira. Se l'app di Test vuole un login,
 le credenziali di prova sono nell'ambiente nelle variabili `COLLAUDO_*` elencate nel messaggio (per esempio
 `$env:COLLAUDO_UTENTE`): usale nei comandi, non stamparle, non elencare le variabili d'ambiente e non scriverle nei commenti: quello che stampi

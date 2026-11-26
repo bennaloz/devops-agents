@@ -1,5 +1,5 @@
 # Hook PreToolUse su Bash, PowerShell e Read: rifiuta un comando o una lettura che nomina un file pat[-nome].txt (pat.txt, pat-smistatore.txt, pat-read-only.txt...) o
-# AZURE_DEVOPS_EXT_PAT, oppure il login di az (get-access-token, AZURE_CONFIG_DIR, la cartella .azure: con un login attivo la sessione non lo eredita), a meno che il comando sia una chiamata a card.ps1. La sessione il PAT in lettura lo usa
+# AZURE_DEVOPS_EXT_PAT o GH_TOKEN (il token di GitHub in lettura, pat-github-lettura.txt), oppure il login di az (get-access-token, AZURE_CONFIG_DIR, la cartella .azure: con un login attivo la sessione non lo eredita), a meno che il comando sia una chiamata a card.ps1. La sessione il PAT in lettura lo usa
 # dall'ambiente (az e gli script lo trovano da soli), non lo vede.
 # E' un presidio, non una recinzione: tiene il PAT fuori dal contesto di un modello che non lo sta cercando apposta.
 # Vale solo dentro una sessione di ruolo, cioe' con ATTREZZI_RUOLO nell'ambiente (lo imposta lo smistatore). Nelle
@@ -32,7 +32,7 @@ if ([string]::IsNullOrWhiteSpace($testo)) { exit 0 }
 # .claude/collaudo: le credenziali di prova del collaudatore, che le riceve nell'ambiente (COLLAUDO_*) senza leggere il file.
 # Il login di az: get-access-token darebbe alla sessione un token con i permessi della persona; AZURE_CONFIG_DIR e la
 # cartella .azure (la cache dei token) sono il modo di arrivarci senza chiamarlo. Alla sessione basta card.ps1.
-if ($testo -notmatch '(?i)pat(-[\w-]+)?\.txt|AZURE_DEVOPS_EXT_PAT|\.claude[\\/]collaudo|get-access-token|\baz(\.cmd)?\s+login\b|msal_token_cache|AZURE_CONFIG_DIR|(^|[\s\\/~"''=:])\.azure([\s\\/"'']|$)') { exit 0 }
+if ($testo -notmatch '(?i)pat(-[\w-]+)?\.txt|AZURE_DEVOPS_EXT_PAT|\bGH_TOKEN\b|\bGITHUB_TOKEN\b|\bgh\s+auth\s+(token|login)\b|\.claude[\\/]collaudo|get-access-token|\baz(\.cmd)?\s+login\b|msal_token_cache|AZURE_CONFIG_DIR|(^|[\s\\/~"''=:])\.azure([\s\\/"'']|$)') { exit 0 }
 
 # Una chiamata a card.ps1 puo nominare il file nel testo di un commento: passa solo se il comando e' una sola
 # invocazione di pwsh su card.ps1, senza altri comandi in coda (nessun ; & | ne' a capo fuori dal testo).

@@ -137,6 +137,9 @@ function Start-SessioneRuolo {
         # Le scritture passano da card.ps1, che legge da se il PAT pieno. Senza il file la sessione non ha nessun PAT.
         # Se manca: pat-smistatore-lettura.txt, altrimenti pat-read-only.txt (Get-PercorsoFilePat).
         [string]$PercorsoPatLettura = (Get-PercorsoFilePat 'lettura'),
+        # Il token di GitHub in sola lettura, che la sessione riceve come GH_TOKEN (gh pr view, gh run view --log-failed) per i repo
+        # delle aree su GitHub. Senza il file la sessione non ha nessun token di GitHub.
+        [string]$PercorsoPatGitHubLettura = (Get-PercorsoFilePatGitHub 'lettura'),
         # Le credenziali di prova dell'ambiente di Test (JSON, chiave -> valore), solo per il collaudatore: ogni chiave
         # diventa COLLAUDO_<CHIAVE> nell'ambiente della sessione. Il file sta fuori da ogni repo e il modello non lo legge.
         [string]$FileCollaudo,
@@ -185,7 +188,7 @@ function Start-SessioneRuolo {
     # Le variabili per gli hook e per card.ps1 vanno nel processo lanciato. Start-Process eredita l'ambiente di chi lo
     # chiama: si impostano qui e si ripristinano subito dopo, cosi non restano nell'ambiente dello smistatore.
     $vecchie = @{ ATTREZZI_CARD = $env:ATTREZZI_CARD; ATTREZZI_RUOLO = $env:ATTREZZI_RUOLO; ATTREZZI_DATI = $env:ATTREZZI_DATI; ATTREZZI_TASK = $env:ATTREZZI_TASK; ATTREZZI_BASE = $env:ATTREZZI_BASE
-        AZURE_DEVOPS_EXT_PAT = $env:AZURE_DEVOPS_EXT_PAT; AZURE_CONFIG_DIR = $env:AZURE_CONFIG_DIR; AZURE_EXTENSION_DIR = $env:AZURE_EXTENSION_DIR }
+        AZURE_DEVOPS_EXT_PAT = $env:AZURE_DEVOPS_EXT_PAT; GH_TOKEN = $env:GH_TOKEN; GITHUB_TOKEN = $env:GITHUB_TOKEN; AZURE_CONFIG_DIR = $env:AZURE_CONFIG_DIR; AZURE_EXTENSION_DIR = $env:AZURE_EXTENSION_DIR }
     # le COLLAUDO_* di chi lancia non passano mai: si tolgono e si rimettono dopo
     foreach ($v in @(Get-ChildItem Env: | Where-Object { $_.Name -like 'COLLAUDO_*' })) { $vecchie[$v.Name] = $v.Value; Remove-Item "Env:$($v.Name)" }
     $nuoveCollaudo = @()
@@ -193,6 +196,10 @@ function Start-SessioneRuolo {
         # mai il PAT di chi lancia: o quello in lettura, o nessuno
         $lettura = if (Test-Path -LiteralPath $PercorsoPatLettura) { Read-FilePat $PercorsoPatLettura } else { '' }
         if ($lettura) { $env:AZURE_DEVOPS_EXT_PAT = $lettura } else { Remove-Item Env:AZURE_DEVOPS_EXT_PAT -ErrorAction SilentlyContinue }
+        # come per Azure DevOps: mai il token GitHub di chi lancia, solo quello in lettura (o nessuno)
+        Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+        $letturaGh = if (Test-Path -LiteralPath $PercorsoPatGitHubLettura) { Read-FilePat $PercorsoPatGitHubLettura } else { '' }
+        if ($letturaGh) { $env:GH_TOKEN = $letturaGh } else { Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue }
         $env:ATTREZZI_CARD = [string]$Card
         $env:ATTREZZI_RUOLO = $Ruolo
         $env:ATTREZZI_DATI = $CartellaDati   # card.ps1 scrive le revisioni nostre dove lo smistatore le legge

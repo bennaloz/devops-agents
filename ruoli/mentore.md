@@ -78,7 +78,7 @@ d'origine non la leggi: `card.ps1 leggi` mostra soltanto la card di questa sessi
 Non cercare altre strade verso Azure DevOps.
 
 Il commit di merge della PR si trova con `git -C <copia principale> log --merges --ancestry-path <commit>..origin/develop`:
-il titolo è `Merged PR <N>: ...`, e titolo e testo dicono cosa cambiava. L'id della card sta nel nome del ramo, che è
+il titolo è `Merged PR <N>: ...` (su un repo GitHub `Merge pull request #<N> from <owner>/<ramo>`), e titolo e testo dicono cosa cambiava. L'id della card sta nel nome del ramo, che è
 `feature/<id>-...` (`fix/<id>-...` per un Bug): se il ramo c'è ancora lo mostra `git -C <copia principale> branch -r
 --contains <commit>`, altrimenti cerca l'id nel testo del commit di merge e nei commit della PR. Quell'id è la card
 d'origine e va nel campo `card` della lezione. Da lì vengono le lezioni per `dev`, per `collaudatore` e, se il difetto

@@ -363,3 +363,29 @@ Describe 'Install-Attrezzi -Pianificazione: un attivita disabilitata resta disab
 }
 
 AfterAll { $env:ATTREZZI_DATI = $script:DatiPrimaIsolamento }
+
+Describe 'Install-Attrezzi -PatGitHub' {
+    BeforeEach {
+        $script:Claude = Join-Path ([IO.Path]::GetTempPath()) ("claude-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Path $script:Claude | Out-Null
+        Import-Module (Join-Path $script:Repo 'src/GitHub.psm1') -Force
+    }
+    AfterEach { Remove-Item $script:Claude -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'salva i due token cifrati nei file pat-github, senza il testo in chiaro' {
+        $s = ConvertTo-SecureString 'ghp_scrittura' -AsPlainText -Force
+        $l = ConvertTo-SecureString 'ghp_lettura' -AsPlainText -Force
+        & $script:Install -PatGitHub -TokenGitHub $s -TokenGitHubLettura $l -ClaudeDir $script:Claude 6>$null
+        $fs = Join-Path $script:Claude 'pat-github.txt'
+        $fl = Join-Path $script:Claude 'pat-github-lettura.txt'
+        Read-FilePat $fs | Should -Be 'ghp_scrittura'
+        Read-FilePat $fl | Should -Be 'ghp_lettura'
+        Get-Content $fs -Raw | Should -Not -Match 'ghp_scrittura'
+    }
+
+    It 'un token vuoto non salva niente' {
+        $v = ConvertTo-SecureString ' ' -AsPlainText -Force
+        { & $script:Install -PatGitHub -TokenGitHub $v -TokenGitHubLettura $v -ClaudeDir $script:Claude 6>$null } | Should -Throw '*vuoto*'
+        Test-Path (Join-Path $script:Claude 'pat-github.txt') | Should -BeFalse
+    }
+}

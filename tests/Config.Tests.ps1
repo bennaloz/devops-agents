@@ -69,6 +69,20 @@ Describe 'Get-Config' {
         { Get-Config -Radice $script:R } | Should -Throw '*progettoBoard*'
     }
 
+    It 'la sorgente del codice (github) vuole repoGithub nella forma owner/repo; ado o assente va bene' {
+        $p = "$script:R/config/mappa.json"
+        $m = Get-Content $p -Raw | ConvertFrom-Json
+        $m.aree[0] | Add-Member sorgente 'github' -Force
+        $m | ConvertTo-Json -Depth 10 | Set-Content $p
+        { Get-Config -Radice $script:R } | Should -Throw "*repoGithub*"
+        $m.aree[0] | Add-Member repoGithub 'acme/web' -Force
+        $m | ConvertTo-Json -Depth 10 | Set-Content $p
+        (Get-Config -Radice $script:R).Mappa.aree[0].repoGithub | Should -Be 'acme/web'
+        $m.aree[0].sorgente = 'gitlab'
+        $m | ConvertTo-Json -Depth 10 | Set-Content $p
+        { Get-Config -Radice $script:R } | Should -Throw "*ado o github*"
+    }
+
     It 'i limiti della quota (D51) si leggono' {
         $c = Get-Config -Radice $script:R
         $c.Limiti.sogliaQuotaSettimanale | Should -Be 0.70

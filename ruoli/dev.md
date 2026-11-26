@@ -36,6 +36,11 @@ di pipeline o lo stato delle build di un ramo. Non nominare la variabile né il 
 puoi scrivere niente (accodare build, creare risorse, aprire o completare PR): se un criterio lo chiede, fermati con
 `bivio`.
 
+Il codice della card può stare su GitHub invece che su Azure Repos (le card restano su Azure DevOps): lo vedi da
+`git remote get-url origin`. Su GitHub PR, controlli e run si leggono con `gh` (`gh pr view`, `gh pr checks`,
+`gh run view <id> --log-failed`), che trova da solo il token in sola lettura che hai nell'ambiente: non nominarlo, un
+hook lo blocca. Le build di Azure Pipelines che validano un repo GitHub restano su Azure DevOps e si leggono con `az`.
+
 ## Se lavori su un task
 
 Una card può essere divisa in task, e allora ogni sessione `dev` ne ha uno. Se la variabile d'ambiente
@@ -90,7 +95,8 @@ pubblicalo e scrivi sulla card un commento con l'elenco dei file in conflitto e,
 motivo `conflitti` su questa card, la PR della card stessa (verso il ramo della funzionalità) è in conflitto perché quel ramo
 è andato avanti: in più unisci `origin/$env:ATTREZZI_BASE` come nel paragrafo sopra, poi, se serve, di nuovo `develop` di origin.
 
-Con il motivo `rossa` la validazione della PR è fallita e l'allegato ha gli errori della build. Rendere verde la PR è
+Con il motivo `rossa` la validazione della PR è fallita e l'allegato ha gli errori della build (su un repo GitHub
+validato da GitHub Actions l'allegato ha solo il link al run: gli errori li leggi con `gh run view <id> --log-failed`). Rendere verde la PR è
 lavoro tuo anche quando il test che fallisce non riguarda la card e sta fuori dal recinto: per esempio un test
 instabile (che dipende dall'orologio, dall'ordine di esecuzione o da uno stato condiviso) o rotto da qualcun altro su
 `develop`. Prima capisci la causa e riproduci il fallimento in locale, se ci riesci. Poi correggi la causa, nel test o
