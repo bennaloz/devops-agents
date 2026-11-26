@@ -44,7 +44,7 @@ if (options.Mode == "live")
     builder.Services.AddSingleton<ICodeHostResolver, CodeHostResolver>();
     builder.Services.AddSingleton<ICiService>(sp => new AzurePipelinesCi(sp.GetRequiredService<AdoClient>()));
     builder.Services.AddSingleton<IWorkspace>(new GitWorkspace(options.WorktreeRoot));
-    builder.Services.AddSingleton<ISessionRunner>(new ClaudeSessionRunner(suite, tokens, new ClaudeRunnerOptions { Executable = options.ClaudeExecutable, DataDir = dataDir }));
+    builder.Services.AddSingleton<ISessionRunner>(new ClaudeSessionRunner(suite, tokens, new ClaudeRunnerOptions { Executable = options.ClaudeExecutable, DataDir = dataDir }, new GitMemorySource(root)));
     builder.Services.AddSingleton<IStateStore>(new JsonStateStore(Path.Combine(dataDir, "stato.json")));
     // D59: gli ambienti Docker di collaudo, se config/collaudo.json c'e
     if (DockerSettings.Load(root) is { } docker) builder.Services.AddSingleton<ITestEnvironments>(new DockerTestEnvironments(docker, dataDir));
@@ -68,7 +68,7 @@ builder.Services.AddSingleton(sp => new PriorityService(sp.GetRequiredService<IB
 builder.Services.AddSingleton(sp => new Dispatcher(
     sp.GetRequiredService<IBoard>(), sp.GetRequiredService<ICodeHostResolver>(), sp.GetRequiredService<ICiService>(), sp.GetRequiredService<IWorkspace>(),
     sp.GetRequiredService<ISessionRunner>(), sp.GetRequiredService<IStateStore>(), sp.GetRequiredService<DecisionEngine>(), suite.Names, suite.Limits,
-    suite.Areas, sp.GetRequiredService<IClock>(), sp.GetRequiredService<ILogger<Dispatcher>>(), new DispatcherOptions { OnlyMine = options.OnlyMine },
+    suite.Areas, sp.GetRequiredService<IClock>(), sp.GetRequiredService<ILogger<Dispatcher>>(), new DispatcherOptions { OnlyMine = options.OnlyMine, SuiteRoot = root, MentorFolders = Path.Combine(dataDir, "mentori") },
     sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IQuotaStore>(), sp.GetService<ITestEnvironments>()));
 builder.Services.AddSingleton(sp => new DispatcherService(sp.GetRequiredService<Dispatcher>(), sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<LiveHub>>(),
     options, TimeSpan.FromMinutes(Math.Max(1, suite.Limits.IntervalMinutes)), sp.GetRequiredService<ILogger<DispatcherService>>()));

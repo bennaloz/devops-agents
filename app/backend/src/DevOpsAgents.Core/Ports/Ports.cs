@@ -154,3 +154,9 @@ public interface ITestEnvironments
     /// <summary>I progetti card-&lt;id&gt; che docker conosce (contenitori con l'etichetta e volumi del progetto).</summary>
     Task<IReadOnlyList<string>> ListProjectsAsync(CancellationToken ct = default);
 }
+
+/// <summary>D46: le lezioni di un ruolo per un repo (comune.md e &lt;repo&gt;.md), stabili e in prova. Non lancia: senza memoria, niente memoria.</summary>
+public interface IMemorySource
+{
+    Task<IReadOnlyList<DevOpsAgents.Core.Memory.MemoryFile>> GetAsync(string role, string repo, CancellationToken ct = default);
+}

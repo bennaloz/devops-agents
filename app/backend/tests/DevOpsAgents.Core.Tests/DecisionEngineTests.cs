@@ -251,7 +251,8 @@ public class DecisionEngineTests
     public void Revisione_bloccante_torna_a_dev_con_i_rilievi_oltre_il_limite_attesa()
     {
         var d = Decide(Fx.Card(K.InReview).Last(Fx.Session("reviewer", "bloccante", text: "file.cs:10")));
-        Assert.Equal(["SpostaCard", "LanciaSessione"], Kinds(d));
+        // D46: con i rilievi del reviewer parte anche il mentore, per la lezione di dev
+        Assert.Equal(["SpostaCard", "LanciaSessione", "LanciaMentore"], Kinds(d));
         Assert.Equal(("dev", "rilievi", "file.cs:10"), (((LaunchSession)d.Actions[1]).Role, ((LaunchSession)d.Actions[1]).Reason, ((LaunchSession)d.Actions[1]).Attachment));
         var limite = Decide(Fx.Card(K.InReview).Last(Fx.Session("reviewer", "bloccante")).With(s => s.ReviewRounds = 2));
         Assert.Equal("limite", Fx.Hold(limite).For);

@@ -145,6 +145,9 @@ public sealed class CardLocalState
     public int AutoResumes { get; set; }
     /// <summary>D57: la causa di un on-hold deciso dallo smistatore chiudendo una sessione (silenzio, morta, fallita).</summary>
     public string? HoldCause { get; set; }
+    /// <summary>D46: le correzioni per cui il mentore e gia partito, e le sue sessioni in corso (non contano nel limite di sessioni).</summary>
+    public List<string> MentorsDone { get; set; } = new();
+    public List<string> MentorRuns { get; set; } = new();
     public int ReviewRounds { get; set; }
     public int RedInARow { get; set; }
     public int TestRounds { get; set; }
@@ -187,6 +190,7 @@ public sealed class CardLocalState
         c.CorrectionsDone = new List<string>(CorrectionsDone);
         c.AlignDone = new List<string>(AlignDone);
         c.PassesDone = new List<string>(PassesDone);
+        c.MentorsDone = new List<string>(MentorsDone);
         return c;
     }
 

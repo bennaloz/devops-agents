@@ -12,6 +12,9 @@ public sealed record DispatcherOptions
 {
     /// <summary>Solo le card assegnate all'utente del token (come lo smistatore PowerShell). Spento, tutte quelle con il tag.</summary>
     public bool OnlyMine { get; init; } = true;
+    /// <summary>D46: la radice degli attrezzi (src/memoria.ps1) e dove nascono le cartelle vuote dei mentori.</summary>
+    public string? SuiteRoot { get; init; }
+    public string? MentorFolders { get; init; }
 }
 
 /// <summary>Cosa e successo a una card in un giro: le azioni decise (ed eseguite, se non e un giro di prova), il motivo, l'errore.</summary>
@@ -193,6 +196,14 @@ public sealed class Dispatcher(
     {
         foreach (var (id, local) in state)
         {
+            // D46: le sessioni del mentore finiscono senza toccare la card; la quota che portano si salva
+            foreach (var mid in local.MentorRuns.ToList())
+                if (await sessions.PollAsync(mid, ct) is { } mr)
+                {
+                    local.MentorRuns.Remove(mid);
+                    if (quotaStore is not null && mr.Quota is not null) await SaveQuotaAsync(mr with { HitTokenLimit = false }, ct);
+                    log($"card {id}: mentore {mid} finito, ESITO={mr.Outcome ?? "(nessuno)"}");
+                }
             if (local.RunningSession is not { } sid || local.LastRole is not { } role) continue;
             var result = await sessions.PollAsync(sid, ct);
             // ancora in corso. Il silenzio lo giudica il runner: chiude il processo e restituisce un risultato senza esito.
@@ -495,6 +506,9 @@ public sealed class Dispatcher(
                 local.WaitingFor = ro.For;
                 local.ResumedBySystem = true;
                 break;
+            case LaunchMentor lm:
+                await LaunchMentorAsync(lm, card, area, local, ct);
+                break;
             case AdoptCard ad:
                 await AdoptAsync(ad, card, area, local, ct);
                 break;
@@ -605,6 +619,33 @@ public sealed class Dispatcher(
             case ("dev", "rossa"): local.RedInARow++; local.HandledRedBuild = s.Pr?.BuildId; break;
             case ("dev", "rilievi"): local.ReviewRounds++; break;
             case ("responsabile", "collaudoRespinto"): local.TestRounds++; break;
+        }
+    }
+
+    /// <summary>
+    /// D46: il mentore lavora in una cartella vuota sua (legge i repo solo con git -C) e scrive le lezioni con memoria.ps1. Non fa parte del
+    /// lavoro della card: non tiene la card ferma e non conta nel limite di sessioni. Se non parte si riprova al giro dopo.
+    /// </summary>
+    private async Task LaunchMentorAsync(LaunchMentor m, Card card, AreaMapping area, CardLocalState local, CancellationToken ct)
+    {
+        var folder = Path.Combine(_options.MentorFolders ?? Path.Combine(Path.GetTempPath(), "devops-agents-mentori"), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var message = string.Join("\n", new[]
+        {
+            $"Card {card.Id} nel repo {area.Repo}.", $"Ruoli da istruire: {string.Join(", ", m.Roles)}.", $"Chi ha corretto: {m.Corrector}.", $"Innesco: {m.Trigger}.",
+            $"memoria.ps1: {Path.Combine(_options.SuiteRoot ?? ".", "src", "memoria.ps1")}", $"Copia principale del repo (da leggere solo con git -C): {area.Folder}",
+        }.Concat(m.Text is { Length: > 0 } t ? [$"Allegato:\n{t}"] : []));
+        try
+        {
+            var id = await sessions.StartAsync(new SessionRequest("mentore", card.Id, area, folder, message, null, false, null, null), ct);
+            local.MentorRuns.Add(id);
+            local.MentorsDone.Add(m.Key);
+            logger.LogInformation("card {Card}: lanciato il mentore {Id} ({Trigger}, per {Roles})", card.Id, id, m.Trigger, string.Join(", ", m.Roles));
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            try { Directory.Delete(folder, true); } catch (IOException) { }
+            logger.LogError("card {Card}: il mentore ({Trigger}, chiave {Key}) non e partito, riprovo al giro dopo: {Error}", card.Id, m.Trigger, m.Key, e.Message);
         }
     }
 

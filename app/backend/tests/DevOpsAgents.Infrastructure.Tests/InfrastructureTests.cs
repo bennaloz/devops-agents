@@ -825,3 +825,43 @@ public class TelegramTests
         Assert.Equal([new TimeSpan(8, 30, 0), new TimeSpan(14, 0, 0)], s.SummaryTimes);
     }
 }
+
+public class MemoryTests
+{
+    [Fact]
+    public async Task Le_lezioni_si_leggono_da_develop_e_dal_ramo_in_prova_finche_non_e_unito()
+    {
+        var tmp = Directory.CreateTempSubdirectory("mem").FullName;
+        void Git(string dir, params string[] args)
+        {
+            var psi = new ProcessStartInfo("git") { WorkingDirectory = dir, RedirectStandardError = true, RedirectStandardOutput = true };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi)!;
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0, p.StandardError.ReadToEnd());
+        }
+        var origin = Path.Combine(tmp, "origin.git");
+        var main = Path.Combine(tmp, "main");
+        Git(tmp, "init", "--bare", "-b", "develop", origin);
+        Git(tmp, "clone", origin, main);
+        Directory.CreateDirectory(Path.Combine(main, "memoria", "dev"));
+        File.WriteAllText(Path.Combine(main, "memoria", "dev", "comune.md"), "### dev-001\n- Situazione: a\n");
+        Git(main, "add", ".");
+        Git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-m", "memoria");
+        Git(main, "push", "origin", "HEAD:develop");
+        var source = new GitMemorySource(main);
+        var files = await source.GetAsync("dev", "Acme.AI");
+        Assert.Equal(["comune", "Acme.AI"], files.Select(f => f.Name));
+        Assert.Contains("dev-001", files[0].Develop);
+        Assert.Null(files[0].InTrial);
+        Assert.Null(files[1].Develop);
+
+        File.AppendAllText(Path.Combine(main, "memoria", "dev", "comune.md"), "\n### dev-002\n- Situazione: b\n");
+        Git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-am", "in prova");
+        Git(main, "push", "origin", "HEAD:refs/heads/memoria/in-prova");
+        var withTrial = await new GitMemorySource(main).GetAsync("dev", "Acme.AI");
+        Assert.Contains("dev-002", withTrial[0].InTrial);
+        Assert.Empty(await new GitMemorySource(Path.Combine(tmp, "non-un-repo")).GetAsync("dev", "x"));
+        Directory.Delete(tmp, true);
+    }
+}

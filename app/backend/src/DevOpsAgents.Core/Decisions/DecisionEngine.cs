@@ -160,6 +160,8 @@ public sealed class DecisionEngine
             if (reset) actions.Insert(0, new ResetCounters());
         }
 
+        // D46: il mentore parte dopo il limite: se il limite ferma il lancio correttivo, non parte neanche lui, e riparte al giro dopo
+        var onHoldRemoved = waiting is not null && waiting != "quota" && !bySystem && !afterReview;
         if (closeReview is not null) actions.Insert(0, closeReview);
         if (resetPasses) actions.Insert(0, new ResetHoldReviews());
 
@@ -170,8 +172,11 @@ public sealed class DecisionEngine
         if (launches.Count > 0 && QuotaBlock(ctx) is { } quota)
             return new Decision([], quota with { Role = launches[0].Role });
 
+        var mentorEnv = env ?? new Env(snapshot, ctx, local);
+        if (mentorEnv.Key is not null) actions.AddRange(MentorActions(mentorEnv, actions, onHoldRemoved));
+
         BlockReason? reason = null;
-        if (env is not null && actions.All(a => a is ResetCounters or ResetDeploy or ResetCiRed or CloseHoldReview or ResetHoldReviews)) reason = StartBlock(env) ?? ClosingInDraft(env);
+        if (env is not null && actions.All(a => a is LaunchMentor or ResetCounters or ResetDeploy or ResetCiRed or CloseHoldReview or ResetHoldReviews)) reason = StartBlock(env) ?? ClosingInDraft(env);
         return new Decision(actions, reason);
     }
 
@@ -658,6 +663,47 @@ public sealed class DecisionEngine
     {
         var done = a.Local.CorrectionsDone.Concat(BugsCreated(a.S.AllComments, "Correzione #")).ToHashSet();
         return CorrectionsWritten(a.S.AllComments).FirstOrDefault(c => !done.Contains(c.Key));
+    }
+
+    // ---- D46: il mentore -----------------------------------------------------------------------------------------
+
+    private static readonly string[] CorrectionFromCommentStates = [K.Ready, K.InDevelopment, K.InReview, K.DeployingToTest, K.AutomatedTest, K.ReadyToMerge];
+
+    /// <summary>
+    /// Quando parte il mentore (Get-AzioniMentore): dev rilanciato dopo la decisione del responsabile su un blocco o un bivio, o con i rilievi
+    /// del reviewer; un commento di persona nello stato (o un on-hold tolto: la lezione va a chi si era fermato); la card tornata In development
+    /// dalla prova umana; una Bug che va in rilascio. Una volta per correzione.
+    /// </summary>
+    private static IEnumerable<LaunchMentor> MentorActions(Env a, IReadOnlyList<AgentAction> actions, bool onHoldRemoved)
+    {
+        var proposals = new List<LaunchMentor>();
+        foreach (var l in actions.OfType<LaunchSession>().Where(l => l.Role == "dev"))
+        {
+            var resp = a.Local.Of("responsabile");
+            if (l.Reason == "decisione" && resp?.Reason is "bloccato" or "bivio")
+                proposals.Add(new LaunchMentor(["dev"], "responsabile", "decisione", l.Attachment, $"decisione@{resp.Id}"));
+            else if (l.Reason == "rilievi")
+                proposals.Add(new LaunchMentor(["dev"], "reviewer", "rilievi", l.Attachment, $"rilievi@{a.Local.Of("reviewer")?.Id}"));
+        }
+        var since = a.Entry?.When;
+        var person = a.S.NewComments.Where(c => IsPersonComment(c) && (since is null || c.When >= since)).ToList();
+        if (person.Count > 0 && CorrectionFromCommentStates.Contains(a.Key!))
+        {
+            var key = $"commento@{person.Max(c => c.Id)}";
+            var text = string.Join("\n\n", person.Select(c => $"{c.Author}: {c.Text}"));
+            proposals.Add(onHoldRemoved
+                ? new LaunchMentor([a.LastRole ?? "responsabile"], "persona", "onHoldTolto", text, key)
+                : new LaunchMentor(["responsabile"], "persona", "commento", text, key));
+        }
+        if (a.Key == K.InDevelopment && a.Entry is not null && a.Ctx.Names.KeyOf(a.Entry.From) == K.HumanTest)
+        {
+            var all = a.S.AllComments ?? a.S.NewComments;
+            var text = string.Join("\n\n", all.Where(IsPersonComment).Select(c => $"{c.Author}: {c.Text}"));
+            proposals.Add(new LaunchMentor(["collaudatore", "reviewer"], "persona", "provaUmana", text, $"provaUmana@{a.EntryRev}"));
+        }
+        if (string.Equals(a.S.Card.WorkItemType, "Bug", StringComparison.OrdinalIgnoreCase) && a.S.Pr?.Id is { } prId && actions.Any(x => x is MoveCard { State: K.ReadyToRelease }))
+            proposals.Add(new LaunchMentor(["dev", "collaudatore", "reviewer"], "bug", "bug", $"{a.S.Card.Title}\n\nPR {prId}", $"bug@{prId}"));
+        return proposals.Where(p => !a.Local.MentorsDone.Contains(p.Key));
     }
 
     // ---- D42, D51, presa in carico ----------------------------------------------------------------------------------

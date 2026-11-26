@@ -24,7 +24,7 @@ public sealed record ClaudeRunnerOptions
 /// Le sessioni dei ruoli con claude -p, come Start-SessioneRuolo (src/Sessioni.psm1): modello, sforzo, advisor, brief del
 /// ruolo, strumenti, nessun MCP, eventi stream-json su file. La sessione riceve solo i token in sola lettura.
 /// </summary>
-public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, ClaudeRunnerOptions options) : ISessionRunner
+public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, ClaudeRunnerOptions options, IMemorySource? memory = null) : ISessionRunner
 {
     private static readonly Regex Esito = new(@"(?m)^[\s`*]*ESITO=([^\s`*]+)[\s`*]*$", RegexOptions.Compiled);
     private readonly ConcurrentDictionary<string, Process> _processes = new();
@@ -47,7 +47,7 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
         return a;
     }
 
-    public Task<string> StartAsync(SessionRequest r, CancellationToken ct = default)
+    public async Task<string> StartAsync(SessionRequest r, CancellationToken ct = default)
     {
         if (!config.Roles.TryGetValue(r.Role, out var role)) throw new InvalidOperationException($"Ruolo sconosciuto: {r.Role}");
         var id = r.Resume && r.SessionId is not null ? r.SessionId : Guid.NewGuid().ToString();
@@ -58,7 +58,7 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
         };
         foreach (var a in options.PrefixArguments) psi.ArgumentList.Add(a);
-        foreach (var a in Arguments(role, Path.Combine(config.Root, role.Brief), r.Message, id, r.Resume)) psi.ArgumentList.Add(a);
+        foreach (var a in Arguments(role, await BriefAsync(r.Role, role, r.Area.Repo, id, ct), r.Message, id, r.Resume)) psi.ArgumentList.Add(a);
 
         // le variabili che leggono hook e card.ps1; mai i token di chi lancia, solo quelli in lettura
         var env = psi.Environment;
@@ -86,7 +86,23 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
         }, CancellationToken.None);
         _ = p.StandardError.ReadToEndAsync(CancellationToken.None);
         _processes[id] = p;
-        return Task.FromResult(id);
+        return id;
+    }
+
+    /// <summary>
+    /// D46: il brief della sessione: quello del ruolo, con in fondo la sezione Memoria (lezioni stabili e in prova del repo) in un file accanto
+    /// all'uscita della sessione. Senza memoria, o se la lettura non riesce, il brief del ruolo.
+    /// </summary>
+    private async Task<string> BriefAsync(string roleName, RoleSettings role, string repo, string id, CancellationToken ct)
+    {
+        var path = Path.Combine(config.Root, role.Brief);
+        if (memory is null) return path;
+        var files = await memory.GetAsync(roleName, repo, ct);
+        if (files.Count == 0) return path;
+        var composed = Core.Memory.Lessons.BriefWithMemory(await File.ReadAllTextAsync(path, ct), files);
+        var target = Path.Combine(options.DataDir, "sessioni", $"{id}.brief.md");
+        await File.WriteAllTextAsync(target, composed, ct);
+        return target;
     }
 
     public async Task<SessionResult?> PollAsync(string sessionId, CancellationToken ct = default)

@@ -136,6 +136,12 @@ public sealed record AdoptCard(string? Base = null, bool FeatureCard = false) : 
     public override string Kind => "AdottaCard";
 }
 
+/// <summary>D46: LanciaMentore, il mentore scrive la lezione per i ruoli corretti. Key: una volta sola per correzione.</summary>
+public sealed record LaunchMentor(IReadOnlyList<string> Roles, string Corrector, string Trigger, string? Text, string Key) : AgentAction
+{
+    public override string Kind => "LanciaMentore";
+}
+
 public sealed record ResetCiRed : AgentAction
 {
     public override string Kind => "AzzeraCiRosse";
