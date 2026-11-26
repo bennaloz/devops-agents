@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Ufficio degli agenti</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", sans-serif; background: #1b1a26; color: #ece8dc; }
+header, main, section, footer { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 14px; }
+h1 { font-size: 1.4rem; margin: 0 0 2px; }
+h2 { font-size: 1.05rem; margin: 18px 0 8px; }
+.sotto { color: #a9a597; font-size: .9rem; margin: 0 0 6px; }
+a { color: #9ad1ff; }
+.avviso { border-radius: 8px; padding: 8px 12px; margin: 8px 0; border: 1px solid #55506a; background: #2a2838; }
+.avviso.allarme { background: #4a1f28; border-color: #d1495b; color: #ffd6dc; }
+.avviso.pausa { background: #4a3514; border-color: #e0a800; color: #ffe6ad; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 8px; }
+.layout.con-scheda { grid-template-columns: minmax(0, 1fr) 320px; }
+@media (max-width: 900px) { .layout.con-scheda { grid-template-columns: minmax(0, 1fr); } }
+#scena { position: relative; min-width: 0; }
+/* il riquadro e' la finestra sull'ufficio: se lo zoom lo fa piu grande dello spazio si sposta trascinando */
+#riquadro { display: flex; overflow: auto; max-height: calc(100vh - 80px); scrollbar-width: thin; }
+#riquadro canvas { flex: none; max-width: none; margin: auto; touch-action: none; }
+#riquadro canvas.trascinato { cursor: grabbing; }
+#comandi-zoom { position: absolute; top: 8px; left: 8px; z-index: 4; display: flex; gap: 4px; align-items: center; padding: 3px 6px; background: rgba(27, 26, 38, .88); border: 1px solid #55506a; border-radius: 8px; font-size: .85rem; }
+#comandi-zoom button { padding: 1px 9px; font-weight: 700; }
+#zoom-livello { min-width: 3.2em; text-align: center; color: #cfcab9; }
+canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 3px solid #3a3750; border-radius: 6px; background: #000; max-width: 100%; }
+#scena.fermo canvas { filter: grayscale(1) brightness(.75); }
+#scheda { background: #272538; border: 1px solid #55506a; border-radius: 10px; padding: 10px 14px 14px; position: relative; }
+#scheda h2 { margin-top: 6px; padding-right: 30px; }
+#scheda ul { padding-left: 18px; margin: 6px 0; }
+#scheda .nota, .nota { color: #a9a597; font-size: .85rem; }
+#chiudi-scheda { position: absolute; top: 8px; right: 8px; }
+button { font: inherit; color: inherit; background: #34314a; border: 1px solid #66618a; border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+button:hover, button:focus-visible { background: #46426a; outline: 2px solid #9ad1ff; }
+.tasto { font-weight: 600; margin-right: 4px; }
+#elenco, #consegne { list-style: none; padding: 0; margin: 0; }
+#elenco li, #consegne li { padding: 3px 0; }
+li.indietro { color: #ff9aa8; font-weight: 600; }
+li.avanti { color: #9affc0; }
+#comandi-esempio[hidden] { display: none; }
+#comandi-esempio { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0; padding: 8px 12px; background: #272538; border-radius: 8px; }
+select { font: inherit; background: #34314a; color: inherit; border: 1px solid #66618a; border-radius: 6px; padding: 2px 6px; }
+details { margin: 12px 0; color: #cfcab9; }
+footer { padding-bottom: 24px; color: #a9a597; font-size: .85rem; }
+/* la versione compatta: dentro il pannello della vista (iframe ?compatto=1), solo la scena e gli avvisi */
+body.compatto header, body.compatto details, body.compatto section, body.compatto footer, body.compatto #comandi-esempio, body.compatto .sotto { display: none; }
+body.compatto main { max-width: none; padding: 0; }
+body.compatto .layout, body.compatto .layout.con-scheda { display: block; margin: 0; }
+body.compatto #riquadro { max-height: none; }
+body.compatto canvas { border-width: 0; border-radius: 0; }
+body.compatto .avviso.nota { display: none; }
+body.compatto .avviso { margin: 0; padding: 4px 10px; border-radius: 0; font-size: .8rem; }
+body.compatto #scheda { position: fixed; top: 6px; right: 6px; bottom: 6px; width: min(300px, 80%); overflow: auto; z-index: 5; box-shadow: 0 0 14px rgba(0, 0, 0, .6); }
+</style>
+</head>
+<body>
+<header>
+  <h1>L'ufficio degli agenti</h1>
+  <p class="sotto" id="sotto"></p>
+  <p><button type="button" id="tasto-movimento">Ferma il movimento</button> <span class="nota">La scelta resta salvata in questo browser.</span></p>
+</header>
+<main>
+  <div id="avvisi" role="status" aria-live="polite"></div>
+  <div id="comandi-esempio" hidden>
+    <label>Scena <select id="scelta-scena"></select></label>
+    <label>Ora del giorno <select id="scelta-ora"><option value="">quella vera</option><option value="9.5">mattina</option><option value="14">pomeriggio</option><option value="19.2">tramonto</option><option value="23">notte</option></select></label>
+    <button type="button" id="ripeti-consegne">Rivedi le consegne</button>
+  </div>
+  <div class="layout" id="layout">
+    <div id="scena">
+      <div id="riquadro"><canvas id="schermo" width="320" height="224" aria-label="Ufficio visto dall'alto: gli agenti alla scrivania, in pausa, o in fila alla porta di Titolare"></canvas></div>
+      <div id="comandi-zoom" role="group" aria-label="Zoom dell'ufficio">
+        <button type="button" id="zoom-meno" aria-label="Rimpicciolisci l'ufficio" title="Rimpicciolisci">&minus;</button>
+        <span id="zoom-livello" aria-live="polite">&times;1</span>
+        <button type="button" id="zoom-piu" aria-label="Ingrandisci l'ufficio" title="Ingrandisci">+</button>
+        <button type="button" id="zoom-adatta" title="Adatta l'ufficio allo spazio che c'e">Adatta</button>
+        <button type="button" id="cambia-stanza" title="Passa all'altra stanza: ufficio o open space">Open space</button>
+      </div>
+    </div>
+    <aside id="scheda" hidden aria-label="Scheda">
+      <button type="button" id="chiudi-scheda" aria-label="Chiudi la scheda">Chiudi</button>
+      <div id="corpo-scheda"></div>
+    </aside>
+  </div>
+  <noscript><p class="avviso allarme">Serve JavaScript: l'ufficio e' un gioco disegnato in una pagina.</p></noscript>
+  <details>
+    <summary>Come leggere l'ufficio</summary>
+    <p>Gli id delle card, le pile sulle scrivanie, i fogli nella stanza di Titolare, i numeri sulla bacheca, le cartelline delle consegne e l'avviso di pausa vengono dai dati dello smistatore. Tutto il resto (la pausa, le chiacchiere, il caffe', il gatto, il cielo che segue l'ora) e' scena: serve solo a tenere vivo l'ufficio e non dice niente sul lavoro. Un agente senza una sessione che cammina verso il divano non sta lavorando.</p>
+    <p>Un rimando indietro (per esempio dal reviewer al dev) ha la cartellina rossa e la scritta INDIETRO; una consegna in avanti ha la cartellina verde e la scritta AVANTI. Una persona per sessione: se un ruolo ha piu sessioni aperte, la prima sta alla scrivania del ruolo e le altre al tavolo dei portatili, contro il muro a sinistra; chi non trova posto lavora nell'open space, oltre la porta in basso a sinistra, che dice quanti sono. La pagina e' in sola lettura: non scrive su Azure DevOps, non lancia sessioni, non sposta card.</p>
+  </details>
+  <section>
+    <h2>Chi fa cosa, adesso</h2>
+    <ul id="elenco"></ul>
+    <h2>Consegne recenti</h2>
+    <ul id="consegne"></ul>
+  </section>
+</main>
+<footer>Clic su un personaggio, su una pila, sulla porta di Titolare, sullo smistatore o sulla bacheca per aprire la scheda. Esc la chiude.</footer>
+<script type="application/json" id="dati">@@DATI@@</script>
+<script>
+@@SCRIPT@@
+</script>
+</body>
+</html>

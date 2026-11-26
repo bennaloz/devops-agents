@@ -1,0 +1,33 @@
+{
+  "organizzazione": "https://acme.visualstudio.com",
+  "progettoBoard": "DevOps.Agents",
+  "aree": [
+    {
+      "area": "DevOps.Agents\\AI\\Stime",
+      "repo": "Acme.AI",
+      "cartella": "C:/develop/GIT/Acme.AI",
+      "progettoAdo": "Acme.AI",
+      "componente": "stime",
+      "pipelineDeploy": 115,
+      "urlTest": "https://srv-app-test:5480"
+    },
+    {
+      "area": "DevOps.Agents\\AI\\Ordini",
+      "repo": "Acme.AI",
+      "cartella": "C:/develop/GIT/Acme.AI",
+      "progettoAdo": "Acme.AI",
+      "componente": "ordini",
+      "pipelineDeploy": 115,
+      "urlTest": "https://srv-app-test:5501"
+    },
+    {
+      "area": "DevOps.Agents\\Workflow\\Forms",
+      "repo": "Acme.Workflow",
+      "cartella": "C:/develop/GIT/Acme.Workflow/src",
+      "progettoAdo": "Acme.Workflow",
+      "componente": "forms",
+      "pipelineDeploy": 58,
+      "urlTest": "https://srv-app-test:5552"
+    }
+  ]
+}

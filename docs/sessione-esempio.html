@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="10">
+<title>Sessione #5</title>
+<style>:root {
+  --sfondo: #f4f5f7; --superficie: #ffffff; --testo: #1d2430; --attenuato: #667085; --bordo: #dde1e8;
+  --accento: #2557d6; --accento-sfondo: #e8eefc;
+  --verde: #1f9d55; --ambra: #c77a06; --rosso: #d03b3b; --grigio: #8a93a3;
+  --codice-sfondo: #f0f2f6;
+  --sblocca-sfondo: #fde8e8; --sblocca-testo: #8a1f1f; --rispondi-sfondo: #efe7fb; --rispondi-testo: #4b2a8a;
+  --prova-sfondo: #fdf0d5; --prova-testo: #7a4a00; --rilascia-sfondo: #dcf5f1; --rilascia-testo: #0b5c52;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sfondo: #12151b; --superficie: #1b2029; --testo: #e6e9ef; --attenuato: #98a1b3; --bordo: #2c3341;
+    --accento: #7ba3ff; --accento-sfondo: #1d2a49;
+    --verde: #3ec47c; --ambra: #e9a23b; --rosso: #f06a6a; --grigio: #7b8498;
+    --codice-sfondo: #141922;
+    --sblocca-sfondo: #3a1c1c; --sblocca-testo: #f6b4b4; --rispondi-sfondo: #2c2144; --rispondi-testo: #d2bdf7;
+    --prova-sfondo: #3a2c10; --prova-testo: #f3cf8a; --rilascia-sfondo: #12332f; --rilascia-testo: #8fe0d4;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--sfondo); color: var(--testo); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { padding: 20px 16px 48px; }
+h1 { margin: 0; font-size: 28px; letter-spacing: -0.01em; }
+.sotto { margin: 4px 0 18px; color: var(--attenuato); font-size: 13px; }
+h2 { margin: 28px 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--attenuato); }
+h2 .conta, h3 .conta { display: inline-block; min-width: 22px; padding: 0 7px; margin-left: 6px; border-radius: 11px; background: var(--bordo); color: var(--testo); font-size: 12px; text-align: center; letter-spacing: 0; }
+h3 { margin: 16px 0 8px; font-size: 14px; }
+.avviso { margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--ambra); border-left-width: 5px; background: var(--superficie); color: var(--testo); }
+.vuoto { color: var(--attenuato); font-style: italic; }
+.kanban { display: grid; gap: 10px; align-items: start; overflow-x: auto; }
+.colonna { min-width: 0; background: color-mix(in srgb, var(--superficie) 55%, var(--sfondo)); border: 1px solid var(--bordo); border-radius: 10px; padding: 4px 10px 12px; }
+.colonna.pipeline { border-style: dashed; background: transparent; }
+.colonna h2 { margin: 10px 0 8px; }
+.colonna h3 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--attenuato); }
+.colonna .scheda { margin-bottom: 10px; }
+.libero { margin: 0 0 10px; padding: 10px 12px; border: 1px dashed var(--bordo); border-radius: 8px; color: var(--attenuato); font-style: italic; }
+.scheda { background: var(--superficie); border: 1px solid var(--bordo); border-left: 5px solid var(--verde); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.scheda.pausa { border-left-color: var(--ambra); }
+.scheda h3 { margin: 0 0 8px; font-size: 15px; overflow-wrap: anywhere; }
+a.segui { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--accento); }
+.num { color: var(--attenuato); font-weight: 600; margin-right: 4px; }
+.chip { display: inline-block; margin: 0 6px 6px 0; padding: 1px 9px; border-radius: 10px; border: 1px solid var(--bordo); font-size: 12px; color: var(--attenuato); }
+.meta { margin: 4px 0; font-size: 13px; color: var(--attenuato); overflow-wrap: anywhere; }
+.meta b { color: var(--testo); font-weight: 600; }
+.pallino { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; background: var(--grigio); vertical-align: baseline; }
+.pallino.viva { background: var(--verde); box-shadow: 0 0 0 3px color-mix(in srgb, var(--verde) 25%, transparent); }
+.barra { height: 6px; margin: 8px 0 2px; border-radius: 3px; background: var(--bordo); overflow: hidden; }
+.barra span { display: block; height: 100%; background: var(--verde); }
+.etichetta-barra { font-size: 12px; color: var(--attenuato); }
+pre.azioni { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--codice-sfondo); color: var(--attenuato); font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.voce { background: var(--superficie); border: 1px solid var(--bordo); border-left: 4px solid var(--grigio); border-radius: 8px; padding: 7px 10px; margin: 6px 0; font-size: 14px; overflow-wrap: anywhere; }
+.voce .motivo { display: block; font-size: 13px; color: var(--attenuato); }
+.voce .stato { font-size: 12px; color: var(--attenuato); }
+.pipeline .voce { border-left-color: var(--bordo); font-size: 13px; }
+.etichetta { display: inline-block; margin: 0 6px 4px 0; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.fase { font-size: 12px; color: var(--attenuato); }
+.att-sblocca { background: var(--sblocca-sfondo); color: var(--sblocca-testo); }
+.att-rispondi { background: var(--rispondi-sfondo); color: var(--rispondi-testo); }
+.att-prova { background: var(--prova-sfondo); color: var(--prova-testo); }
+.att-rilascia { background: var(--rilascia-sfondo); color: var(--rilascia-testo); }
+.voce.att-sblocca, .voce.att-rispondi, .voce.att-prova, .voce.att-rilascia { border-left-width: 4px; }
+.voce.att-sblocca { border-left-color: var(--sblocca-testo); }
+.voce.att-rispondi { border-left-color: var(--rispondi-testo); }
+.voce.att-prova { border-left-color: var(--prova-testo); }
+.voce.att-rilascia { border-left-color: var(--rilascia-testo); }
+.voce.att-sblocca .motivo, .voce.att-rispondi .motivo, .voce.att-prova .motivo, .voce.att-rilascia .motivo, .voce.att-sblocca .fase, .voce.att-rispondi .fase, .voce.att-prova .fase, .voce.att-rilascia .fase { color: inherit; }
+details.catene { margin-top: 24px; }
+details.catene summary { cursor: pointer; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--attenuato); }
+.catene-lista { display: grid; gap: 10px; }
+.catena { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; padding: 10px 14px; background: var(--superficie); border: 1px solid var(--bordo); border-radius: 10px; }
+.catena .nodo { min-width: 130px; max-width: 220px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--bordo); border-left: 5px solid var(--grigio); background: var(--superficie); font-size: 13px; overflow-wrap: anywhere; }
+.catena .nodo b { display: block; font-size: 13px; }
+.catena .nodo .stato, .catena .nodo .dove { display: block; font-size: 12px; color: var(--attenuato); }
+.catena .nodo .dove { color: var(--testo); }
+.catena .nodo.stato-unita { border-left-color: var(--verde); }
+.catena .nodo.stato-lavorazione { border-left-color: var(--ambra); }
+.catena .nodo.stato-coda { border-left-color: var(--grigio); }
+.catena .freccia { align-self: center; color: var(--attenuato); font-size: 18px; }
+.legenda { list-style: none; margin: 12px 0 0; padding: 0; font-size: 12px; color: var(--attenuato); }
+.legenda li { display: flex; align-items: baseline; gap: 8px; margin: 4px 0; }
+.campione { flex: none; width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--bordo); transform: translateY(2px); }
+.campione.att-sblocca { background: var(--sblocca-sfondo); border-color: var(--sblocca-testo); }
+.campione.att-rispondi { background: var(--rispondi-sfondo); border-color: var(--rispondi-testo); }
+.campione.att-prova { background: var(--prova-sfondo); border-color: var(--prova-testo); }
+.campione.att-rilascia { background: var(--rilascia-sfondo); border-color: var(--rilascia-testo); }
+.campione.stato-unita { background: var(--verde); border-color: var(--verde); }
+.campione.stato-lavorazione { background: var(--ambra); border-color: var(--ambra); }
+.campione.stato-coda { background: var(--superficie); border-color: var(--grigio); }
+@media (max-width: 480px) { main { padding: 14px 10px 32px; } h1 { font-size: 24px; } }.ev { background: var(--superficie); border: 1px solid var(--bordo); border-left: 4px solid var(--grigio); border-radius: 8px; padding: 7px 10px; margin: 6px 0; overflow-wrap: anywhere; }
+.ev pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.ev.testo { border-left-color: var(--accento); }
+.ev.testo pre { font: inherit; }
+.ev.strumento { border-left-color: var(--ambra); }
+.ev.risultato { border-left-color: var(--grigio); background: var(--codice-sfondo); color: var(--attenuato); }
+.ev.esito { border-left-color: var(--verde); }
+.ev.errore { border-left-color: var(--rosso); }
+.ev .taglio { display: block; margin-top: 4px; font-size: 12px; font-style: italic; color: var(--attenuato); }
+.ev .tipo { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--attenuato); }
+.ripresa { margin: 14px 0 6px; padding-top: 6px; border-top: 2px dashed var(--bordo); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--attenuato); }</style>
+</head>
+<body>
+<main>
+<h1><span class="num">#5</span>Importare le stime dal foglio Excel</h1>
+<div><span class="chip">Acme.AI</span><span class="chip">dev</span></div>
+<div class="meta">task <b>55</b> Scrivere il parser</div>
+<div class="meta">34 min &middot; 18.8k token</div>
+<h2>Stream</h2>
+<div class="ev testo"><pre>Parto dal parser: leggo il file e poi lancio i test.</pre></div>
+<div class="ev strumento"><span class="tipo">strumento</span> <b>Read</b><pre>file_path: C:/repo/src/Importa.ps1</pre></div>
+<div class="ev risultato"><span class="tipo">risultato</span><pre>function Import-Stime {
+    param($Percorso)
+}</pre></div>
+<div class="ev strumento"><span class="tipo">strumento</span> <b>Bash</b><pre>command: npm test
+description: Lancia i test</pre></div>
+<div class="ev strumento"><span class="tipo">strumento</span> <b>Edit</b><pre>file_path: C:/repo/src/Importa.ps1</pre></div>
+</main>
+<script>
+(function () { var k = 'scorri:' + location.pathname, v = null;
+  try { history.scrollRestoration = 'manual'; v = sessionStorage.getItem(k); } catch (e) {}
+  var fondo = function () { return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40; };
+  window.scrollTo(0, (v === null || v === 'fondo') ? document.documentElement.scrollHeight : (parseInt(v, 10) || 0));
+  window.addEventListener('scroll', function () { try { sessionStorage.setItem(k, fondo() ? 'fondo' : String(window.scrollY)); } catch (e) {} });
+})();
+</script>
+</body>
+</html>

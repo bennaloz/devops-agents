@@ -1,0 +1,24 @@
+{
+  "intervalloMinuti": 5,
+  "minutiSenzaGiro": 10,
+  "erroriDiFilaPerCard": 5,
+  "oreSenzaMovimento": 6,
+  "minutiInCoda": 60,
+  "minutiFraRiavviiVista": 60,
+  "oreRicordoUrgente": 4,
+  "orariRiepilogo": ["08:30", "14:00"],
+  "diagnosiAlGiorno": 3,
+  "giorniPreavvisoPat": 7,
+  "timeoutVistaSecondi": 60,
+  "minutiControlloAggiornamenti": 30,
+  "oreAttesaAggiornamento": 6,
+  "pipelineRilanciabili": [],
+  "rilasci": { "predefinito": { "card": 5, "giorni": 7 }, "perArea": {} },
+  "urlVista": "http://localhost:18799/vista.html",
+  "testiInfrastruttura": [
+    "lost communication with the server",
+    "LocalDB",
+    "Timeout expired",
+    "agent .* was not found"
+  ]
+}

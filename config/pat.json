@@ -1,0 +1,11 @@
+{
+  "durataGiorni": 90,
+  "smistatore": {
+    "nome": "DevOps.Agents smistatore",
+    "scope": ["vso.work_write", "vso.code_write", "vso.build_execute", "vso.agentpools"]
+  },
+  "solaLettura": {
+    "nome": "DevOps.Agents sola lettura",
+    "scope": ["vso.build", "vso.code"]
+  }
+}

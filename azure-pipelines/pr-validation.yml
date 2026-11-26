@@ -1,0 +1,32 @@
+trigger: none
+pr: none
+# Si aggancia con una Build Validation branch policy su develop (il trigger pr: nello YAML non vale su Azure Repos).
+# Pool dalle variabili prPool/prImage della definizione, come le pr-validation di Acme.AI: non definirle qui,
+# vincerebbero su quelle della definizione. Cloud: prPool = Azure Pipelines, prImage = windows-latest.
+# Serve PowerShell 7 (pwsh) su Windows: c'e' sull'immagine di Microsoft; su un agente on-prem va installato.
+# La suite dura circa 10 minuti (Vista.Tests e Worktree.Tests da soli ~6).
+pool:
+  name: $(prPool)
+  vmImage: $(prImage)
+
+jobs:
+- job: validazione
+  displayName: Validazione PR
+  timeoutInMinutes: 40
+  steps:
+  - checkout: self
+    displayName: Checkout repo
+  # Ogni step fallisce al primo rosso e i successivi non partono: dal piu' economico al piu' lento.
+  - pwsh: ./ci/Invoke-PrValidation.ps1 -Step Analyzer
+    displayName: Analisi statica (PSScriptAnalyzer)
+  - pwsh: ./ci/Invoke-PrValidation.ps1 -Step Hooks
+    displayName: Test degli hook
+  - pwsh: ./ci/Invoke-PrValidation.ps1 -Step Pester -ResultsPath '$(Build.SourcesDirectory)/TestResults/pester.xml'
+    displayName: Test Pester
+  - task: PublishTestResults@2
+    displayName: Pubblica risultati test
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFormat: NUnit
+      testResultsFiles: '$(Build.SourcesDirectory)/TestResults/pester.xml'
+      failTaskOnFailedTests: true

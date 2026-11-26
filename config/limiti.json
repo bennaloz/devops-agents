@@ -1,0 +1,16 @@
+{
+  "sessioniAttive": 3,
+  "cardInSviluppoPerRepo": 1,
+  "cardInTestPerComponente": 1,
+  "giriRevisione": 2,
+  "giriCollaudo": 2,
+  "rosseDiFila": 3,
+  "silenzioMinuti": 45,
+  "validazioneMinuti": 60,
+  "intervalloMinuti": 2,
+  "sogliaResumeMinuti": 0,
+  "sogliaQuotaSettimanale": 0.70,
+  "margineQuotaMinuti": 5,
+  "tettoMemoria": 25,
+  "funzionalitaAttive": true
+}

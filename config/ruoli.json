@@ -1,0 +1,55 @@
+{
+  "responsabile": {
+    "modello": "opus",
+    "sforzo": "high",
+    "advisor": "fable",
+    "brief": "ruoli/responsabile.md",
+    "strumenti": ["Read", "Grep", "Glob", "PowerShell", "Skill"],
+    "transizioni": [
+      ["nuova", "pronto"],
+      ["nuova", "daChiarire"],
+      ["daChiarire", "pronto"],
+      ["inSviluppo", "daChiarire"],
+      ["inCollaudo", "daUnire"],
+      ["inCollaudo", "inSviluppo"],
+      ["inProvaUmana", "daUnire"],
+      ["inProvaUmana", "inSviluppo"]
+    ]
+  },
+  "dev": {
+    "modello": "opus",
+    "sforzo": "medium",
+    "advisor": "fable",
+    "brief": "ruoli/dev.md",
+    "strumenti": ["Read", "Write", "Edit", "Grep", "Glob", "PowerShell", "Skill"],
+    "transizioni": []
+  },
+  "collaudatore": {
+    "modello": "opus",
+    "sforzo": "medium",
+    "brief": "ruoli/collaudatore.md",
+    "strumenti": ["Read", "Grep", "Glob", "PowerShell", "Skill"],
+    "transizioni": []
+  },
+  "reviewer": {
+    "modello": "opus",
+    "sforzo": "high",
+    "brief": "ruoli/reviewer.md",
+    "strumenti": ["Read", "Grep", "Glob", "PowerShell", "Skill"],
+    "transizioni": []
+  },
+  "mentore": {
+    "modello": "opus",
+    "sforzo": "high",
+    "brief": "ruoli/mentore.md",
+    "strumenti": ["Read", "Grep", "Glob", "PowerShell", "Skill"],
+    "transizioni": []
+  },
+  "supervisore": {
+    "modello": "sonnet",
+    "sforzo": "medium",
+    "brief": "ruoli/supervisore.md",
+    "strumenti": ["Read", "Grep", "Glob", "PowerShell"],
+    "transizioni": []
+  }
+}

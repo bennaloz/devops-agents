@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="10">
+<title>Agenti</title>
+<style>:root {
+  --sfondo: #f4f5f7; --superficie: #ffffff; --testo: #1d2430; --attenuato: #667085; --bordo: #dde1e8;
+  --accento: #2557d6; --accento-sfondo: #e8eefc;
+  --verde: #1f9d55; --ambra: #c77a06; --rosso: #d03b3b; --grigio: #8a93a3;
+  --codice-sfondo: #f0f2f6;
+  --sblocca-sfondo: #fde8e8; --sblocca-testo: #8a1f1f; --rispondi-sfondo: #efe7fb; --rispondi-testo: #4b2a8a;
+  --prova-sfondo: #fdf0d5; --prova-testo: #7a4a00; --rilascia-sfondo: #dcf5f1; --rilascia-testo: #0b5c52;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sfondo: #12151b; --superficie: #1b2029; --testo: #e6e9ef; --attenuato: #98a1b3; --bordo: #2c3341;
+    --accento: #7ba3ff; --accento-sfondo: #1d2a49;
+    --verde: #3ec47c; --ambra: #e9a23b; --rosso: #f06a6a; --grigio: #7b8498;
+    --codice-sfondo: #141922;
+    --sblocca-sfondo: #3a1c1c; --sblocca-testo: #f6b4b4; --rispondi-sfondo: #2c2144; --rispondi-testo: #d2bdf7;
+    --prova-sfondo: #3a2c10; --prova-testo: #f3cf8a; --rilascia-sfondo: #12332f; --rilascia-testo: #8fe0d4;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--sfondo); color: var(--testo); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { padding: 20px 16px 48px; }
+h1 { margin: 0; font-size: 28px; letter-spacing: -0.01em; }
+.sotto { margin: 4px 0 18px; color: var(--attenuato); font-size: 13px; }
+h2 { margin: 28px 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--attenuato); }
+h2 .conta, h3 .conta { display: inline-block; min-width: 22px; padding: 0 7px; margin-left: 6px; border-radius: 11px; background: var(--bordo); color: var(--testo); font-size: 12px; text-align: center; letter-spacing: 0; }
+h3 { margin: 16px 0 8px; font-size: 14px; }
+.avviso { margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--ambra); border-left-width: 5px; background: var(--superficie); color: var(--testo); }
+.vuoto { color: var(--attenuato); font-style: italic; }
+.kanban { display: grid; gap: 10px; align-items: start; overflow-x: auto; }
+.colonna { min-width: 0; background: color-mix(in srgb, var(--superficie) 55%, var(--sfondo)); border: 1px solid var(--bordo); border-radius: 10px; padding: 4px 10px 12px; }
+.colonna.pipeline { border-style: dashed; background: transparent; }
+.colonna h2 { margin: 10px 0 8px; }
+.colonna h3 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--attenuato); }
+.colonna .scheda { margin-bottom: 10px; }
+.giro-supervisore { margin: 0 0 10px; font-size: 13px; color: var(--attenuato); }
+.voce.problema { border-left: 3px solid var(--ambra); }
+.voce.problema.urgente { border-left-color: var(--rosso); background: color-mix(in srgb, var(--rosso) 10%, transparent); }
+.etichetta.urgente { background: var(--rosso); color: #fff; }
+.libero { margin: 0 0 10px; padding: 10px 12px; border: 1px dashed var(--bordo); border-radius: 8px; color: var(--attenuato); font-style: italic; }
+.scheda { background: var(--superficie); border: 1px solid var(--bordo); border-left: 5px solid var(--verde); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.scheda.pausa { border-left-color: var(--ambra); }
+.scheda h3 { margin: 0 0 8px; font-size: 15px; overflow-wrap: anywhere; }
+a.brief { margin-left: 8px; font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--accento); opacity: 0.8; }
+a.segui { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--accento); }
+.giro { margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.contatori { margin: -10px 0 14px; font-size: 13px; color: var(--attenuato); }
+.contatori b { color: var(--testo); font-variant-numeric: tabular-nums; }
+.giro button { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--accento); background: var(--accento-sfondo); color: var(--accento); font: inherit; font-weight: 600; cursor: pointer; }
+.giro button:disabled { opacity: 0.6; cursor: default; }
+#giro-esito { margin-left: 10px; font-size: 13px; color: var(--attenuato); }
+.num { color: var(--attenuato); font-weight: 600; margin-right: 4px; }
+/* i link alle card: neri e in grassetto come il testo; al passaggio del mouse si evidenziano (blu, sottolineati) */
+a.card, a.num { color: var(--testo); font-weight: 600; text-decoration: none; }
+a.card:hover, a.num:hover { color: var(--accento); text-decoration: underline; text-underline-offset: 2px; }
+a.card .num { color: inherit; }
+.voce a.card { font-weight: 600; }
+.riga-stato { margin: 4px 0 2px; font-size: 12.5px; color: var(--attenuato); }
+.riga-stato .campo { font-weight: 600; }
+.riga-stato .stato-board { white-space: normal; }
+.nodo a.num { margin-right: 0; }
+.chip { display: inline-block; margin: 0 6px 6px 0; padding: 1px 9px; border-radius: 10px; border: 1px solid var(--bordo); font-size: 12px; color: var(--attenuato); }
+.meta { margin: 4px 0; font-size: 13px; color: var(--attenuato); overflow-wrap: anywhere; }
+.meta b { color: var(--testo); font-weight: 600; }
+.pallino { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; background: var(--grigio); vertical-align: baseline; }
+.pallino.viva { background: var(--verde); box-shadow: 0 0 0 3px color-mix(in srgb, var(--verde) 25%, transparent); }
+.barra { height: 6px; margin: 8px 0 2px; border-radius: 3px; background: var(--bordo); overflow: hidden; }
+.barra span { display: block; height: 100%; background: var(--verde); }
+.etichetta-barra { font-size: 12px; color: var(--attenuato); }
+pre.testo-lezione { margin: 6px 0 2px; padding: 8px 10px; border-radius: 6px; background: var(--codice-sfondo); color: var(--testo); font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+details.lezione > summary, details.stabili > summary { cursor: pointer; }
+details.stabili { margin: 0 0 12px; }
+details.stabili > summary .conta { margin-left: 6px; }
+pre.azioni { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--codice-sfondo); color: var(--attenuato); font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.voce { background: var(--superficie); border: 1px solid var(--bordo); border-left: 4px solid var(--grigio); border-radius: 8px; padding: 7px 10px; margin: 6px 0; font-size: 14px; overflow-wrap: anywhere; }
+.voce .azione { display: block; margin-top: 6px; }
+.voce .motivo { display: block; font-size: 13px; color: var(--attenuato); white-space: pre-line; }
+.voce .stato { font-size: 12px; color: var(--attenuato); }
+.aspetta { margin: 8px 0 2px; padding: 8px 10px; border: 1px solid var(--bordo); border-left: 4px solid var(--ambra); border-radius: 8px; background: var(--codice-sfondo); font-size: 14px; line-height: 1.35; }
+.aspetta.persona { border-color: var(--sblocca-testo); background: var(--sblocca-sfondo); }
+.aspetta ul { margin: 0; padding: 0; list-style: none; }
+.aspetta li + li { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--bordo); }
+.aspetta-testo { display: block; font-weight: 600; color: var(--testo); }
+.aspetta-testo .num { font-weight: 700; }
+.aspetta-stato { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 5px; }
+.aspetta-stato .stato-board { white-space: normal; max-width: 100%; }
+.aspetta-stato .campo { font-size: 12.5px; font-weight: 600; color: var(--attenuato); }
+.stato-board { display: inline-block; padding: 1px 10px; border-radius: 10px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.stato-board.analisi, .stato-board.altro { background: color-mix(in srgb, var(--grigio) 22%, transparent); color: var(--testo); }
+.stato-board.sviluppo { background: var(--accento-sfondo); color: var(--accento); }
+.stato-board.verifica { background: color-mix(in srgb, var(--ambra) 20%, transparent); color: var(--ambra); }
+.stato-board.unione { background: color-mix(in srgb, var(--verde) 18%, transparent); color: var(--verde); }
+.stato-board.rimossa { background: color-mix(in srgb, var(--rosso) 16%, transparent); color: var(--rosso); }
+.aspetta .gesto { display: block; margin-top: 6px; font-weight: 700; color: var(--sblocca-testo); }
+.aspetta .gesto::before { content: "\2192  "; }
+.pipeline .voce { border-left-color: var(--bordo); font-size: 13px; overflow-wrap: break-word; hyphens: auto; }
+.pipeline .voce .titolo { display: block; font-weight: 600; }
+.etichetta { display: inline-block; margin: 0 6px 4px 0; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.fase { font-size: 12px; color: var(--attenuato); }
+.pr { margin: 4px 0; font-size: 12px; color: var(--attenuato); }
+.pr .pr-stato { font-weight: 600; }
+.pr-verde .pr-stato { color: var(--verde); }
+.pr-rossa .pr-stato { color: var(--rosso); }
+.pr-inCorso .pr-stato, .pr-scaduta .pr-stato, .pr-conflitti .pr-stato { color: var(--ambra); }
+.pr a { color: var(--accento); }
+.att-sblocca { background: var(--sblocca-sfondo); color: var(--sblocca-testo); }
+.att-rispondi { background: var(--rispondi-sfondo); color: var(--rispondi-testo); }
+.att-prova { background: var(--prova-sfondo); color: var(--prova-testo); }
+.att-rilascia { background: var(--rilascia-sfondo); color: var(--rilascia-testo); }
+.voce.att-sblocca, .voce.att-rispondi, .voce.att-prova, .voce.att-rilascia { border-left-width: 4px; }
+.voce.att-sblocca { border-left-color: var(--sblocca-testo); }
+.voce.att-rispondi { border-left-color: var(--rispondi-testo); }
+.voce.att-prova { border-left-color: var(--prova-testo); }
+.voce.att-rilascia { border-left-color: var(--rilascia-testo); }
+.voce.att-sblocca .motivo, .voce.att-rispondi .motivo, .voce.att-prova .motivo, .voce.att-rilascia .motivo, .voce.att-sblocca .fase, .voce.att-rispondi .fase, .voce.att-prova .fase, .voce.att-rilascia .fase { color: inherit; }
+.voce.att-rispondi .motivo { margin-top: 4px; line-height: 1.45; }
+.voce.att-rispondi .motivo b { display: inline-block; margin-top: 6px; }
+.proposta { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; opacity: .75; }
+.funzionalita { margin: 0 0 18px; padding: 9px 14px; border: 1px solid var(--bordo); border-left: 5px solid var(--verde); border-radius: 10px; background: var(--superficie); }
+.funzionalita h2 { margin: 0 0 10px; font-size: 15px; font-weight: 700; color: var(--testo); }
+.funzionalita h2 .pillola { margin-left: 6px; background: color-mix(in srgb, var(--verde) 18%, transparent); color: var(--verde); }
+.funzionalita h2 .nota { margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--attenuato); }
+.funzionalita-lista { display: grid; gap: 10px; }
+.funzionalita-voce { padding: 10px 14px; background: var(--superficie); border: 1px solid var(--bordo); border-radius: 10px; font-size: 13px; }
+.funzionalita-voce h3 { margin: 0 0 6px; font-size: 14px; }
+.funzionalita-voce h3 .stato, .funzionalita-voce .campo { font-size: 12.5px; font-weight: 600; color: var(--attenuato); }
+.funzionalita-voce .chiusura { margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--bordo); }
+.funzionalita-voce ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.funzionalita-voce .dove { margin-left: 6px; font-size: 12px; color: var(--testo); }
+details.catene { margin: 0 0 18px; padding: 9px 14px; border: 1px solid var(--bordo); border-left: 5px solid var(--accento); border-radius: 10px; background: var(--superficie); }
+details.catene summary { cursor: pointer; font-size: 15px; font-weight: 700; color: var(--testo); }
+details.catene summary .pillola { margin-left: 6px; background: var(--accento-sfondo); color: var(--accento); }
+details.catene summary .nota { margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--attenuato); }
+details.catene[open] summary { margin-bottom: 10px; }
+section.apprendimento { margin-top: 24px; }
+section.apprendimento h2 { margin-top: 0; }
+section.apprendimento h3 { margin: 16px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--attenuato); }
+section.apprendimento td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.catene-lista { display: grid; gap: 10px; }
+.catena { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; padding: 10px 14px; background: var(--superficie); border: 1px solid var(--bordo); border-radius: 10px; }
+.catena .nodo { min-width: 130px; max-width: 220px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--bordo); border-left: 5px solid var(--grigio); background: var(--superficie); font-size: 13px; overflow-wrap: anywhere; }
+.catena .nodo b { display: block; font-size: 13px; }
+.catena .nodo .stato, .catena .nodo .dove { display: block; font-size: 12px; color: var(--attenuato); }
+.catena .nodo .dove { color: var(--testo); }
+.catena .nodo.stato-unita { border-left-color: var(--verde); }
+.catena .nodo .spunta { color: var(--verde); font-weight: 700; }
+.catena .nodo.stato-lavorazione { border-left-color: var(--ambra); }
+.catena .nodo.stato-coda { border-left-color: var(--grigio); }
+.catena .freccia { align-self: center; color: var(--attenuato); font-size: 18px; }
+.legenda { list-style: none; margin: 12px 0 0; padding: 0; font-size: 12px; color: var(--attenuato); }
+.legenda li { display: flex; align-items: baseline; gap: 8px; margin: 4px 0; }
+.campione { flex: none; width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--bordo); transform: translateY(2px); }
+.campione.att-sblocca { background: var(--sblocca-sfondo); border-color: var(--sblocca-testo); }
+.campione.att-rispondi { background: var(--rispondi-sfondo); border-color: var(--rispondi-testo); }
+.campione.att-prova { background: var(--prova-sfondo); border-color: var(--prova-testo); }
+.campione.att-rilascia { background: var(--rilascia-sfondo); border-color: var(--rilascia-testo); }
+.campione.stato-unita { background: var(--verde); border-color: var(--verde); }
+.campione.stato-lavorazione { background: var(--ambra); border-color: var(--ambra); }
+.campione.stato-coda { background: var(--superficie); border-color: var(--grigio); }
+.build { margin-top: 0; }
+.build h2 { margin-top: 0; }
+.build-testa { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 12px; }
+.build-testa h1 { margin: 0; }
+a.build-pr { display: inline-block; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--accento); background: var(--accento-sfondo); color: var(--accento); font-weight: 600; text-decoration: none; }
+.orch { margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--accento); border-radius: 10px; background: var(--accento-sfondo); }
+.orch h3 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accento); }
+details.falliti { margin-top: 10px; }
+details.falliti summary { cursor: pointer; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--attenuato); }
+.schede { display: flex; gap: 4px; margin: 0 0 18px; border-bottom: 1px solid var(--bordo); }
+.schede button { padding: 8px 16px; border: 0; border-bottom: 3px solid transparent; background: none; color: var(--attenuato); font: inherit; font-weight: 600; cursor: pointer; }
+.schede button[aria-selected="true"] { color: var(--accento); border-bottom-color: var(--accento); }
+.schede .disposizione { display: flex; gap: 2px; margin-left: auto; align-self: center; padding: 2px; border: 1px solid var(--bordo); border-radius: 8px; }
+.schede .disposizione button { padding: 3px 10px; border: 0; border-radius: 6px; font-size: 13px; font-weight: 600; }
+.schede .disposizione button[aria-pressed="true"] { background: var(--accento); color: var(--superficie); }
+.pannelli > [data-pannello] { min-width: 0; }
+.pannelli[data-disposizione="affiancate"] { display: grid; grid-template-columns: minmax(0, var(--quota, 50%)) 16px minmax(0, 1fr); column-gap: 10px; align-items: start; }
+.pannelli[data-disposizione="affiancate"] > [data-pannello] { overflow-x: auto; }
+.pannelli[data-disposizione="affiancate"] [data-pannello="pipeline"] table { min-width: 760px; }
+.pannelli[data-disposizione="colonna"] > [data-pannello="agenti"] { height: var(--alto, auto); overflow: auto; }
+.divisore { display: none; position: relative; touch-action: none; }
+.divisore::before { content: ""; position: absolute; background: var(--bordo); border-radius: 2px; }
+.divisore::after { content: ""; position: absolute; border-radius: 4px; background: var(--attenuato); opacity: .55; }
+.divisore:hover::before, .divisore:focus-visible::before, body.trascina .divisore::before { background: var(--accento); }
+.divisore:focus-visible { outline: 2px solid var(--accento); outline-offset: 2px; }
+.pannelli[data-disposizione="affiancate"] > .divisore { display: block; align-self: stretch; cursor: col-resize; }
+.pannelli[data-disposizione="affiancate"] > .divisore::before { left: 7px; top: 0; bottom: 0; width: 2px; }
+.pannelli[data-disposizione="affiancate"] > .divisore::after { left: 5px; top: 120px; width: 6px; height: 44px; }
+.pannelli[data-disposizione="colonna"] > .divisore { display: block; height: 16px; margin: 14px 0; cursor: row-resize; }
+.pannelli[data-disposizione="colonna"] > .divisore::before { top: 7px; left: 0; right: 0; height: 2px; }
+.pannelli[data-disposizione="colonna"] > .divisore::after { top: 5px; left: calc(50% - 22px); width: 44px; height: 6px; }
+body.trascina { user-select: none; }
+@media (max-width: 1200px) { .pannelli[data-disposizione="affiancate"] { display: block; } .pannelli[data-disposizione="affiancate"] > .divisore { display: none; } .pannelli[data-disposizione="affiancate"] > [data-pannello="pipeline"] { margin-top: 28px; padding-top: 18px; border-top: 2px solid var(--bordo); } }
+.schede .conta { display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 6px; border-radius: 10px; background: var(--bordo); color: var(--testo); font-size: 12px; text-align: center; }
+.schede .conta.allarme { background: var(--rosso); color: #fff; }
+.schede .conta.attenzione { background: var(--ambra); color: #fff; }
+.build-riepilogo { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
+.build-riepilogo .dato { min-width: 120px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--bordo); background: var(--superficie); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--attenuato); }
+.build-riepilogo .dato b { display: block; font-size: 26px; line-height: 1.15; letter-spacing: 0; color: var(--testo); font-variant-numeric: tabular-nums; }
+.build-riepilogo .dato.attesa b { color: var(--ambra); }
+.build-riepilogo .dato.fallito b { color: var(--rosso); }
+.build h3 { margin: 22px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--attenuato); }
+.tabella { overflow-x: auto; border: 1px solid var(--bordo); border-radius: 10px; background: var(--superficie); }
+table.build-tab { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.build-tab th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--attenuato); border-bottom: 1px solid var(--bordo); white-space: nowrap; }
+table.build-tab td { padding: 8px 12px; border-bottom: 1px solid var(--bordo); vertical-align: top; }
+table.build-tab tr:last-child td { border-bottom: 0; }
+table.build-tab tbody tr[data-url] { cursor: pointer; }
+table.build-tab tbody tr:hover { background: color-mix(in srgb, var(--accento-sfondo) 50%, transparent); }
+table.build-tab td.prog, table.build-tab td.chi, table.build-tab td.dove { color: var(--attenuato); }
+table.build-tab td.chi { white-space: nowrap; }
+table.build-tab td.dove { white-space: nowrap; }
+table.build-tab td.nome { font-weight: 600; overflow-wrap: anywhere; }
+table.build-tab td.ramo { font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: nowrap; }
+table.build-tab td.azione { text-align: right; white-space: nowrap; }
+table.build-tab td.azione a { color: var(--accento); font-weight: 600; text-decoration: none; }
+table.build-tab td.azione a:hover { text-decoration: underline; }
+.pillola { display: inline-block; padding: 1px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--codice-sfondo); color: var(--attenuato); }
+.pillola.inCorso { background: var(--accento-sfondo); color: var(--accento); }
+.pillola.inCorso::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: currentColor; vertical-align: 1px; animation: vista-pulsa 1.6s ease-in-out infinite; }
+@keyframes vista-pulsa { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pillola.inCorso::before { animation: none; } }
+.pillola.inCoda { background: var(--codice-sfondo); color: var(--testo); border: 1px dashed var(--grigio); }
+.pillola.inAttesa { background: var(--prova-sfondo); color: var(--prova-testo); font-weight: 700; }
+.pillola.rosso { background: color-mix(in srgb, var(--rosso) 16%, transparent); color: var(--rosso); }
+.pillola.verde { background: color-mix(in srgb, var(--verde) 18%, transparent); color: var(--verde); }
+.pillola.ambra { background: color-mix(in srgb, var(--ambra) 20%, transparent); color: var(--ambra); }
+tr.in-attesa td { background: color-mix(in srgb, var(--prova-sfondo) 55%, transparent); }
+.agente { display: inline-block; padding: 1px 9px; border-radius: 10px; border: 1px solid var(--bordo); font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--attenuato); }
+.agente.cloud { color: var(--accento); border-color: var(--accento); background: var(--accento-sfondo); }
+.agente.interno { color: var(--rilascia-testo); border-color: var(--rilascia-testo); background: var(--rilascia-sfondo); }
+.agente.misto { color: var(--rispondi-testo); border-color: var(--rispondi-testo); background: var(--rispondi-sfondo); }
+.agente.stimato { border-style: dashed; opacity: .8; }
+.tipo { display: inline-block; padding: 0 8px; border-radius: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; background: var(--codice-sfondo); color: var(--attenuato); }
+.tipo.rilascio { background: var(--accento-sfondo); color: var(--accento); }
+.tipo.pr { background: var(--rispondi-sfondo); color: var(--rispondi-testo); }
+.tipo.ci { background: var(--rilascia-sfondo); color: var(--rilascia-testo); }
+table.build-tab td.numero { font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--attenuato); white-space: nowrap; }
+table.build-tab td.numero .build-id { display: block; font-size: 13px; color: var(--testo); }
+table.build-tab td.numero .versione { display: block; font-size: 11px; }
+.comp { display: inline-block; margin: 0 4px 3px 0; padding: 1px 8px; border-radius: 10px; background: var(--codice-sfondo); color: var(--testo); font-size: 12px; }
+.agenti-pool { margin: 0 0 16px; }
+.agenti-pool h3 { margin: 0 0 8px; }
+.pool-lista { display: flex; flex-wrap: wrap; gap: 10px; }
+.pool { min-width: 260px; padding: 8px 12px; border: 1px solid var(--bordo); border-radius: 10px; background: var(--superficie); }
+.pool h4 { margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--bordo); font-size: 14px; }
+.pool ul { padding-left: 4px !important; }
+.etichetta-tipo { display: inline-block; min-width: 46px; padding: 0 6px; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; text-align: center; vertical-align: 1px; }
+.etichetta-tipo.pool { background: var(--testo); color: var(--superficie); }
+.etichetta-tipo.agente { background: var(--codice-sfondo); color: var(--attenuato); border: 1px solid var(--bordo); }
+.pool ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.pool li { margin: 4px 0; }
+.pool li a { color: var(--accento); }
+.filtri { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+.filtri button { padding: 4px 12px; border-radius: 16px; border: 1px solid var(--bordo); background: var(--superficie); color: var(--testo); font: inherit; font-size: 13px; cursor: pointer; }
+.filtri button[aria-pressed="true"] { border-color: var(--accento); background: var(--accento-sfondo); color: var(--accento); font-weight: 600; }
+.filtri .conta { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: var(--bordo); color: var(--testo); font-size: 11px; text-align: center; }
+.da-approvare { margin: 0 0 18px; padding: 10px 12px 12px; border: 1px solid var(--prova-testo); border-left-width: 5px; border-radius: 10px; background: var(--prova-sfondo); }
+.da-approvare h3 { margin: 0 0 8px; color: var(--prova-testo); }
+.da-approvare .tabella { background: var(--superficie); }
+.da-approvare td.azione a { color: var(--prova-testo); }
+details.progetto { margin: 0 0 18px; }
+details.progetto > summary { list-style: none; cursor: pointer; }
+details.progetto > summary::-webkit-details-marker { display: none; }
+details.progetto > summary h3::before { content: '\25BE'; display: inline-block; width: 14px; color: var(--attenuato); }
+details.progetto:not([open]) > summary h3::before { content: '\25B8'; }
+details.progetto h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 20px 0 8px; font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--testo); }
+details.progetto details.falliti { margin-top: 8px; }
+details.progetto details.falliti .tabella { margin-top: 6px; }
+.tag-rilascio { display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; background: var(--accento-sfondo); color: var(--accento); }
+.fase-run { white-space: nowrap; }
+@media (max-width: 480px) { main { padding: 14px 10px 32px; } h1 { font-size: 24px; } }</style>
+</head>
+<body>
+<main data-generata="2026-11-24T16:48:44.5099124+01:00">
+<div class="schede" role="tablist"><button type="button" role="tab" data-scheda="agenti" aria-selected="true">Agenti</button><button type="button" role="tab" data-scheda="pipeline" aria-selected="false">Pipeline<span class="conta attenzione" title="in attesa di approvazione">1</span></button><button type="button" role="tab" data-scheda="apprendimento" aria-selected="false">Apprendimento<span class="conta attenzione" title="lezioni in prova in attesa di conferma">2</span></button><span class="disposizione" role="group" aria-label="Disposizione"><button type="button" data-disposizione="schede" aria-pressed="true" title="una scheda alla volta">Schede</button><button type="button" data-disposizione="affiancate" aria-pressed="false" title="Agenti e Pipeline uno accanto all&#39;altro (l&#39;Apprendimento sotto)">Affiancate</button><button type="button" data-disposizione="colonna" aria-pressed="false" title="Agenti sopra, Pipeline sotto (e l&#39;Apprendimento)">In colonna</button></span></div>
+<div class="pannelli" data-disposizione="schede">
+<div data-pannello="agenti" role="tabpanel">
+<h1>Agenti</h1>
+<p class="sotto">Generata alle 2026-11-24 16:48:44 &middot; Ultimo giro dello smistatore 2026-11-24 10:02:03 &middot; prossimo 2026-11-18 10:04</p>
+<p class="contatori">Pagina: si ricarica fra <b id="conta-pagina" data-secondi="10">10 s</b> &middot; Smistatore: parte fra <b id="conta-smistatore" data-quando="2026-11-18T10:04:00.0000000+01:00">&hellip;</b></p>
+<details class="catene"><summary>Catene delle card<span class="pillola">1</span><span class="nota">le card che aspettano altre card: clic per aprire</span></summary><div class="catene-lista">
+<div class="catena"><div data-id="10" class="nodo stato-unita"><b><span class="spunta" role="img" aria-label="unita">&#10003;</span> <a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/10" target="_blank" rel="noopener"><span class="num">#10</span></a></b><span class="stato">Closed</span><span class="dove">unita</span></div><span class="freccia">&rarr;</span><div data-id="12" class="nodo stato-lavorazione"><b><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/12" target="_blank" rel="noopener"><span class="num">#12</span> Titolo della card 12</a></b><span class="stato">Ready to merge</span><span class="dove">pipeline</span></div><span class="freccia">&rarr;</span><div data-id="13" class="nodo stato-coda"><b><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/13" target="_blank" rel="noopener"><span class="num">#13</span> Titolo della card 13</a></b><span class="stato">Ready to develop</span><span class="dove">in coda per dev</span></div><span class="freccia">&rarr;</span><div data-id="17" class="nodo stato-coda"><b><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/17" target="_blank" rel="noopener"><span class="num">#17</span> Rapporto finale delle stime</a></b><span class="stato">New</span><span class="dove">in coda per responsabile</span></div><span class="freccia">&rarr;</span><div data-id="18" class="nodo stato-coda"><b><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/18" target="_blank" rel="noopener"><span class="num">#18</span> Titolo della card 18</a></b><span class="stato">New</span><span class="dove">in coda per responsabile</span></div></div>
+</div><ul class="legenda"><li><span class="campione stato-unita"></span><span>unita: il suo lavoro e in develop</span></li><li><span class="campione stato-lavorazione"></span><span>in lavorazione: ha un ramo che avanza o una sessione</span></li><li><span class="campione stato-coda"></span><span>in coda: non e ancora partita</span></li></ul></details>
+<script>
+(function () { var d = document.querySelector('details.catene'); if (!d) return;
+  try { if (sessionStorage.getItem('catene-aperte') === '1') d.open = true; } catch (e) {}
+  d.addEventListener('toggle', function () { try { sessionStorage.setItem('catene-aperte', d.open ? '1' : '0'); } catch (e) {} });
+})();
+</script>
+<section class="funzionalita"><h2>Funzionalita<span class="pillola">1</span><span class="nota">le card sotto la loro Feature, con lo stato della card di chiusura</span></h2><div class="funzionalita-lista">
+<div class="funzionalita-voce" data-feature="70"><h3>Feature <a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/70" target="_blank" rel="noopener"><span class="num">#70</span> Esportare le stime in PDF</a> <span class="stato">Active</span></h3><div class="chiusura" data-id="62"><span class="campo">Card di chiusura:</span> <a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/62" target="_blank" rel="noopener"><span class="num">#62</span></a> <span class="stato-board analisi">Draft</span><span class="dove">tocca a te: Sblocca</span></div><ul><li data-id="60"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/60" target="_blank" rel="noopener"><span class="num">#60</span> Titolo della card 60</a> <span class="stato-board unione">In feature branch</span><span class="dove">pipeline</span></li><li data-id="61"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/61" target="_blank" rel="noopener"><span class="num">#61</span> Titolo della card 61</a> <span class="stato-board unione">In feature branch</span><span class="dove">pipeline</span></li></ul></div>
+</div></section>
+<div class="kanban" style="grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) minmax(190px,1.2fr) minmax(170px,0.8fr)">
+<section class="colonna" data-colonna="responsabile"><h2>Responsabile<span class="conta">0</span> <a class="brief" href="brief-responsabile.html" target="_blank" rel="noopener">brief</a></h2>
+<p class="libero">libero</p>
+<h3>In coda<span class="conta">2</span></h3>
+<div class="voce" data-id="17"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/17" target="_blank" rel="noopener"><span class="num">#17</span> Rapporto finale delle stime</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board analisi">New</span></div><div class="aspetta"><ul><li><span class="aspetta-testo">Aspetta la card <a class="num" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/13" target="_blank" rel="noopener">#13</a></span><span class="aspetta-stato"><span class="campo">Stato:</span><span class="stato-board sviluppo">Ready to develop</span></span></li></ul></div></div>
+<div class="voce" data-id="18"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/18" target="_blank" rel="noopener"><span class="num">#18</span> Titolo della card 18</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board analisi">New</span></div><div class="aspetta"><ul><li><span class="aspetta-testo">Aspetta la card <a class="num" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/17" target="_blank" rel="noopener">#17</a></span><span class="aspetta-stato"><span class="campo">Stato:</span><span class="stato-board analisi">New</span></span></li></ul></div></div>
+</section>
+<section class="colonna" data-colonna="dev"><h2>Dev<span class="conta">1</span> <a class="brief" href="brief-dev.html" target="_blank" rel="noopener">brief</a></h2>
+<article class="scheda" data-id="5"><h3><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/5" target="_blank" rel="noopener"><span class="num">#5</span> Importare le stime dal foglio Excel</a> <a class="segui" href="sessione-sid-1.html" target="_blank" rel="noopener">segui</a></h3><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board sviluppo">In development</span></div><div><span class="chip">Acme.AI</span><span class="chip">dev</span></div><div class="meta">task <b>55</b> Scrivere il parser</div><div class="meta"><span class="pallino viva"></span>processo vivo &middot; 34 min &middot; 18.8k token</div><div class="pr pr-rossa"><a href="https://acme.visualstudio.com/Acme.AI/_git/Acme.AI/pullrequest/105" target="_blank" rel="noopener">PR #105</a> <span class="pr-stato">rossa</span> &middot; <a href="https://log/9" target="_blank" rel="noopener">log</a></div><div class="barra" role="img" aria-label="2 task chiusi su 3"><span style="width:66%"></span></div><div class="etichetta-barra">2/3 task</div><pre class="azioni">- Read: C:/repo/src/Importa.ps1
+- Bash: Lancia i test
+- Edit: C:/repo/src/Importa.ps1</pre></article>
+<h3>In coda<span class="conta">1</span></h3>
+<div class="voce" data-id="13"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/13" target="_blank" rel="noopener"><span class="num">#13</span> Titolo della card 13</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board sviluppo">Ready to develop</span></div><div class="aspetta"><ul><li><span class="aspetta-testo">Aspetta la card <a class="num" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/12" target="_blank" rel="noopener">#12</a></span><span class="aspetta-stato"><span class="campo">Stato:</span><span class="stato-board unione">Ready to merge</span></span></li></ul></div><div class="barra" role="img" aria-label="0 task chiusi su 1"><span style="width:0%"></span></div><div class="etichetta-barra">0/1 task</div></div>
+</section>
+<section class="colonna" data-colonna="reviewer"><h2>Reviewer<span class="conta">1</span> <a class="brief" href="brief-reviewer.html" target="_blank" rel="noopener">brief</a></h2>
+<article class="scheda" data-id="8"><h3><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/8" target="_blank" rel="noopener"><span class="num">#8</span> Esportare il riepilogo in PDF</a> <a class="segui" href="sessione-sid-8.html" target="_blank" rel="noopener">segui</a></h3><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board verifica">In review</span></div><div><span class="chip">Acme.AI</span><span class="chip">reviewer</span></div><div class="meta"><span class="pallino viva"></span>processo vivo &middot; 6 min</div><pre class="azioni">- Grep</pre></article>
+</section>
+<section class="colonna" data-colonna="collaudatore"><h2>Collaudatore<span class="conta">0</span> <a class="brief" href="brief-collaudatore.html" target="_blank" rel="noopener">brief</a></h2>
+<p class="libero">libero</p>
+<h3>In coda<span class="conta">1</span></h3>
+<div class="voce" data-id="23"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/23" target="_blank" rel="noopener"><span class="num">#23</span> Titolo della card 23</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board verifica">Automated test</span></div><span class="motivo">parte al prossimo giro</span><div class="pr pr-inCorso"><a href="https://acme.visualstudio.com/Acme.Workflow/_git/Acme.Workflow/pullrequest/123" target="_blank" rel="noopener">PR #123</a> <span class="pr-stato">in corso</span> &middot; <a href="https://log/7" target="_blank" rel="noopener">log</a></div></div>
+</section>
+<section class="colonna supervisore" data-colonna="supervisore"><h2>Supervisore<span class="conta">2</span> <a class="brief" href="brief-supervisore.html" target="_blank" rel="noopener">brief</a></h2>
+<p class="giro-supervisore">ultimo giro 2026-11-24 16:46:44 &middot; prossimo 2026-11-18 10:04</p>
+<div class="voce problema urgente" data-problema="pat"><span class="etichetta urgente">urgente</span> Il PAT di Azure DevOps scade fra 3 giorni</div>
+<div class="voce problema" data-problema="quota">La quota settimanale e al 80%</div>
+<h3>Diagnosi in corso<span class="conta">1</span></h3>
+<div class="voce diagnosi">La quota settimanale e al 80%</div>
+</section>
+<section class="colonna operatore" data-colonna="operatore"><h2>Operatore (tu)<span class="conta">5</span></h2>
+<h3>Fermano il flusso<span class="conta">4</span></h3>
+<div class="voce att-prova" data-attivita="prova" data-id="11"><span class="etichetta att-prova">Prova in Test</span> <span class="fase">prova in Test</span><br><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/11" target="_blank" rel="noopener"><span class="num">#11</span> Titolo della card 11</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board verifica">Human test</span></div><span class="motivo">Il deploy in Test e riuscito: la card aspetta la tua verifica.</span><div class="pr pr-verde"><a href="https://acme.visualstudio.com/Acme.AI/_git/Acme.AI/pullrequest/111" target="_blank" rel="noopener">PR #111</a> <span class="pr-stato">verde</span></div></div>
+<div class="voce att-rispondi" data-attivita="rispondi" data-id="14"><span class="etichetta att-rispondi">Rispondi</span> <span class="fase">analisi</span><br><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/14" target="_blank" rel="noopener"><span class="num">#14</span> Titolo della card 14</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board analisi">Needs clarification</span></div><span class="motivo"><b>D1. L export deve includere anche le stime scartate?</b>
+<span class="proposta">proposta:</span> a) Si, in un foglio a parte.
+<b>D2. Quale formato?</b>
+a) CSV
+b) PDF</span></div>
+<div class="voce att-sblocca" data-attivita="sblocca" data-id="21" data-on-hold="1"><span class="etichetta att-sblocca">Sblocca</span> <span class="fase">sviluppo</span><br><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/21" target="_blank" rel="noopener"><span class="num">#21</span> Titolo della card 21</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board sviluppo">In development</span></div><span class="motivo">in on-hold, togliendo il tag si riprende la sessione</span></div>
+<div class="voce att-sblocca" data-attivita="sblocca" data-id="62"><span class="etichetta att-sblocca">Sblocca</span> <span class="fase">analisi</span><br><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/62" target="_blank" rel="noopener"><span class="num">#62</span> Collaudo funzionalita: Esportare le stime in PDF</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board analisi">Draft</span></div><span class="motivo">la card di chiusura della funzionalita (#62) e in Draft e le sorelle sono tutte unite nel ramo: aspetta una persona che la porti in New</span><div class="aspetta persona"><span class="gesto">sposta la card #62 in New</span></div></div>
+<h3>Non fermano nessuno<span class="conta">1</span></h3>
+<div class="voce att-rilascia" data-attivita="rilascia" data-id="15"><span class="etichetta att-rilascia">Rilascia</span> <span class="fase">rilascio</span><br><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/15" target="_blank" rel="noopener"><span class="num">#15</span> Titolo della card 15</a><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board unione">Ready to release</span></div><span class="motivo">unita in develop: aspetta il rilascio in produzione</span></div>
+<ul class="legenda"><li><span class="campione att-sblocca"></span><span><b>Sblocca</b>: on-hold, un limite o un problema da sbloccare</span></li><li><span class="campione att-rispondi"></span><span><b>Rispondi</b>: responsabile ha fatto una domanda</span></li><li><span class="campione att-prova"></span><span><b>Prova in Test</b>: la prova tocca a una persona</span></li><li><span class="campione att-rilascia"></span><span><b>Rilascia</b>: pronta per la produzione</span></li></ul>
+</section>
+<section class="colonna pipeline" data-colonna="pipeline"><h2>Pipeline<span class="conta">4</span></h2>
+<div class="voce" data-id="12"><span class="titolo"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/12" target="_blank" rel="noopener"><span class="num">#12</span> Titolo della card 12</a></span><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board unione">Ready to merge</span></div></div>
+<div class="voce" data-id="19"><span class="titolo"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/19" target="_blank" rel="noopener"><span class="num">#19</span> Titolo della card 19</a></span><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board unione">Releasing</span></div></div>
+<div class="voce" data-id="60"><span class="titolo"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/60" target="_blank" rel="noopener"><span class="num">#60</span> Titolo della card 60</a></span><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board unione">In feature branch</span></div><span class="motivo">la card di chiusura della funzionalita (#62) e in Draft e le sorelle sono tutte unite nel ramo: aspetta una persona che la porti in New</span></div>
+<div class="voce" data-id="61"><span class="titolo"><a class="card" href="https://acme.visualstudio.com/DevOps.Agents/_workitems/edit/61" target="_blank" rel="noopener"><span class="num">#61</span> Titolo della card 61</a></span><div class="riga-stato"><span class="campo">Stato:</span> <span class="stato-board unione">In feature branch</span></div><span class="motivo">la card di chiusura della funzionalita (#62) e in Draft e le sorelle sono tutte unite nel ramo: aspetta una persona che la porti in New</span></div>
+</section>
+</div>
+</div>
+<div class="divisore" role="separator" tabindex="0" aria-label="Allarga o stringi i pannelli" title="Trascina per allargare o stringere; doppio clic per tornare com&#39;era"></div>
+<div data-pannello="pipeline" role="tabpanel">
+<section class="build" data-sezione="build"><div class="build-testa"><h1>Pipeline</h1><a class="build-pr" href="https://acme.visualstudio.com/_pulls" target="_blank" rel="noopener">Pull request di tutti i progetti &#8599;</a></div>
+<p class="sotto">Run di build di tutti i progetti dell'organizzazione &middot; letti alle 16:48:44 &middot; si rileggono ogni 60 s</p>
+<div class="build-riepilogo"><div class="dato"><b>2</b>in corso</div><div class="dato"><b>1</b>in coda</div><div class="dato attesa"><b>1</b>in attesa di approvazione</div><div class="dato fallito"><b>2</b>falliti nelle ultime 24 ore</div></div>
+
+<div class="filtri" role="group" aria-label="Filtra per stato (scelta multipla)" title="un clic aggiunge o toglie uno stato; Tutti li azzera"><button type="button" data-filtro="tutti" aria-pressed="true">Tutti<span class="conta">9</span></button><button type="button" data-filtro="inCorso" aria-pressed="false">In corso<span class="conta">2</span></button><button type="button" data-filtro="inCoda" aria-pressed="false">In coda<span class="conta">1</span></button><button type="button" data-filtro="inAttesa" aria-pressed="false">Da approvare<span class="conta">2</span></button><button type="button" data-filtro="fallito" aria-pressed="false">Falliti o annullati<span class="conta">3</span></button><button type="button" data-filtro="riuscito" aria-pressed="false">Riusciti<span class="conta">1</span></button></div>
+<div class="da-approvare" data-blocco="approvazioni"><h3>Da approvare<span class="conta">2</span></h3><div class="tabella"><table class="build-tab"><thead><tr><th>Progetto</th><th>Pipeline</th><th>Ramo</th><th>Approvazione per</th><th>In attesa</th><th></th></tr></thead><tbody><tr data-stato="inAttesa" data-build="4102" data-url="https://acme.visualstudio.com/Acme.Agenda/_build/results?buildId=4102"><td class="nome">Acme.Agenda</td><td>deploy-test</td><td class="ramo">develop</td><td><b>DeployTest</b></td><td class="dove">da 42 min</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Agenda/_build/results?buildId=4102" target="_blank" rel="noopener">apri e approva</a></td></tr>
+<tr data-stato="inAttesa" data-build="4201" data-url="https://acme.visualstudio.com/Acme.AI/_build/results?buildId=4201"><td class="nome">Acme.AI</td><td>release-orchestrator</td><td class="ramo">release/1.2</td><td><b>Prod</b></td><td class="dove">da 12 min</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.AI/_build/results?buildId=4201" target="_blank" rel="noopener">apri e approva</a></td></tr></tbody></table></div></div>
+<details class="progetto" data-progetto="Acme.Agenda" open><summary><h3>Acme.Agenda <span class="pillola inAttesa">1 da approvare</span></h3></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr class="in-attesa" data-stato="inAttesa" data-build="4102" data-url="https://acme.visualstudio.com/Acme.Agenda/_build/results?buildId=4102"><td><span class="pillola inAttesa">attende approvazione</span></td><td></td><td class="nome">deploy-test</td><td class="numero"><b class="build-id" title="build id">4102</b></td><td class="ramo">develop</td><td><span class="fase-run">approvazione per <b>DeployTest</b></span></td><td class="chi">Mario Rossi</td><td><span class="agente cloud" title="agente cloud: Azure Pipelines">&#9729; cloud</span></td><td class="dove">gira da 42 min</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Agenda/_build/results?buildId=4102" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+</details>
+<details class="progetto" data-progetto="Acme.AI" open><summary><h3>Acme.AI <span class="pillola inAttesa">1 da approvare</span></h3></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr class="in-attesa" data-stato="inAttesa" data-build="4201" data-url="https://acme.visualstudio.com/Acme.AI/_build/results?buildId=4201"><td><span class="pillola inAttesa">attende approvazione</span></td><td><span class="tipo rilascio">rilascio</span></td><td class="nome">release-orchestrator</td><td class="numero"><b class="build-id" title="build id">4201</b></td><td class="ramo">release/1.2</td><td><span class="comp">deployApi</span><span class="comp">deployWeb</span> <span class="fase-run">approvazione per <b>Prod</b></span></td><td class="chi">Mario Rossi</td><td></td><td class="dove">gira da 12 min</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.AI/_build/results?buildId=4201" target="_blank" rel="noopener">apri il run</a></td></tr>
+<tr data-stato="riuscito" data-build="4200" data-url="https://acme.visualstudio.com/Acme.AI/_build/results?buildId=4200"><td><span class="pillola verde">riuscito</span></td><td><span class="tipo rilascio">rilascio</span></td><td class="nome">release-orchestrator</td><td class="numero"><b class="build-id" title="build id">4200</b></td><td class="ramo">release/1.1</td><td><span class="comp">deployWeb</span></td><td class="chi">Mario Rossi</td><td></td><td class="dove">finito 24/11 11:57</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.AI/_build/results?buildId=4200" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+</details>
+<details class="progetto" data-progetto="Acme.Monitor" open><summary><h3>Acme.Monitor <span class="pillola inCorso">1 in corso</span> <span class="pillola rosso">1 falliti/annullati</span></h3></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr data-stato="inCorso" data-build="4101" data-url="https://acme.visualstudio.com/Acme.Monitor/_build/results?buildId=4101"><td><span class="pillola inCorso">in corso</span></td><td></td><td class="nome">build-ci</td><td class="numero"><b class="build-id" title="build id">4101</b></td><td class="ramo">feature/5-importa-stime</td><td><span class="fase-run">fase <b>Test</b></span></td><td class="chi">Paolo Rossi</td><td><span class="agente interno" title="agente interno: Self-Hosted">&#8962; interno</span></td><td class="dove">gira da 7 min</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Monitor/_build/results?buildId=4101" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+<details class="falliti"><summary>Falliti o annullati nelle ultime 24 ore<span class="conta">1</span></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr data-stato="fallito" data-build="4090" data-url="https://acme.visualstudio.com/Acme.Monitor/_build/results?buildId=4090"><td><span class="pillola rosso">fallito</span></td><td></td><td class="nome">build-ci</td><td class="numero"><b class="build-id" title="build id">4090</b></td><td class="ramo">feature/11-x</td><td></td><td class="chi">Paolo Rossi</td><td></td><td class="dove">finito 24/11 14:47</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Monitor/_build/results?buildId=4090" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+</details>
+</details>
+<details class="progetto" data-progetto="Acme.Portale" open><summary><h3>Acme.Portale <span class="pillola inCoda">1 in coda</span> <span class="pillola rosso">1 falliti/annullati</span></h3></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr data-stato="inCoda" data-build="4104" data-url="https://acme.visualstudio.com/Acme.Portale/_build/results?buildId=4104"><td><span class="pillola inCoda">in coda</span></td><td></td><td class="nome">pr-validation</td><td class="numero"><b class="build-id" title="build id">4104</b></td><td class="ramo">feature/8-pdf</td><td></td><td class="chi">Paolo Rossi</td><td></td><td class="dove">in coda da 3 min</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Portale/_build/results?buildId=4104" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+<details class="falliti"><summary>Falliti o annullati nelle ultime 24 ore<span class="conta">1</span></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr data-stato="fallito" data-build="4070" data-url="https://acme.visualstudio.com/Acme.Portale/_build/results?buildId=4070"><td><span class="pillola ambra">annullato</span></td><td></td><td class="nome">build-ci</td><td class="numero"><b class="build-id" title="build id">4070</b></td><td class="ramo">develop</td><td></td><td class="chi">Mario Rossi</td><td></td><td class="dove">finito 24/11 05:17</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Portale/_build/results?buildId=4070" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+</details>
+</details>
+<details class="progetto" data-progetto="Acme.Warehouse" open><summary><h3>Acme.Warehouse <span class="pillola inCorso">1 in corso</span> <span class="pillola rosso">1 falliti/annullati</span></h3></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr data-stato="inCorso" data-build="4103" data-url="https://acme.visualstudio.com/Acme.Warehouse/_build/results?buildId=4103"><td><span class="pillola inCorso">in corso</span></td><td></td><td class="nome">build-ci</td><td class="numero"><b class="build-id" title="build id">4103</b></td><td class="ramo">develop</td><td><span class="fase-run">fase <b>Build</b></span></td><td class="chi">Anna Verdi</td><td></td><td class="dove">gira da 1 h 35 min</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Warehouse/_build/results?buildId=4103" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+<details class="falliti"><summary>Falliti o annullati nelle ultime 24 ore<span class="conta">1</span></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Stato</th><th>Tipo</th><th>Pipeline</th><th>Run</th><th>Ramo</th><th>Dettaglio</th><th>Chi</th><th>Agente</th><th>Quando</th><th></th></tr></thead><tbody><tr data-stato="fallito" data-build="4080" data-url="https://acme.visualstudio.com/Acme.Warehouse/_build/results?buildId=4080"><td><span class="pillola rosso">fallito</span></td><td></td><td class="nome">pr-validation</td><td class="numero"><b class="build-id" title="build id">4080</b></td><td class="ramo">fix/9-y</td><td></td><td class="chi">Anna Verdi</td><td></td><td class="dove">finito 24/11 10:17</td><td class="azione"><a href="https://acme.visualstudio.com/Acme.Warehouse/_build/results?buildId=4080" target="_blank" rel="noopener">apri il run</a></td></tr></tbody></table></div>
+</details>
+</details>
+</section>
+</div>
+</div>
+<div data-pannello="apprendimento" role="tabpanel">
+<section class="apprendimento" data-sezione="apprendimento"><h2>Apprendimento</h2>
+<p class="sotto">Per ruolo e per settimana ISO (da lunedi), ultime 4 settimane intere piu quella in corso &middot; lezioni in prova lette alle 16:48:44</p>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Settimana</th><th>Ruolo</th><th>Blocchi</th><th>On-hold</th><th>Correzioni</th><th>Lezioni applicate</th></tr></thead><tbody><tr data-ruolo="dev" data-settimana="2026-W48"><td>2026-W48 <span class="dove">dal 2026-11-23</span></td><td>dev</td><td class="num">3</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+<tr data-ruolo="reviewer" data-settimana="2026-W48"><td>2026-W48 <span class="dove">dal 2026-11-23</span></td><td>reviewer</td><td class="num">0</td><td class="num">1</td><td class="num">0</td><td class="num">0</td></tr>
+<tr data-ruolo="dev" data-settimana="2026-W47"><td>2026-W47 <span class="dove">dal 2026-11-16</span></td><td>dev</td><td class="num">1</td><td class="num">0</td><td class="num">1</td><td class="num">1</td></tr>
+<tr data-ruolo="dev" data-settimana="2026-W46"><td>2026-W46 <span class="dove">dal 2026-11-09</span></td><td>dev</td><td class="num">1</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr></tbody></table></div>
+<h3>Lezioni che hanno evitato un blocco finora<span class="conta">1</span></h3>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Lezione</th><th>Ruolo</th><th>Applicata su</th></tr></thead><tbody><tr data-evitata="dev-001"><td><b>dev-001</b></td><td>dev</td><td>card 7</td></tr></tbody></table></div>
+<h3>Lezioni in prova in attesa di conferma<span class="conta">2</span></h3>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Id</th><th>Ruolo</th><th>Repo</th><th>Situazione (clic per leggerla)</th></tr></thead><tbody><tr data-lezione="dev-001"><td><b>dev-001</b></td><td>dev</td><td>comune</td><td><details class="lezione" data-ricorda="lezione-dev-001"><summary>Il test di integrazione non parte</summary><pre class="testo-lezione">### dev-001
+- Situazione: Il test di integrazione non parte
+- Cosa fare: Avvia prima il database di prova con docker compose up -d e aspetta che risponda sulla porta 5432, poi lancia i test.
+- Perch&#233;: Senza database la suite fallisce con un timeout che sembra un errore di rete.
+- Card: 5</pre></details></td></tr>
+<tr data-lezione="dev-002"><td><b>dev-002</b></td><td>dev</td><td>comune</td><td><details class="lezione" data-ricorda="lezione-dev-002"><summary>Il restore dei pacchetti fallisce dietro il proxy</summary><pre class="testo-lezione">### dev-002
+- Situazione: Il restore dei pacchetti fallisce dietro il proxy
+- Cosa fare: Imposta HTTPS_PROXY prima di dotnet restore e ripeti il comando una sola volta.
+- Perch&#233;: Il feed interno risponde solo dalla rete aziendale.
+- Card: 9</pre></details></td></tr></tbody></table></div>
+<h3>Lezioni stabili<span class="conta">2</span></h3>
+<details class="stabili" data-ruolo-stabili="dev" data-ricorda="stabili-dev" open><summary><b>dev</b><span class="conta">2</span></summary>
+<div class="tabella"><table class="build-tab"><thead><tr><th>Id</th><th>Repo</th><th>Situazione (clic per leggerla)</th></tr></thead><tbody><tr data-stabile="dev-003"><td><b>dev-003</b></td><td>comune</td><td><details class="lezione" data-ricorda="stabile-dev-003"><summary>La pipeline di build non trova la versione</summary><pre class="testo-lezione">### dev-003
+- Situazione: La pipeline di build non trova la versione
+- Cosa fare: Lancia scripts/Calculate-Version.ps1 con il nome del ramo, non con il commit.
+- Perch&#233;: Lo script ricava la fascia (alpha, beta, rc) dal nome del ramo.
+- Card: 12</pre></details></td></tr>
+<tr data-stabile="dev-004"><td><b>dev-004</b></td><td>comune</td><td><details class="lezione" data-ricorda="stabile-dev-004"><summary>Il commit viene rifiutato dall hook</summary><pre class="testo-lezione">### dev-004
+- Situazione: Il commit viene rifiutato dall hook
+- Cosa fare: Leggi il messaggio dell hook: chiede un prefisso Conventional Commits, correggi il titolo e ripeti.
+- Perch&#233;: L hook controlla il titolo prima di accettare il commit.
+- Card: 14</pre></details></td></tr></tbody></table></div>
+</details>
+</section>
+</div>
+<script>
+(function () {
+  var bottoni = document.querySelectorAll('.schede [data-scheda]');
+  var pannelli = document.querySelector('.pannelli');
+  var disposizione = 'schede';
+  var mostra = function (nome) {
+    bottoni.forEach(function (b) { b.setAttribute('aria-selected', b.dataset.scheda === nome ? 'true' : 'false'); b.hidden = disposizione !== 'schede'; });
+    document.querySelectorAll('[data-pannello]').forEach(function (p) { p.hidden = disposizione === 'schede' && p.dataset.pannello !== nome; });
+  };
+  var scelta = 'agenti';
+  try { scelta = sessionStorage.getItem('scheda') || 'agenti'; } catch (e) {}
+  if (location.hash === '#pipeline' || location.hash === '#agenti' || location.hash === '#apprendimento') { scelta = location.hash.substring(1); }
+  // un valore ricordato che non e una scheda (vecchio o sbagliato) ricade su agenti
+  if (['agenti', 'pipeline', 'apprendimento'].indexOf(scelta) < 0) { scelta = 'agenti'; }
+  // la disposizione: schede (una alla volta), affiancate o in colonna (tutte e due); resta in localStorage
+  var scelte = document.querySelectorAll('.disposizione [data-disposizione]');
+  var disponi = function (d) {
+    disposizione = d; if (pannelli) { pannelli.dataset.disposizione = d; }
+    scelte.forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.disposizione === d ? 'true' : 'false'); });
+    mostra(scelta);
+  };
+  try { var dd = localStorage.getItem('disposizione'); if (dd === 'affiancate' || dd === 'colonna') { disposizione = dd; } } catch (e) {}
+  scelte.forEach(function (b) { b.addEventListener('click', function () { disponi(b.dataset.disposizione); try { localStorage.setItem('disposizione', b.dataset.disposizione); } catch (e) {} }); });
+  disponi(disposizione);
+  // il divisore fra i due pannelli: trascinato allarga o stringe (affiancate: la quota a sinistra; in colonna: l'altezza degli
+  // Agenti), con le frecce va a scatti, doppio clic torna com'era. Le misure restano in localStorage, una per disposizione.
+  var divisore = document.querySelector('.divisore');
+  var leggiMisura = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  var salvaMisura = function (k, v) { try { if (v === null) { localStorage.removeItem(k); } else { localStorage.setItem(k, v); } } catch (e) {} };
+  var applicaMisure = function () {
+    var q = parseFloat(leggiMisura('quota-affiancate')); pannelli.style.setProperty('--quota', (q >= 15 && q <= 85 ? q : 50) + '%');
+    var a = parseInt(leggiMisura('alto-colonna'), 10); if (a >= 120) { pannelli.style.setProperty('--alto', a + 'px'); } else { pannelli.style.removeProperty('--alto'); }
+  };
+  var misura = function (x, y) {
+    if (disposizione === 'affiancate') {
+      var r = pannelli.getBoundingClientRect();
+      salvaMisura('quota-affiancate', Math.min(85, Math.max(15, (x - r.left) / r.width * 100)).toFixed(1));
+    } else if (disposizione === 'colonna') {
+      var su = pannelli.querySelector('[data-pannello="agenti"]').getBoundingClientRect().top;
+      salvaMisura('alto-colonna', String(Math.round(Math.max(120, y - su))));
+    }
+    applicaMisure();
+  };
+  if (divisore && pannelli) {
+    applicaMisure();
+    divisore.addEventListener('pointerdown', function (ev) {
+      ev.preventDefault(); divisore.setPointerCapture(ev.pointerId); document.body.classList.add('trascina');
+      var muovi = function (e) { misura(e.clientX, e.clientY); };
+      var fine = function () {
+        document.body.classList.remove('trascina');
+        divisore.removeEventListener('pointermove', muovi); divisore.removeEventListener('pointerup', fine); divisore.removeEventListener('pointercancel', fine);
+      };
+      divisore.addEventListener('pointermove', muovi); divisore.addEventListener('pointerup', fine); divisore.addEventListener('pointercancel', fine);
+    });
+    divisore.addEventListener('dblclick', function () { salvaMisura(disposizione === 'affiancate' ? 'quota-affiancate' : 'alto-colonna', null); applicaMisure(); });
+    divisore.addEventListener('keydown', function (ev) {
+      var passo = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[ev.key]; if (!passo) return;
+      ev.preventDefault();
+      var r = divisore.getBoundingClientRect();
+      if (disposizione === 'affiancate') { misura(r.left + r.width / 2 + passo * pannelli.clientWidth * 0.05, 0); }
+      else { misura(0, r.top - 14 + passo * 60); }
+    });
+  }
+  // un clic su una riga di run (non sul suo link) apre il run in una scheda nuova, come il link
+  document.addEventListener('click', function (ev) {
+    var tr = ev.target.closest('tr[data-url]');
+    if (!tr || ev.target.closest('a')) return;
+    var w = window.open(tr.dataset.url, '_blank', 'noopener');
+    if (w) { w.opener = null; }
+  });
+  // i filtri per stato, a scelta multipla: ogni pulsante si accende e si spegne, "Tutti" li azzera. Si vedono le righe degli
+  // stati scelti, e i blocchi e le tabelle che ne hanno almeno una. La scelta resta in sessionStorage (stati separati da virgola).
+  var filtri = document.querySelectorAll('.filtri [data-filtro]');
+  var scelti = [];
+  var applica = function () {
+    var tutti = scelti.length === 0;
+    var vede = function (st) { return tutti || scelti.indexOf(st) >= 0; };
+    filtri.forEach(function (x) { var f = x.dataset.filtro; x.setAttribute('aria-pressed', (f === 'tutti' ? tutti : scelti.indexOf(f) >= 0) ? 'true' : 'false'); });
+    document.querySelectorAll('tr[data-stato]').forEach(function (tr) { tr.hidden = !vede(tr.dataset.stato); });
+    document.querySelectorAll('.tabella, details.falliti, details.progetto, .da-approvare').forEach(function (b) {
+      b.hidden = !tutti && !Array.prototype.some.call(b.querySelectorAll('tr[data-stato]'), function (tr) { return vede(tr.dataset.stato); });
+    });
+    if (scelti.indexOf('fallito') >= 0) { document.querySelectorAll('details.falliti').forEach(function (d) { d.open = true; }); }
+    try { sessionStorage.setItem('filtro-pipeline', scelti.join(',')); } catch (e) {}
+  };
+  try { var m = sessionStorage.getItem('filtro-pipeline'); if (m && m !== 'tutti') { scelti = m.split(',').filter(function (x) { return x; }); } } catch (e) {}
+  if (filtri.length) { applica(); }
+  filtri.forEach(function (x) { x.addEventListener('click', function () {
+    var f = x.dataset.filtro;
+    if (f === 'tutti') { scelti = []; } else { var i = scelti.indexOf(f); if (i >= 0) { scelti.splice(i, 1); } else { scelti.push(f); } }
+    applica();
+  }); });
+  // i progetti chiusi restano chiusi dopo il ricaricamento
+  document.querySelectorAll('details.progetto').forEach(function (d) {
+    var k = 'progetto-chiuso:' + d.dataset.progetto;
+    try { if (sessionStorage.getItem(k) === '1') { d.open = false; } } catch (e) {}
+    d.addEventListener('toggle', function () { try { sessionStorage.setItem(k, d.open ? '0' : '1'); } catch (e) {} });
+  });
+  // le lezioni aperte restano aperte dopo il ricaricamento (e le sezioni delle stabili, aperte o chiuse, come le ha lasciate chi legge)
+  document.querySelectorAll('details[data-ricorda]').forEach(function (d) {
+    var k = 'aperto:' + d.dataset.ricorda;
+    try { var v = sessionStorage.getItem(k); if (v === '1') { d.open = true; } else if (v === '0') { d.open = false; } } catch (e) {}
+    d.addEventListener('toggle', function () { try { sessionStorage.setItem(k, d.open ? '1' : '0'); } catch (e) {} });
+  });
+  bottoni.forEach(function (b) { b.addEventListener('click', function () { scelta = b.dataset.scheda; mostra(scelta); try { sessionStorage.setItem('scheda', b.dataset.scheda); } catch (e) {} }); });
+})();
+</script>
+<script>
+(function () {
+  var p = document.getElementById('conta-pagina'), s = document.getElementById('conta-smistatore');
+  var main = document.querySelector('main');
+  var resto = p ? parseInt(p.getAttribute('data-secondi'), 10) : 0, ricarica = false;
+  var quando = s && s.getAttribute('data-quando') ? Date.parse(s.getAttribute('data-quando')) : NaN;
+  var durata = function (sec) { var m = Math.floor(sec / 60), r = sec % 60; return (m > 0 ? m + ' min ' : '') + r + ' s'; };
+  var passo = function () {
+    if (p) { p.textContent = resto > 0 ? resto + ' s' : 'adesso'; }
+    if (s) {
+      if (isNaN(quando)) { s.textContent = 'non si sa'; }
+      else { var d = Math.round((quando - Date.now()) / 1000); s.textContent = d > 0 ? durata(d) : 'adesso'; }
+    }
+    // una volta sola: con il server occupato a rileggere ADO, un reload al secondo annulla ogni volta la richiesta di prima
+    if (resto <= 0 && !ricarica && main && main.getAttribute('data-ricarica') === 'script' && !window.vistaAttesaAggiorna) { ricarica = true; location.reload(); }
+    resto--;
+  };
+  passo(); setInterval(passo, 1000);
+})();
+</script>
+</main>
+</body>
+</html>

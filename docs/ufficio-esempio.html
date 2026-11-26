@@ -1,0 +1,2116 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Ufficio degli agenti</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", sans-serif; background: #1b1a26; color: #ece8dc; }
+header, main, section, footer { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 14px; }
+h1 { font-size: 1.4rem; margin: 0 0 2px; }
+h2 { font-size: 1.05rem; margin: 18px 0 8px; }
+.sotto { color: #a9a597; font-size: .9rem; margin: 0 0 6px; }
+a { color: #9ad1ff; }
+.avviso { border-radius: 8px; padding: 8px 12px; margin: 8px 0; border: 1px solid #55506a; background: #2a2838; }
+.avviso.allarme { background: #4a1f28; border-color: #d1495b; color: #ffd6dc; }
+.avviso.pausa { background: #4a3514; border-color: #e0a800; color: #ffe6ad; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 8px; }
+.layout.con-scheda { grid-template-columns: minmax(0, 1fr) 320px; }
+@media (max-width: 900px) { .layout.con-scheda { grid-template-columns: minmax(0, 1fr); } }
+#scena { position: relative; min-width: 0; }
+/* il riquadro e' la finestra sull'ufficio: se lo zoom lo fa piu grande dello spazio si sposta trascinando */
+#riquadro { display: flex; overflow: auto; max-height: calc(100vh - 80px); scrollbar-width: thin; }
+#riquadro canvas { flex: none; max-width: none; margin: auto; touch-action: none; }
+#riquadro canvas.trascinato { cursor: grabbing; }
+#comandi-zoom { position: absolute; top: 8px; left: 8px; z-index: 4; display: flex; gap: 4px; align-items: center; padding: 3px 6px; background: rgba(27, 26, 38, .88); border: 1px solid #55506a; border-radius: 8px; font-size: .85rem; }
+#comandi-zoom button { padding: 1px 9px; font-weight: 700; }
+#zoom-livello { min-width: 3.2em; text-align: center; color: #cfcab9; }
+canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 3px solid #3a3750; border-radius: 6px; background: #000; max-width: 100%; }
+#scena.fermo canvas { filter: grayscale(1) brightness(.75); }
+#scheda { background: #272538; border: 1px solid #55506a; border-radius: 10px; padding: 10px 14px 14px; position: relative; }
+#scheda h2 { margin-top: 6px; padding-right: 30px; }
+#scheda ul { padding-left: 18px; margin: 6px 0; }
+#scheda .nota, .nota { color: #a9a597; font-size: .85rem; }
+#chiudi-scheda { position: absolute; top: 8px; right: 8px; }
+button { font: inherit; color: inherit; background: #34314a; border: 1px solid #66618a; border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+button:hover, button:focus-visible { background: #46426a; outline: 2px solid #9ad1ff; }
+.tasto { font-weight: 600; margin-right: 4px; }
+#elenco, #consegne { list-style: none; padding: 0; margin: 0; }
+#elenco li, #consegne li { padding: 3px 0; }
+li.indietro { color: #ff9aa8; font-weight: 600; }
+li.avanti { color: #9affc0; }
+#comandi-esempio[hidden] { display: none; }
+#comandi-esempio { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0; padding: 8px 12px; background: #272538; border-radius: 8px; }
+select { font: inherit; background: #34314a; color: inherit; border: 1px solid #66618a; border-radius: 6px; padding: 2px 6px; }
+details { margin: 12px 0; color: #cfcab9; }
+footer { padding-bottom: 24px; color: #a9a597; font-size: .85rem; }
+/* la versione compatta: dentro il pannello della vista (iframe ?compatto=1), solo la scena e gli avvisi */
+body.compatto header, body.compatto details, body.compatto section, body.compatto footer, body.compatto #comandi-esempio, body.compatto .sotto { display: none; }
+body.compatto main { max-width: none; padding: 0; }
+body.compatto .layout, body.compatto .layout.con-scheda { display: block; margin: 0; }
+body.compatto #riquadro { max-height: none; }
+body.compatto canvas { border-width: 0; border-radius: 0; }
+body.compatto .avviso.nota { display: none; }
+body.compatto .avviso { margin: 0; padding: 4px 10px; border-radius: 0; font-size: .8rem; }
+body.compatto #scheda { position: fixed; top: 6px; right: 6px; bottom: 6px; width: min(300px, 80%); overflow: auto; z-index: 5; box-shadow: 0 0 14px rgba(0, 0, 0, .6); }
+</style>
+</head>
+<body>
+<header>
+  <h1>L'ufficio degli agenti</h1>
+  <p class="sotto" id="sotto"></p>
+  <p><button type="button" id="tasto-movimento">Ferma il movimento</button> <span class="nota">La scelta resta salvata in questo browser.</span></p>
+</header>
+<main>
+  <div id="avvisi" role="status" aria-live="polite"></div>
+  <div id="comandi-esempio" hidden>
+    <label>Scena <select id="scelta-scena"></select></label>
+    <label>Ora del giorno <select id="scelta-ora"><option value="">quella vera</option><option value="9.5">mattina</option><option value="14">pomeriggio</option><option value="19.2">tramonto</option><option value="23">notte</option></select></label>
+    <button type="button" id="ripeti-consegne">Rivedi le consegne</button>
+  </div>
+  <div class="layout" id="layout">
+    <div id="scena">
+      <div id="riquadro"><canvas id="schermo" width="320" height="224" aria-label="Ufficio visto dall'alto: gli agenti alla scrivania, in pausa, o in fila alla porta di Titolare"></canvas></div>
+      <div id="comandi-zoom" role="group" aria-label="Zoom dell'ufficio">
+        <button type="button" id="zoom-meno" aria-label="Rimpicciolisci l'ufficio" title="Rimpicciolisci">&minus;</button>
+        <span id="zoom-livello" aria-live="polite">&times;1</span>
+        <button type="button" id="zoom-piu" aria-label="Ingrandisci l'ufficio" title="Ingrandisci">+</button>
+        <button type="button" id="zoom-adatta" title="Adatta l'ufficio allo spazio che c'e">Adatta</button>
+        <button type="button" id="cambia-stanza" title="Passa all'altra stanza: ufficio o open space">Open space</button>
+      </div>
+    </div>
+    <aside id="scheda" hidden aria-label="Scheda">
+      <button type="button" id="chiudi-scheda" aria-label="Chiudi la scheda">Chiudi</button>
+      <div id="corpo-scheda"></div>
+    </aside>
+  </div>
+  <noscript><p class="avviso allarme">Serve JavaScript: l'ufficio e' un gioco disegnato in una pagina.</p></noscript>
+  <details>
+    <summary>Come leggere l'ufficio</summary>
+    <p>Gli id delle card, le pile sulle scrivanie, i fogli nella stanza di Titolare, i numeri sulla bacheca, le cartelline delle consegne e l'avviso di pausa vengono dai dati dello smistatore. Tutto il resto (la pausa, le chiacchiere, il caffe', il gatto, il cielo che segue l'ora) e' scena: serve solo a tenere vivo l'ufficio e non dice niente sul lavoro. Un agente senza una sessione che cammina verso il divano non sta lavorando.</p>
+    <p>Un rimando indietro (per esempio dal reviewer al dev) ha la cartellina rossa e la scritta INDIETRO; una consegna in avanti ha la cartellina verde e la scritta AVANTI. Una persona per sessione: se un ruolo ha piu sessioni aperte, la prima sta alla scrivania del ruolo e le altre al tavolo dei portatili, contro il muro a sinistra; chi non trova posto lavora nell'open space, oltre la porta in basso a sinistra, che dice quanti sono. La pagina e' in sola lettura: non scrive su Azure DevOps, non lancia sessioni, non sposta card.</p>
+  </details>
+  <section>
+    <h2>Chi fa cosa, adesso</h2>
+    <ul id="elenco"></ul>
+    <h2>Consegne recenti</h2>
+    <ul id="consegne"></ul>
+  </section>
+</main>
+<footer>Clic su un personaggio, su una pila, sulla porta di Titolare, sullo smistatore o sulla bacheca per aprire la scheda. Esc la chiude.</footer>
+<script type="application/json" id="dati">{"esempio":true,"scenari":[{"nome":"Consegna, rimando e fila alla porta (nessuna sessione)","fermoDaMinuti":0,"modello":{"generata":"2026-11-25T17:25:51.6176484Z","secondi":5,"esempio":true,"erroreAdo":"","personaggi":[{"ruolo":"responsabile","sessione":null,"codaTotale":1,"coda":[{"id":1033,"titolo":"Correggere l'arrotondamento dell'IVA","urlCard":"https://esempio.invalid/card/1033"}]},{"ruolo":"dev","sessione":null,"codaTotale":2,"coda":[{"id":1050,"titolo":"Migrare la tabella delle letture","urlCard":"https://esempio.invalid/card/1050"},{"id":1052,"titolo":"Notifiche push","urlCard":"https://esempio.invalid/card/1052"}]},{"ruolo":"reviewer","sessione":null,"codaTotale":4,"coda":[{"id":1040,"titolo":"Importare le stime di costo","urlCard":"https://esempio.invalid/card/1040"},{"id":1041,"titolo":"Filtro per periodo nei report","urlCard":"https://esempio.invalid/card/1041"},{"id":1044,"titolo":"Export dei report in PDF","urlCard":"https://esempio.invalid/card/1044"},{"id":1046,"titolo":"Login con SSO","urlCard":"https://esempio.invalid/card/1046"}]},{"ruolo":"collaudatore","sessione":null,"codaTotale":1,"coda":[{"id":1060,"titolo":"Storico delle fatture","urlCard":"https://esempio.invalid/card/1060"}]},{"ruolo":"mentore","sessione":null,"codaTotale":0,"coda":[]}],"altreSessioni":[],"consegne":[{"id":1033,"titolo":"Correggere l'arrotondamento dell'IVA","urlCard":"https://esempio.invalid/card/1033","da":"collaudatore","a":"responsabile","verso":"indietro"},{"id":1040,"titolo":"Importare le stime di costo","urlCard":"https://esempio.invalid/card/1040","da":"dev","a":"reviewer","verso":"avanti"}],"daFareTu":[{"id":1051,"titolo":"Scegliere il formato delle esportazioni","urlCard":"https://esempio.invalid/card/1051","verbo":"Rispondi","testo":"serve il formato scelto","ferma":true},{"id":1055,"titolo":"Anagrafica fornitori","urlCard":"https://esempio.invalid/card/1055","verbo":"Prova in Test","testo":"tocca a te provarla","ferma":false},{"id":1057,"titolo":"Calcolo degli incentivi","urlCard":"https://esempio.invalid/card/1057","verbo":"Rilascia","testo":"pronta per la produzione","ferma":false}],"fila":[{"ruolo":"mentore","id":1051}],"board":[{"chiave":"nuova","titolo":"Nuove","sigla":"NEW","conteggio":2},{"chiave":"daChiarire","titolo":"Da chiarire","sigla":"CHIAR","conteggio":2},{"chiave":"pronto","titolo":"Pronte da sviluppare","sigla":"PRONT","conteggio":2},{"chiave":"inSviluppo","titolo":"In sviluppo","sigla":"DEV","conteggio":0},{"chiave":"inRevisione","titolo":"In revisione","sigla":"REV","conteggio":4},{"chiave":"inDeployTest","titolo":"Deploy in Test","sigla":"DEPL","conteggio":1},{"chiave":"inCollaudo","titolo":"Collaudo automatico","sigla":"COLL","conteggio":1},{"chiave":"inProvaUmana","titolo":"Prova in Test","sigla":"TEST","conteggio":1},{"chiave":"daUnire","titolo":"Da unire","sigla":"MERGE","conteggio":1},{"chiave":"daRilasciare","titolo":"Da rilasciare","sigla":"REL","conteggio":1}],"quota":{"stato":"libera","uso":0.42,"soglia":0.9,"fino":null,"alzata":false,"ignorata":false,"finestra":null,"usoFinestra":null},"smistatore":{"inGiro":false,"ultimoGiro":"2026-11-24 14:05:11","prossimoGiro":"2026-11-24 14:10"}}},{"nome":"Giornata di lavoro con lo smistatore in giro","fermoDaMinuti":0,"modello":{"generata":"2026-11-25T17:25:51.6176484Z","secondi":5,"esempio":true,"erroreAdo":"","personaggi":[{"ruolo":"responsabile","sessione":null,"codaTotale":0,"coda":[]},{"ruolo":"dev","sessione":{"id":1042,"titolo":"Pannello consumi per edificio","urlCard":"https://esempio.invalid/card/1042","task":7,"titoloTask":"Scrivere i test del caricamento","minuti":14,"tokenTesto":"48.2k token","tokenUsati":48200,"altre":2},"codaTotale":2,"coda":[{"id":1050,"titolo":"Migrare la tabella delle letture","urlCard":"https://esempio.invalid/card/1050"},{"id":1052,"titolo":"Notifiche push","urlCard":"https://esempio.invalid/card/1052"}]},{"ruolo":"reviewer","sessione":null,"codaTotale":4,"coda":[{"id":1040,"titolo":"Importare le stime di costo","urlCard":"https://esempio.invalid/card/1040"},{"id":1041,"titolo":"Filtro per periodo nei report","urlCard":"https://esempio.invalid/card/1041"},{"id":1044,"titolo":"Export dei report in PDF","urlCard":"https://esempio.invalid/card/1044"},{"id":1046,"titolo":"Login con SSO","urlCard":"https://esempio.invalid/card/1046"}]},{"ruolo":"collaudatore","sessione":{"id":1031,"titolo":"Allarmi sulle soglie di potenza","urlCard":"https://esempio.invalid/card/1031","task":null,"titoloTask":null,"minuti":3,"tokenTesto":null,"tokenUsati":0,"altre":1},"codaTotale":0,"coda":[]},{"ruolo":"mentore","sessione":null,"codaTotale":0,"coda":[]}],"altreSessioni":[{"id":1047,"titolo":"Filtro per cliente","urlCard":"https://esempio.invalid/card/1047","task":null,"titoloTask":null,"minuti":6,"tokenTesto":null,"tokenUsati":0,"ruolo":"dev"},{"id":1048,"titolo":"Esportazione CSV","urlCard":"https://esempio.invalid/card/1048","task":null,"titoloTask":null,"minuti":2,"tokenTesto":null,"tokenUsati":0,"ruolo":"dev"},{"id":1036,"titolo":"Notifiche via mail","urlCard":"https://esempio.invalid/card/1036","task":null,"titoloTask":null,"minuti":9,"tokenTesto":null,"tokenUsati":0,"ruolo":"collaudatore"}],"consegne":[],"daFareTu":[],"fila":[],"board":[{"chiave":"nuova","titolo":"Nuove","sigla":"NEW","conteggio":2},{"chiave":"daChiarire","titolo":"Da chiarire","sigla":"CHIAR","conteggio":0},{"chiave":"pronto","titolo":"Pronte da sviluppare","sigla":"PRONT","conteggio":2},{"chiave":"inSviluppo","titolo":"In sviluppo","sigla":"DEV","conteggio":3},{"chiave":"inRevisione","titolo":"In revisione","sigla":"REV","conteggio":4},{"chiave":"inDeployTest","titolo":"Deploy in Test","sigla":"DEPL","conteggio":1},{"chiave":"inCollaudo","titolo":"Collaudo automatico","sigla":"COLL","conteggio":2},{"chiave":"inProvaUmana","titolo":"Prova in Test","sigla":"TEST","conteggio":0},{"chiave":"daUnire","titolo":"Da unire","sigla":"MERGE","conteggio":1},{"chiave":"daRilasciare","titolo":"Da rilasciare","sigla":"REL","conteggio":0}],"quota":{"stato":"libera","uso":0.42,"soglia":0.9,"fino":null,"alzata":false,"ignorata":false,"finestra":null,"usoFinestra":null},"smistatore":{"inGiro":true,"ultimoGiro":"2026-11-24 14:05:11","prossimoGiro":"2026-11-24 14:10"}}},{"nome":"Tante sessioni: tavolo dei portatili pieno e open space","fermoDaMinuti":0,"modello":{"generata":"2026-11-25T17:25:51.6176484Z","secondi":5,"esempio":true,"erroreAdo":"","personaggi":[{"ruolo":"responsabile","sessione":null,"codaTotale":0,"coda":[]},{"ruolo":"dev","sessione":{"id":1042,"titolo":"Pannello consumi per edificio","urlCard":"https://esempio.invalid/card/1042","task":7,"titoloTask":"Scrivere i test del caricamento","minuti":14,"tokenTesto":"48.2k token","tokenUsati":48200,"altre":3},"codaTotale":2,"coda":[{"id":1050,"titolo":"Migrare la tabella delle letture","urlCard":"https://esempio.invalid/card/1050"},{"id":1052,"titolo":"Notifiche push","urlCard":"https://esempio.invalid/card/1052"}]},{"ruolo":"reviewer","sessione":{"id":1054,"titolo":"Ricerca per codice","urlCard":"https://esempio.invalid/card/1054","task":null,"titoloTask":null,"minuti":5,"tokenTesto":null,"tokenUsati":0,"altre":2},"codaTotale":4,"coda":[{"id":1040,"titolo":"Importare le stime di costo","urlCard":"https://esempio.invalid/card/1040"},{"id":1041,"titolo":"Filtro per periodo nei report","urlCard":"https://esempio.invalid/card/1041"},{"id":1044,"titolo":"Export dei report in PDF","urlCard":"https://esempio.invalid/card/1044"},{"id":1046,"titolo":"Login con SSO","urlCard":"https://esempio.invalid/card/1046"}]},{"ruolo":"collaudatore","sessione":{"id":1031,"titolo":"Allarmi sulle soglie di potenza","urlCard":"https://esempio.invalid/card/1031","task":null,"titoloTask":null,"minuti":3,"tokenTesto":null,"tokenUsati":0,"altre":1},"codaTotale":0,"coda":[]},{"ruolo":"mentore","sessione":null,"codaTotale":0,"coda":[]}],"altreSessioni":[{"id":1047,"titolo":"Filtro per cliente","urlCard":"https://esempio.invalid/card/1047","task":null,"titoloTask":null,"minuti":6,"tokenTesto":null,"tokenUsati":0,"ruolo":"dev"},{"id":1048,"titolo":"Esportazione CSV","urlCard":"https://esempio.invalid/card/1048","task":null,"titoloTask":null,"minuti":2,"tokenTesto":null,"tokenUsati":0,"ruolo":"dev"},{"id":1049,"titolo":"Tema scuro","urlCard":"https://esempio.invalid/card/1049","task":null,"titoloTask":null,"minuti":1,"tokenTesto":null,"tokenUsati":0,"ruolo":"dev"},{"id":1058,"titolo":"Controllo dei duplicati","urlCard":"https://esempio.invalid/card/1058","task":null,"titoloTask":null,"minuti":8,"tokenTesto":null,"tokenUsati":0,"ruolo":"reviewer"},{"id":1059,"titolo":"Stampa del riepilogo","urlCard":"https://esempio.invalid/card/1059","task":null,"titoloTask":null,"minuti":3,"tokenTesto":null,"tokenUsati":0,"ruolo":"reviewer"},{"id":1036,"titolo":"Notifiche via mail","urlCard":"https://esempio.invalid/card/1036","task":null,"titoloTask":null,"minuti":9,"tokenTesto":null,"tokenUsati":0,"ruolo":"collaudatore"}],"consegne":[],"daFareTu":[],"fila":[],"board":[{"chiave":"nuova","titolo":"Nuove","sigla":"NEW","conteggio":2},{"chiave":"daChiarire","titolo":"Da chiarire","sigla":"CHIAR","conteggio":0},{"chiave":"pronto","titolo":"Pronte da sviluppare","sigla":"PRONT","conteggio":2},{"chiave":"inSviluppo","titolo":"In sviluppo","sigla":"DEV","conteggio":4},{"chiave":"inRevisione","titolo":"In revisione","sigla":"REV","conteggio":7},{"chiave":"inDeployTest","titolo":"Deploy in Test","sigla":"DEPL","conteggio":1},{"chiave":"inCollaudo","titolo":"Collaudo automatico","sigla":"COLL","conteggio":2},{"chiave":"inProvaUmana","titolo":"Prova in Test","sigla":"TEST","conteggio":0},{"chiave":"daUnire","titolo":"Da unire","sigla":"MERGE","conteggio":1},{"chiave":"daRilasciare","titolo":"Da rilasciare","sigla":"REL","conteggio":0}],"quota":{"stato":"libera","uso":0.42,"soglia":0.9,"fino":null,"alzata":false,"ignorata":false,"finestra":null,"usoFinestra":null},"smistatore":{"inGiro":true,"ultimoGiro":"2026-11-24 14:05:11","prossimoGiro":"2026-11-24 14:10"}}},{"nome":"Pausa: riserva settimanale oltre la soglia","fermoDaMinuti":0,"modello":{"generata":"2026-11-25T17:25:51.6176484Z","secondi":5,"esempio":true,"erroreAdo":"","personaggi":[{"ruolo":"responsabile","sessione":null,"codaTotale":0,"coda":[]},{"ruolo":"dev","sessione":null,"codaTotale":2,"coda":[{"id":1050,"titolo":"Migrare la tabella delle letture","urlCard":"https://esempio.invalid/card/1050"},{"id":1052,"titolo":"Notifiche push","urlCard":"https://esempio.invalid/card/1052"}]},{"ruolo":"reviewer","sessione":null,"codaTotale":4,"coda":[{"id":1040,"titolo":"Importare le stime di costo","urlCard":"https://esempio.invalid/card/1040"},{"id":1041,"titolo":"Filtro per periodo nei report","urlCard":"https://esempio.invalid/card/1041"},{"id":1044,"titolo":"Export dei report in PDF","urlCard":"https://esempio.invalid/card/1044"},{"id":1046,"titolo":"Login con SSO","urlCard":"https://esempio.invalid/card/1046"}]},{"ruolo":"collaudatore","sessione":null,"codaTotale":1,"coda":[{"id":1060,"titolo":"Storico delle fatture","urlCard":"https://esempio.invalid/card/1060"}]},{"ruolo":"mentore","sessione":null,"codaTotale":0,"coda":[]}],"altreSessioni":[],"consegne":[],"daFareTu":[],"fila":[],"board":[{"chiave":"nuova","titolo":"Nuove","sigla":"NEW","conteggio":2},{"chiave":"daChiarire","titolo":"Da chiarire","sigla":"CHIAR","conteggio":0},{"chiave":"pronto","titolo":"Pronte da sviluppare","sigla":"PRONT","conteggio":2},{"chiave":"inSviluppo","titolo":"In sviluppo","sigla":"DEV","conteggio":0},{"chiave":"inRevisione","titolo":"In revisione","sigla":"REV","conteggio":4},{"chiave":"inDeployTest","titolo":"Deploy in Test","sigla":"DEPL","conteggio":1},{"chiave":"inCollaudo","titolo":"Collaudo automatico","sigla":"COLL","conteggio":1},{"chiave":"inProvaUmana","titolo":"Prova in Test","sigla":"TEST","conteggio":0},{"chiave":"daUnire","titolo":"Da unire","sigla":"MERGE","conteggio":1},{"chiave":"daRilasciare","titolo":"Da rilasciare","sigla":"REL","conteggio":0}],"quota":{"stato":"riserva","uso":0.93,"soglia":0.9,"fino":"2026-11-27T17:25:51.6176484Z","alzata":false,"ignorata":false,"finestra":null,"usoFinestra":null},"smistatore":{"inGiro":false,"ultimoGiro":"2026-11-24 14:05:11","prossimoGiro":"2026-11-24 14:10"}}},{"nome":"Azure DevOps non risponde","fermoDaMinuti":0,"modello":{"generata":"2026-11-25T17:25:51.6176484Z","secondi":5,"esempio":true,"erroreAdo":"timeout dopo 30 secondi","personaggi":[{"ruolo":"responsabile","sessione":null,"codaTotale":0,"coda":[]},{"ruolo":"dev","sessione":{"id":1042,"titolo":"Pannello consumi per edificio","urlCard":"https://esempio.invalid/card/1042","task":null,"titoloTask":null,"minuti":22,"tokenTesto":"12.0k token","tokenUsati":48200,"altre":0},"codaTotale":0,"coda":[]},{"ruolo":"reviewer","sessione":null,"codaTotale":0,"coda":[]},{"ruolo":"collaudatore","sessione":null,"codaTotale":0,"coda":[]},{"ruolo":"mentore","sessione":null,"codaTotale":0,"coda":[]}],"altreSessioni":[],"consegne":[],"daFareTu":[],"fila":[],"board":null,"quota":{"stato":"libera","uso":0.42,"soglia":0.9,"fino":null,"alzata":false,"ignorata":false,"finestra":null,"usoFinestra":null},"smistatore":{"inGiro":false,"ultimoGiro":"2026-11-24 14:05:11","prossimoGiro":"2026-11-24 14:10"}}},{"nome":"Dati fermi da 7 minuti (simulato)","fermoDaMinuti":7,"modello":{"generata":"2026-11-25T17:25:51.6176484Z","secondi":5,"esempio":true,"erroreAdo":"","personaggi":[{"ruolo":"responsabile","sessione":null,"codaTotale":0,"coda":[]},{"ruolo":"dev","sessione":{"id":1042,"titolo":"Pannello consumi per edificio","urlCard":"https://esempio.invalid/card/1042","task":7,"titoloTask":"Scrivere i test del caricamento","minuti":14,"tokenTesto":"48.2k token","tokenUsati":48200,"altre":2},"codaTotale":2,"coda":[{"id":1050,"titolo":"Migrare la tabella delle letture","urlCard":"https://esempio.invalid/card/1050"},{"id":1052,"titolo":"Notifiche push","urlCard":"https://esempio.invalid/card/1052"}]},{"ruolo":"reviewer","sessione":null,"codaTotale":4,"coda":[{"id":1040,"titolo":"Importare le stime di costo","urlCard":"https://esempio.invalid/card/1040"},{"id":1041,"titolo":"Filtro per periodo nei report","urlCard":"https://esempio.invalid/card/1041"},{"id":1044,"titolo":"Export dei report in PDF","urlCard":"https://esempio.invalid/card/1044"},{"id":1046,"titolo":"Login con SSO","urlCard":"https://esempio.invalid/card/1046"}]},{"ruolo":"collaudatore","sessione":{"id":1031,"titolo":"Allarmi sulle soglie di potenza","urlCard":"https://esempio.invalid/card/1031","task":null,"titoloTask":null,"minuti":3,"tokenTesto":null,"tokenUsati":0,"altre":1},"codaTotale":0,"coda":[]},{"ruolo":"mentore","sessione":null,"codaTotale":0,"coda":[]}],"altreSessioni":[{"id":1047,"titolo":"Filtro per cliente","urlCard":"https://esempio.invalid/card/1047","task":null,"titoloTask":null,"minuti":6,"tokenTesto":null,"tokenUsati":0,"ruolo":"dev"},{"id":1048,"titolo":"Esportazione CSV","urlCard":"https://esempio.invalid/card/1048","task":null,"titoloTask":null,"minuti":2,"tokenTesto":null,"tokenUsati":0,"ruolo":"dev"},{"id":1036,"titolo":"Notifiche via mail","urlCard":"https://esempio.invalid/card/1036","task":null,"titoloTask":null,"minuti":9,"tokenTesto":null,"tokenUsati":0,"ruolo":"collaudatore"}],"consegne":[],"daFareTu":[],"fila":[],"board":[{"chiave":"nuova","titolo":"Nuove","sigla":"NEW","conteggio":2},{"chiave":"daChiarire","titolo":"Da chiarire","sigla":"CHIAR","conteggio":0},{"chiave":"pronto","titolo":"Pronte da sviluppare","sigla":"PRONT","conteggio":2},{"chiave":"inSviluppo","titolo":"In sviluppo","sigla":"DEV","conteggio":3},{"chiave":"inRevisione","titolo":"In revisione","sigla":"REV","conteggio":4},{"chiave":"inDeployTest","titolo":"Deploy in Test","sigla":"DEPL","conteggio":1},{"chiave":"inCollaudo","titolo":"Collaudo automatico","sigla":"COLL","conteggio":2},{"chiave":"inProvaUmana","titolo":"Prova in Test","sigla":"TEST","conteggio":0},{"chiave":"daUnire","titolo":"Da unire","sigla":"MERGE","conteggio":1},{"chiave":"daRilasciare","titolo":"Da rilasciare","sigla":"REL","conteggio":0}],"quota":{"stato":"libera","uso":0.42,"soglia":0.9,"fino":null,"alzata":false,"ignorata":false,"finestra":null,"usoFinestra":null},"smistatore":{"inGiro":true,"ultimoGiro":"2026-11-24 14:05:11","prossimoGiro":"2026-11-24 14:10"}}}]}</script>
+<script>
+// Il font a pixel (3x5) e le icone dei fumetti. Tutto disegnato da codice: nessun font ne immagine scaricati.
+// Nel canvas finiscono solo cifre, sigle di ruolo e parole fisse: i titoli delle card non vengono mai disegnati qui.
+var U = {};
+(function (U) {
+  'use strict';
+  // ogni glifo: cinque righe da tre colonne, separate da /
+  var T = {
+    A: '.X./X.X/XXX/X.X/X.X', B: 'XX./X.X/XX./X.X/XX.', C: '.XX/X../X../X../.XX', D: 'XX./X.X/X.X/X.X/XX.', E: 'XXX/X../XX./X../XXX',
+    F: 'XXX/X../XX./X../X..', G: '.XX/X../X.X/X.X/.XX', H: 'X.X/X.X/XXX/X.X/X.X', I: 'XXX/.X./.X./.X./XXX', J: '..X/..X/..X/X.X/.X.',
+    K: 'X.X/X.X/XX./X.X/X.X', L: 'X../X../X../X../XXX', M: 'X.X/XXX/XXX/X.X/X.X', N: 'XX./X.X/X.X/X.X/X.X', O: '.X./X.X/X.X/X.X/.X.',
+    P: 'XX./X.X/XX./X../X..', Q: '.X./X.X/X.X/XX./.XX', R: 'XX./X.X/XX./X.X/X.X', S: '.XX/X../.X./..X/XX.', T: 'XXX/.X./.X./.X./.X.',
+    U: 'X.X/X.X/X.X/X.X/XXX', V: 'X.X/X.X/X.X/X.X/.X.', W: 'X.X/X.X/XXX/XXX/X.X', X: 'X.X/X.X/.X./X.X/X.X', Y: 'X.X/X.X/.X./.X./.X.',
+    Z: 'XXX/..X/.X./X../XXX',
+    0: 'XXX/X.X/X.X/X.X/XXX', 1: '.X./XX./.X./.X./XXX', 2: 'XX./..X/.X./X../XXX', 3: 'XX./..X/.X./..X/XX.', 4: 'X.X/X.X/XXX/..X/..X',
+    5: 'XXX/X../XX./..X/XX.', 6: '.XX/X../XXX/X.X/XXX', 7: 'XXX/..X/.X./.X./.X.', 8: 'XXX/X.X/XXX/X.X/XXX', 9: 'XXX/X.X/XXX/..X/XX.',
+    '#': 'X.X/XXX/X.X/XXX/X.X', '!': '.X./.X./.X./.../.X.', '?': 'XX./..X/.X./.../.X.', '.': '.../.../.../.../.X.', ':': '.../.X./.../.X./...',
+    '-': '.../.../XXX/.../...', '+': '.../.X./XXX/.X./...', '%': 'X.X/..X/.X./X../X.X', '/': '..X/..X/.X./X../X..', x: '.../X.X/.X./X.X/...', ' ': '.../.../.../.../...'
+  };
+  var G = {};
+  Object.keys(T).forEach(function (k) { G[k] = T[k].split('/').join(''); });
+  var LARG = 4; // 3 colonne + 1 di spazio
+
+  // Scrive un testo in pixel. 'rect' e il disegno di un rettangolo pieno sul contesto.
+  U.testo = function (ctx, s, x, y, colore, scala) {
+    scala = scala || 1;
+    ctx.fillStyle = colore;
+    s = String(s).toUpperCase();
+    for (var i = 0; i < s.length; i++) {
+      var g = G[s.charAt(i)];
+      if (g) {
+        for (var k = 0; k < 15; k++) {
+          if (g.charAt(k) === 'X') ctx.fillRect(x + (k % 3) * scala, y + Math.floor(k / 3) * scala, scala, scala);
+        }
+      }
+      x += LARG * scala;
+    }
+  };
+  U.larghezzaTesto = function (s, scala) { return String(s).length * LARG * (scala || 1) - (scala || 1); };
+  // Testo con un fondo scuro dietro, leggibile su qualunque colore.
+  U.etichetta = function (ctx, s, x, y, colore, fondo) {
+    var w = U.larghezzaTesto(s) + 3;
+    ctx.fillStyle = fondo || '#1d1b2b';
+    ctx.fillRect(x - Math.floor(w / 2), y - 1, w, 7);
+    U.testo(ctx, s, x - Math.floor(w / 2) + 2, y, colore || '#ffffff');
+  };
+
+  // Le icone dei fumetti, 7x7, un solo colore. Simboli, mai testo di lavoro.
+  U.icone = {
+    cuore: ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...', '.......'],
+    nota: ['...XXX.', '...X..X', '...X...', '...X...', '.XXX...', 'XXXX...', '.XX....'],
+    domanda: ['.XXXXX.', 'XX...XX', '....XX.', '...XX..', '...X...', '.......', '...X...'],
+    esclama: ['..XXX..', '..XXX..', '..XXX..', '..XXX..', '.......', '..XXX..', '..XXX..'],
+    stella: ['...X...', '...X...', 'XXXXXXX', '.XXXXX.', '..XXX..', '.XX.XX.', 'XX...XX'],
+    sorriso: ['.XXXXX.', 'X.....X', 'X.X.X.X', 'X.....X', 'X.X.X.X', 'X..XXXX', '.XXXXX.'],
+    tazza: ['.......', 'XXXXXX.', 'X....XX', 'X....X.', 'X....XX', '.XXXX..', '.......'],
+    zeta: ['.XXXXX.', '....XX.', '...XX..', '..XX...', '.XXXXX.', '.......', '.......'],
+    puntini: ['.......', '.......', '.......', 'X.X.X..', '.......', '.......', '.......'],
+    freccia: ['...X...', '....X..', 'XXXXXX.', '....X..', '...X...', '.......', '.......'],
+    indietro: ['...X...', '..X....', '.XXXXXX', '..X....', '...X...', '.......', '.......']
+  };
+  U.icona = function (ctx, nome, x, y, colore) {
+    var b = U.icone[nome];
+    if (!b) return;
+    ctx.fillStyle = colore;
+    for (var r = 0; r < b.length; r++) {
+      for (var c = 0; c < b[r].length; c++) if (b[r].charAt(c) === 'X') ctx.fillRect(x + c, y + r, 1, 1);
+    }
+  };
+  // Un fumetto con un'icona (o un testo corto di sole cifre) sopra la testa: cx,y = centro e punta della coda.
+  U.fumetto = function (ctx, icona, cx, y, colore, sfondo) {
+    var w = 11, h = 11, x = cx - 5, top = y - h - 2;
+    ctx.fillStyle = '#1d1b2b';
+    ctx.fillRect(x, top + 1, w, h - 2); ctx.fillRect(x + 1, top, w - 2, h);
+    ctx.fillStyle = sfondo || '#ffffff';
+    ctx.fillRect(x + 1, top + 2, w - 2, h - 4); ctx.fillRect(x + 2, top + 1, w - 4, h - 2);
+    ctx.fillStyle = '#1d1b2b';
+    ctx.fillRect(cx - 1, top + h, 3, 1); ctx.fillRect(cx, top + h + 1, 1, 1);
+    ctx.fillStyle = sfondo || '#ffffff';
+    ctx.fillRect(cx, top + h - 1, 1, 1);
+    U.icona(ctx, icona, x + 2, top + 2, colore);
+  };
+})(U);
+
+// Il mondo: le misure dell'ufficio, la griglia dei posti dove si cammina e il percorso che evita mobili e muri.
+// Niente DOM e niente disegno: ci si ragiona anche fuori dal browser.
+(function (U) {
+  'use strict';
+  var W = 320, H = 224, T = 8, GW = W / T, GH = H / T;
+  var M = { W: W, H: H, T: T, GW: GW, GH: GH };
+
+  // Le scrivanie sono in fila contro il muro in alto, una per ruolo, nell'ordine in cui arrivano i personaggi.
+  M.MAX_SCRIVANIE = 5;
+  var DESK_X0 = 84, DESK_STEP = 34, DESK_W = 28;
+  M.scrivania = function (i) {
+    var x = DESK_X0 + i * DESK_STEP;
+    return {
+      x: x, y: 56, w: DESK_W, h: 12,
+      monitor: { x: x + 3, y: 42, w: 22, h: 13 },
+      seduto: { x: x + 14, y: 84 },
+      visita: { x: x + 22, y: 92 },        // dove sta in piedi chi viene a portare qualcosa
+      pila: { x: x + 22, y: 66 },
+      appoggio: { x: x + 2, y: 58 }        // dove si posa la cartellina consegnata
+    };
+  };
+
+  // La stanza di Titolare, a destra: ci si entra solo con gli occhi, si fa la fila davanti alla porta.
+  M.stanza = { x: 252, y: 0, w: 68, h: 128 };
+  M.porta = { x: 248, y: 96, w: 8, h: 24 };
+  M.codaPorta = function (i) { return { x: 242 - i * 14, y: 116 }; };
+  M.scrivaniaTitolare = { x: 270, y: 74, w: 36, h: 12 };
+  M.pilaTitolare = { x: 274, y: 84 };
+  M.bacheca = { x: 98, y: 2, w: 136, h: 40 };
+
+  // Dove si fa cosa quando si e in pausa. Ogni posto ha un punto di arrivo (ax, ay: sempre in una cella libera) e, se serve, un punto
+  // finale (x, y) in cui ci si infila (il divano). dir e dove si guarda.
+  M.posti = {
+    caffe: [{ ax: 302, ay: 182, x: 302, y: 182, dir: 'u' }],
+    gioco: [{ ax: 272, ay: 182, x: 272, y: 182, dir: 'u' }],
+    finestra: [{ ax: 24, ay: 62, x: 24, y: 62, dir: 'u' }, { ax: 42, ay: 62, x: 42, y: 62, dir: 'u' }, { ax: 60, ay: 62, x: 60, y: 62, dir: 'u' }],
+    divano: [{ ax: 28, ay: 206, x: 28, y: 193, dir: 'd' }, { ax: 48, ay: 206, x: 48, y: 193, dir: 'd' }],
+    chiacchiere: [
+      [{ ax: 112, ay: 134, x: 112, y: 134, dir: 'r' }, { ax: 130, ay: 134, x: 130, y: 134, dir: 'l' }],
+      [{ ax: 190, ay: 166, x: 190, y: 166, dir: 'r' }, { ax: 208, ay: 166, x: 208, y: 166, dir: 'l' }]
+    ]
+  };
+  // Il tavolo dei portatili, contro il muro a sinistra: una persona per ogni sessione oltre la prima di un ruolo (la prima siede alla
+  // scrivania del ruolo). Chi non trova posto e nell'open space, oltre la porta in basso a sinistra: da li si entra e si esce.
+  M.POSTI_TAVOLO = 4;
+  M.tavolo = { x: 8, y: 68, w: 15, h: 57 };
+  M.postoTavolo = function (i) { var y = 80 + i * 14; return { ax: 28, ay: y, x: 28, y: y, dir: 'l' }; };
+  M.portaOpenSpace = { x: 0, y: 158, w: 8, h: 16 };
+  M.ingressoOpenSpace = { ax: 14, ay: 167, x: 14, y: 167, dir: 'r' };
+  M.stazione = { ax: 18, ay: 151, x: 18, y: 151, dir: 'd' };   // dove riposa lo smistatore
+  M.gatto = { x: 170, y: 190 };
+
+  // La griglia: true dove non si passa.
+  var blocco = new Array(GW * GH);
+  function cella(x, y) { return { cx: Math.max(0, Math.min(GW - 1, Math.floor(x / T))), cy: Math.max(0, Math.min(GH - 1, Math.floor(y / T))) }; }
+  M.cella = cella;
+  function bloccaRett(x, y, w, h) {
+    var a = cella(x, y), b = cella(x + w - 1, y + h - 1);
+    for (var cy = a.cy; cy <= b.cy; cy++) for (var cx = a.cx; cx <= b.cx; cx++) blocco[cy * GW + cx] = true;
+  }
+  for (var i = 0; i < blocco.length; i++) blocco[i] = false;
+  bloccaRett(0, 0, W, 56);                       // il muro in alto, con i monitor e la bacheca
+  bloccaRett(0, 0, T, H);                        // il muro a sinistra
+  bloccaRett(0, 208, W, 16);                     // il muro in basso
+  bloccaRett(W - T, 0, T, H);                    // il muro a destra
+  bloccaRett(M.stanza.x - 4, 0, M.stanza.w + 4, M.porta.y);   // la stanza di Titolare, sopra la porta
+  bloccaRett(M.stanza.x - 4, M.porta.y + M.porta.h, M.stanza.w + 4, 128 - M.porta.y - M.porta.h);   // e sotto
+  bloccaRett(M.stanza.x + 4, M.porta.y, M.stanza.w, M.porta.h);   // dentro la stanza non si entra
+  for (var s = 0; s < M.MAX_SCRIVANIE; s++) { var d = M.scrivania(s); bloccaRett(d.x, d.y, d.w, d.h + 3); }
+  bloccaRett(14, 176, 48, 23);                   // il divano
+  bloccaRett(289, 134, 24, 42);                  // l'angolo del caffe: bancone, macchina da espresso e insegna
+  bloccaRett(262, 148, 20, 28);                  // la macchina da gioco
+  bloccaRett(96, 188, 36, 20);                   // l'acquario
+  bloccaRett(146, 130, 12, 22);                  // il refrigeratore
+  bloccaRett(66, 48, 10, 18);                    // il cactus davanti alla finestra
+  bloccaRett(M.tavolo.x, M.tavolo.y, M.tavolo.w, M.tavolo.h);   // il tavolo dei portatili
+  bloccaRett(232, 194, 12, 14);                  // la pianta in basso
+  bloccaRett(8, 130, 20, 8);                     // la stazione di ricarica dello smistatore (il retro)
+  M.bloccata = function (cx, cy) { return cx < 0 || cy < 0 || cx >= GW || cy >= GH || blocco[cy * GW + cx]; };
+
+  // Il percorso piu breve fra due punti, in celle, con le diagonali solo se non tagliano un angolo. Restituisce i punti da toccare
+  // (centri delle celle, senza quella di partenza) oppure null se non si arriva.
+  var DIR = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.41], [1, -1, 1.41], [-1, 1, 1.41], [-1, -1, 1.41]];
+  M.percorso = function (x0, y0, x1, y1) {
+    var a = cella(x0, y0), b = cella(x1, y1);
+    var da = a.cy * GW + a.cx, fine = b.cy * GW + b.cx;
+    if (da === fine) return [];
+    var costo = new Array(GW * GH), prec = new Array(GW * GH), chiuso = new Array(GW * GH);
+    for (var i = 0; i < costo.length; i++) { costo[i] = Infinity; prec[i] = -1; chiuso[i] = false; }
+    costo[da] = 0;
+    for (;;) {
+      var cur = -1, mn = Infinity;
+      for (var k = 0; k < costo.length; k++) if (!chiuso[k] && costo[k] < mn) { mn = costo[k]; cur = k; }
+      if (cur < 0) return null;
+      if (cur === fine) break;
+      chiuso[cur] = true;
+      var cx = cur % GW, cy = Math.floor(cur / GW);
+      for (var j = 0; j < DIR.length; j++) {
+        var nx = cx + DIR[j][0], ny = cy + DIR[j][1];
+        if (M.bloccata(nx, ny)) continue;
+        if (DIR[j][2] > 1 && (M.bloccata(cx + DIR[j][0], cy) || M.bloccata(cx, cy + DIR[j][1]))) continue;
+        var n = ny * GW + nx, c = costo[cur] + DIR[j][2];
+        if (c < costo[n]) { costo[n] = c; prec[n] = cur; }
+      }
+    }
+    var celle = [];
+    for (var p = fine; p !== da; p = prec[p]) celle.push(p);
+    celle.reverse();
+    // si tengono solo i punti dove la direzione cambia: in linea retta si va dritti
+    var punti = [], ultimaDir = null;
+    for (var q = 0; q < celle.length; q++) {
+      var prima = q === 0 ? da : celle[q - 1];
+      var dd = (celle[q] % GW - prima % GW) + ',' + (Math.floor(celle[q] / GW) - Math.floor(prima / GW));
+      if (q > 0 && dd === ultimaDir) punti[punti.length - 1] = puntoCella(celle[q]);
+      else punti.push(puntoCella(celle[q]));
+      ultimaDir = dd;
+    }
+    return punti;
+  };
+  function puntoCella(n) { return { x: (n % GW) * T + T / 2, y: Math.floor(n / GW) * T + T - 1 }; }
+
+  // Una cella libera a caso nel corridoio (per chi passeggia e per il gatto). rnd: numero casuale in [0,1).
+  M.cellaLibera = function (rnd, minY) {
+    for (var t = 0; t < 200; t++) {
+      var cx = 2 + Math.floor(rnd() * (GW - 12)), cy = Math.floor((minY || 88) / T) + Math.floor(rnd() * 14);
+      if (!M.bloccata(cx, cy) && cy < GH - 3) return puntoCella(cy * GW + cx);
+    }
+    return { x: 160, y: 140 };
+  };
+
+  U.M = M;
+})(U);
+
+// I personaggi: un disegno per ruolo (colori e dettagli diversi, riconoscibili a colpo d'occhio), il robot dello smistatore e il gatto.
+// Tutto con rettangoli: nessuna immagine. Le posizioni sono i piedi al centro (x, y).
+(function (U) {
+  'use strict';
+  function R(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); }
+
+  var BASE = { pelle: '#f2c6a0', capelli: '#3b2a1a', top: '#777777', dettaglio: '#bbbbbb', pantaloni: '#33384a', scarpe: '#1d1b2b', acc: '' };
+  U.stili = {
+    responsabile: { pelle: '#f2c6a0', capelli: '#4a2f1b', top: '#7a4fd1', dettaglio: '#c9b6f7', acc: 'cravatta', sigla: 'RESP' },
+    dev: { pelle: '#e0a97f', capelli: '#1d1d1d', top: '#2a9d8f', dettaglio: '#8fe0d4', acc: 'cuffie', sigla: 'DEV' },
+    reviewer: { pelle: '#f6d3b3', capelli: '#e9c46a', top: '#e76f51', dettaglio: '#ffd0c2', acc: 'occhiali', sigla: 'REV' },
+    collaudatore: { pelle: '#c68642', capelli: '#2b2b2b', top: '#f4f1ea', dettaglio: '#2a9d4e', acc: 'camice', sigla: 'COLL' },
+    mentore: { pelle: '#f0c9a6', capelli: '#c9ccd1', top: '#8a5a2b', dettaglio: '#d9b27c', acc: 'barba', sigla: 'MENT' },
+    titolare: { pelle: '#f0c9a6', capelli: '#5a3a22', top: '#3a6ea5', dettaglio: '#a9c8e8', acc: '', sigla: 'RIC' }
+  };
+  U.stile = function (ruolo) {
+    var s = U.stili[ruolo];
+    if (s) return Object.assign({}, BASE, s);
+    // un ruolo nuovo, senza disegno suo: colore dal nome, sigla dalle prime lettere
+    var h = 0; for (var i = 0; i < ruolo.length; i++) h = (h * 31 + ruolo.charCodeAt(i)) % 360;
+    return Object.assign({}, BASE, { top: 'hsl(' + h + ',55%,50%)', dettaglio: 'hsl(' + h + ',55%,75%)', capelli: '#2b2b2b', sigla: ruolo.slice(0, 4).toUpperCase() });
+  };
+
+  // o: { x, y, dir ('d','u','l','r'), passo (0-3), cammina, posa, t (secondi), stile }
+  // pose: 'in piedi', 'scrivania' (digita; con seduto: true sta seduto di schiena), 'stira', 'bevi', 'gioca', 'divano', 'dorme', 'parla'
+  U.persona = function (c, o) {
+    var s = o.stile, x = Math.round(o.x), y = Math.round(o.y), dir = o.dir, posa = o.posa || 'in piedi';
+    var cam = !!o.cammina, passo = o.passo | 0;
+    var seduto = !!o.seduto, divano = posa === 'divano' || posa === 'dorme';
+    R(c, x - 5, y - 1, 10, 2, 'rgba(0,0,0,0.22)');
+    var su = cam && (passo % 2 === 1) ? 1 : 0;      // il corpo sale un pixel a ogni mezzo passo
+    var by = y - su;
+    var dy = seduto ? 3 : (divano ? 2 : 0);          // da seduti si sta piu in basso
+    // gambe
+    if (!seduto) {
+      var lungaS = 3, lungaD = 3;
+      if (cam) { if (passo === 0) lungaD = 2; else if (passo === 2) lungaS = 2; }
+      if (divano) { R(c, x - 3, y - 3, 3, 2, s.pantaloni); R(c, x + 1, y - 3, 3, 2, s.pantaloni); R(c, x - 3, y - 1, 3, 1, s.scarpe); R(c, x + 1, y - 1, 3, 1, s.scarpe); }
+      else {
+        R(c, x - 3, y - lungaS, 3, lungaS, s.pantaloni); R(c, x + 1, y - lungaD, 3, lungaD, s.pantaloni);
+        R(c, x - 3, y - 1, 3, 1, s.scarpe); R(c, x + 1, y - 1, 3, 1, s.scarpe);
+      }
+    }
+    // busto e braccia
+    var ty = by - 9 + dy;
+    R(c, x - 4, ty, 8, 6, s.top);
+    if (s.acc === 'camice') { R(c, x - 4, ty, 8, 1, s.dettaglio); if (dir === 'd') R(c, x + 1, ty + 2, 2, 2, s.dettaglio); }
+    if (s.acc === 'cravatta' && dir === 'd') { R(c, x - 1, ty, 2, 4, '#d1495b'); R(c, x - 4, ty, 3, 1, s.dettaglio); R(c, x + 1, ty, 3, 1, s.dettaglio); }
+    if (s.acc === 'cuffie' && dir === 'd') R(c, x - 4, ty + 5, 8, 1, s.dettaglio);
+    var bS = 0, bD = 0, t = o.t || 0;
+    if (cam) { bS = passo === 0 ? 1 : (passo === 2 ? -1 : 0); bD = -bS; }
+    var braccioSu = false, tazza = false;
+    if (posa === 'stira') braccioSu = true;
+    if (posa === 'bevi') tazza = true;
+    if (posa === 'parla') { bD = (Math.floor(t * 3) % 2) ? -3 : 0; }
+    if (posa === 'scrivania') { bS = (Math.floor(t * 9) % 2); bD = 1 - bS; }
+    if (posa === 'gioca') { bS = (Math.floor(t * 8) % 2) * -1; bD = (Math.floor(t * 6) % 2) * -1; }
+    if (braccioSu) {
+      R(c, x - 6, ty - 8, 2, 9, s.top); R(c, x + 4, ty - 8, 2, 9, s.top); R(c, x - 6, ty - 10, 2, 2, s.pelle); R(c, x + 4, ty - 10, 2, 2, s.pelle);
+    } else if (tazza) {
+      R(c, x - 6, ty + 1, 2, 5, s.top); R(c, x + 4, ty - 3, 2, 6, s.top);
+      R(c, x + 3, ty - 6, 4, 4, '#f5f5f5'); R(c, x + 4, ty - 5, 2, 2, '#6b4226');
+    } else {
+      R(c, x - 6, ty + 1 + bS, 2, 5, s.top); R(c, x + 4, ty + 1 + bD, 2, 5, s.top);
+      R(c, x - 6, ty + 5 + bS, 2, 1, s.pelle); R(c, x + 4, ty + 5 + bD, 2, 1, s.pelle);
+    }
+    // testa
+    var hy = by - 16 + dy + (o.posa === 'dorme' ? 1 : 0);
+    R(c, x - 4, hy, 8, 7, s.pelle);
+    if (dir === 'u') {
+      R(c, x - 4, hy, 8, 7, s.capelli);
+      if (s.acc === 'camice') R(c, x - 4, hy, 8, 3, s.dettaglio);
+    } else {
+      R(c, x - 4, hy, 8, 3, s.capelli);
+      if (dir === 'd') { R(c, x - 4, hy + 3, 1, 2, s.capelli); R(c, x + 3, hy + 3, 1, 2, s.capelli); }
+      if (dir === 'l') R(c, x + 1, hy + 3, 3, 3, s.capelli);
+      if (dir === 'r') R(c, x - 4, hy + 3, 3, 3, s.capelli);
+      if (s.acc === 'camice') { R(c, x - 4, hy, 8, 3, s.dettaglio); R(c, x - 4, hy + 3, 8, 1, '#f2d34f'); }
+      // occhi
+      var chiusi = o.posa === 'dorme' || (o.blink);
+      if (dir === 'd') {
+        if (chiusi) { R(c, x - 3, hy + 4, 2, 1, '#1d1b2b'); R(c, x + 1, hy + 4, 2, 1, '#1d1b2b'); }
+        else { R(c, x - 2, hy + 3, 1, 2, '#1d1b2b'); R(c, x + 1, hy + 3, 1, 2, '#1d1b2b'); }
+      } else {
+        var ex = dir === 'l' ? x - 3 : x + 2;
+        if (chiusi) R(c, ex - (dir === 'l' ? 0 : 1), hy + 4, 2, 1, '#1d1b2b'); else R(c, ex, hy + 3, 1, 2, '#1d1b2b');
+      }
+      if (s.acc === 'occhiali') {
+        if (dir === 'd') { R(c, x - 3, hy + 2, 3, 1, '#b3282d'); R(c, x + 1, hy + 2, 3, 1, '#b3282d'); R(c, x - 3, hy + 5, 3, 1, '#b3282d'); R(c, x + 1, hy + 5, 3, 1, '#b3282d'); }
+        else R(c, dir === 'l' ? x - 4 : x + 1, hy + 2, 3, 1, '#b3282d');
+      }
+      if (s.acc === 'barba') {
+        if (dir === 'd') { R(c, x - 3, hy + 5, 6, 2, '#e3e5e8'); }
+        else R(c, dir === 'l' ? x - 4 : x + 1, hy + 5, 3, 2, '#e3e5e8');
+      }
+    }
+    if (s.acc === 'cuffie') {
+      R(c, x - 4, hy - 1, 8, 1, '#555a66');
+      if (dir === 'd' || dir === 'u') { R(c, x - 5, hy + 2, 1, 4, '#555a66'); R(c, x + 4, hy + 2, 1, 4, '#555a66'); }
+      else R(c, x - 1, hy + 2, 2, 4, '#555a66');
+    }
+    if (s.acc === 'barba' && dir === 'u') R(c, x - 4, hy + 3, 8, 3, s.capelli);
+    if (o.cartella) U.cartella(c, x, by - 6 + dy, o.cartella.verso);
+  };
+
+  // La cartellina che si porta in mano: verde se si va avanti nel flusso, rossa con un segno se e un rimando indietro, azzurra
+  // se il passaggio non e ne l'uno ne l'altro (il mentore). L'id lo scrive l'etichetta sopra la testa.
+  U.cartella = function (c, x, y, verso) {
+    var col = verso === 'indietro' ? '#d1495b' : (verso === 'avanti' ? '#3fae5a' : '#4a90d9');
+    R(c, x - 5, y, 10, 7, '#1d1b2b'); R(c, x - 4, y + 1, 8, 5, col); R(c, x - 4, y - 1, 4, 2, col);
+    R(c, x - 3, y + 2, 6, 1, 'rgba(255,255,255,0.7)');
+    if (verso === 'indietro') R(c, x - 1, y + 3, 2, 2, '#ffffff');
+  };
+
+  // Lo smistatore: un robot a ruote. stato: 'riposo' (occhio blu), 'giro' (occhio verde, vassoio), 'dorme' (occhio spento).
+  U.robot = function (c, o) {
+    var x = Math.round(o.x), y = Math.round(o.y), t = o.t || 0;
+    R(c, x - 6, y - 1, 12, 2, 'rgba(0,0,0,0.22)');
+    var su = o.cammina && (Math.floor(t * 8) % 2) ? 1 : 0;
+    R(c, x - 6, y - 3, 4, 3, '#2b2d3a'); R(c, x + 2, y - 3, 4, 3, '#2b2d3a');
+    R(c, x - 5, y - 11 - su, 10, 8, '#aab4c4'); R(c, x - 5, y - 4 - su, 10, 1, '#7d8799');
+    R(c, x - 4, y - 17 - su, 8, 6, '#c7cfdc'); R(c, x - 4, y - 12 - su, 8, 1, '#7d8799');
+    var occhio = o.stato === 'giro' ? '#5fe08a' : (o.stato === 'dorme' ? '#3a3f55' : '#57a8ff');
+    R(c, x - 3, y - 15 - su, 6, 2, '#1d1b2b'); R(c, x - 2, y - 15 - su, 4, 2, occhio);
+    R(c, x, y - 21 - su, 1, 4, '#7d8799');
+    var led = o.stato === 'dorme' ? '#5b2a2a' : (Math.floor(t * 2) % 2 ? '#ff6b6b' : '#8a2f2f');
+    R(c, x - 1, y - 23 - su, 3, 2, led);
+    if (o.stato === 'giro') { R(c, x - 6, y - 8 - su, 3, 4, '#f4f1ea'); R(c, x - 6, y - 9 - su, 3, 1, '#d9d4c7'); }
+    R(c, x + 5, y - 8 - su, 2, 2, '#aab4c4');
+  };
+
+  // Il gatto di casa. stato: 'cammina', 'siede', 'dorme'. dir: 'l' o 'r'.
+  U.gatto = function (c, o) {
+    var x = Math.round(o.x), y = Math.round(o.y), t = o.t || 0, f = o.dir === 'l' ? -1 : 1, col = '#d98a3d';
+    R(c, x - 4, y - 1, 9, 2, 'rgba(0,0,0,0.2)');
+    if (o.stato === 'dorme') {
+      R(c, x - 4, y - 4, 9, 4, col); R(c, x - 5, y - 4, 2, 3, col); R(c, x - 4, y - 5, 1, 1, '#a8651f'); R(c, x - 2, y - 5, 1, 1, '#a8651f');
+      R(c, x + 2, y - 3, 3, 1, '#a8651f');
+      if (Math.floor(t * 1.2) % 2) R(c, x + 5, y - 7, 1, 1, '#ffffff');
+      return;
+    }
+    var sw = Math.floor(t * 3) % 2;
+    var passo = o.stato === 'cammina' ? Math.floor(t * 8) % 2 : 0;
+    R(c, x - 3 * f - (f > 0 ? 0 : 3), y - 5, 6, 3, col);
+    R(c, x + 2 * f - (f > 0 ? 0 : 2), y - 7, 3, 3, col);
+    R(c, x + 2 * f - (f > 0 ? 0 : 2), y - 8, 1, 1, '#a8651f'); R(c, x + 4 * f - (f > 0 ? 0 : 1), y - 8, 1, 1, '#a8651f');
+    R(c, x - 3 * f - (f > 0 ? 0 : 3), y - 3, 1, 3 - passo, col); R(c, x + 1 * f - (f > 0 ? 0 : 1), y - 3, 1, 2 + passo, col);
+    R(c, x - 4 * f - (f > 0 ? 0 : 1), y - 7 + sw, 1, 4, col);
+  };
+})(U);
+
+// La scena: lo sfondo fisso (pre-disegnato una volta), il cielo che segue l'ora vera, la bacheca, le scrivanie e l'ambiente che si muove sempre.
+// Qui si disegna soltanto: nessuna decisione. Gli id di card che compaiono (schermi, pile, cartelline) arrivano dal modello dei dati.
+(function (U) {
+  'use strict';
+  var M = U.M;
+  function R(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); }
+  function lerp(a, b, k) { return a + (b - a) * k; }
+  function hex(h) { return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)]; }
+  function mix(a, b, k) { var x = hex(a), y = hex(b); return 'rgb(' + Math.round(lerp(x[0], y[0], k)) + ',' + Math.round(lerp(x[1], y[1], k)) + ',' + Math.round(lerp(x[2], y[2], k)) + ')'; }
+  // un generatore deterministico per le cose che devono restare uguali a ogni disegno (le assi del pavimento, le stelle)
+  function seme(n) { var s = n; return function () { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; }; }
+
+  // ---- il cielo dalla finestra, secondo l'ora vera del giorno ---------------------------------------------------------------
+  var CIELO = [[0, '#0a1030', '#18204a'], [5, '#141c46', '#3a3f7a'], [6.5, '#f08a5d', '#f9c784'], [8, '#6cb4ee', '#bfe4f7'], [12, '#4aa3e8', '#a9dcf5'],
+    [17, '#5aa8e6', '#f7d9a0'], [19, '#e76f51', '#f4a261'], [20.5, '#2a2a5e', '#50407a'], [22, '#0a1030', '#18204a'], [24, '#0a1030', '#18204a']];
+  function coloriCielo(ora) {
+    for (var i = 1; i < CIELO.length; i++) {
+      if (ora <= CIELO[i][0]) {
+        var a = CIELO[i - 1], b = CIELO[i], k = (ora - a[0]) / (b[0] - a[0]);
+        return [mix(a[1], b[1], k), mix(a[2], b[2], k)];
+      }
+    }
+    return [CIELO[0][1], CIELO[0][2]];
+  }
+  var FIN = { x: 10, y: 8, w: 64, h: 34 };
+  var NUVOLE = [{ x: 0, y: 12, v: 2.2, s: 1 }, { x: 30, y: 22, v: 1.3, s: 1.3 }, { x: 52, y: 6, v: 3.1, s: 0.8 }];
+  var rs = seme(7), STELLE = [];
+  for (var si = 0; si < 14; si++) STELLE.push({ x: 2 + Math.floor(rs() * (FIN.w - 4)), y: 2 + Math.floor(rs() * (FIN.h - 12)), f: rs() * 6 });
+
+  // F: il rettangolo della finestra (quella dell'ufficio se manca)
+  function cielo(c, ora, t, F) {
+    F = F || FIN;
+    var col = coloriCielo(ora);
+    var fascia = F.h / 6;
+    for (var i = 0; i < 6; i++) R(c, F.x, F.y + i * fascia, F.w, Math.ceil(fascia), mixRgb(col[0], col[1], i / 5));
+    var giorno = ora >= 6.5 && ora <= 19.5, notte = ora < 5.5 || ora > 20.5;
+    if (notte) STELLE.forEach(function (s) { if (Math.floor(t * 1.5 + s.f) % 3) R(c, F.x + s.x, F.y + s.y, 1, 1, '#ffffff'); });
+    var arco = function (da, a) { var k = ((ora - da + 24) % 24) / a; return { x: F.x + 6 + k * (F.w - 12), y: F.y + F.h - 6 - Math.sin(k * Math.PI) * (F.h - 14) }; };
+    if (giorno) { var p = arco(6.5, 13); R(c, p.x - 3, p.y - 3, 7, 7, '#ffe27a'); R(c, p.x - 4, p.y - 1, 9, 3, '#ffe27a'); R(c, p.x - 1, p.y - 4, 3, 9, '#ffe27a'); }
+    else if (ora > 19.5 || ora < 6.5) { var q = arco(19.5, 11); R(c, q.x - 3, q.y - 3, 6, 6, '#f1f1e6'); R(c, q.x - 1, q.y - 3, 4, 6, mixRgb(col[0], col[1], 0.3)); }
+    var chiara = giorno ? '#ffffff' : '#7d86b8';
+    NUVOLE.forEach(function (n) {
+      var x = ((n.x + t * n.v) % (F.w + 24)) - 12;
+      R(c, F.x + x, F.y + n.y + 2, Math.round(14 * n.s), 3, chiara); R(c, F.x + x + 3, F.y + n.y, Math.round(8 * n.s), 3, chiara);
+    });
+  }
+  function mixRgb(a, b, k) {
+    var pa = a.match(/\d+/g).map(Number), pb = b.match(/\d+/g).map(Number);
+    return 'rgb(' + Math.round(lerp(pa[0], pb[0], k)) + ',' + Math.round(lerp(pa[1], pb[1], k)) + ',' + Math.round(lerp(pa[2], pb[2], k)) + ')';
+  }
+  // quanto buio e dentro: 0 di giorno, fino a 0.34 di notte
+  function bui(ora) {
+    if (ora >= 8 && ora <= 17.5) return 0;
+    if (ora > 17.5 && ora < 20.5) return (ora - 17.5) / 3 * 0.34;
+    if (ora >= 20.5 || ora <= 5) return 0.34;
+    if (ora > 5 && ora < 8) return (8 - ora) / 3 * 0.34;
+    return 0;
+  }
+
+  // ---- lo sfondo fisso ---------------------------------------------------------------------------------------------------
+  U.creaSfondo = function () {
+    var cv = document.createElement('canvas'); cv.width = M.W; cv.height = M.H;
+    var c = cv.getContext('2d');
+    // pavimento a doghe
+    var r = seme(3);
+    for (var y = 56; y < M.H; y += 8) {
+      var off = (Math.floor(y / 8) % 2) * 16;
+      for (var x = 0; x < M.W; x += 32) R(c, x, y, 32, 8, ((x + y) / 8) % 2 ? '#c99d63' : '#c19659');
+      for (var s = -off; s < M.W; s += 32) R(c, s, y, 1, 8, '#a97e48');
+      R(c, 0, y + 7, M.W, 1, '#b48850');
+      if (r() > 0.7) R(c, Math.floor(r() * M.W), y + 2, 2, 1, '#b08350');
+    }
+    // il muro in alto, a sinistra e in basso
+    R(c, 0, 0, M.W, 50, '#e9dfc9'); R(c, 0, 50, M.W, 6, '#a07a4f'); R(c, 0, 50, M.W, 1, '#c29c6b'); R(c, 0, 55, M.W, 1, '#7b5b37');
+    for (var wx = 0; wx < M.W; wx += 16) R(c, wx, 0, 1, 50, '#e1d6bd');
+    R(c, 0, 56, 8, M.H - 56, '#d6c8a8'); R(c, 7, 56, 1, M.H - 56, '#a07a4f');
+    R(c, 0, 208, M.W, 16, '#e9dfc9'); R(c, 0, 208, M.W, 3, '#a07a4f'); R(c, 0, 211, M.W, 1, '#7b5b37');
+    for (var bx = 0; bx < M.W; bx += 16) R(c, bx, 212, 1, 12, '#e1d6bd');
+    // la finestra: il buco da cui si vede il cielo, il telaio, le tende
+    R(c, FIN.x - 2, FIN.y - 2, FIN.w + 4, FIN.h + 4, '#8a6a46');
+    c.clearRect(FIN.x, FIN.y, FIN.w, FIN.h);
+    R(c, FIN.x + FIN.w / 2 - 1, FIN.y, 2, FIN.h, '#8a6a46'); R(c, FIN.x, FIN.y + 16, FIN.w, 2, '#8a6a46');
+    R(c, FIN.x - 4, FIN.y + FIN.h + 1, FIN.w + 8, 3, '#b08457');
+    R(c, FIN.x, FIN.y, 7, FIN.h, '#c0576a'); R(c, FIN.x + FIN.w - 7, FIN.y, 7, FIN.h, '#c0576a');
+    for (var tk = 0; tk < FIN.h; tk += 4) { R(c, FIN.x + 2, FIN.y + tk, 1, 3, '#a8445a'); R(c, FIN.x + FIN.w - 5, FIN.y + tk, 1, 3, '#a8445a'); }
+    // l'orologio a muro
+    R(c, 81, 8, 14, 14, '#6b4b2b'); R(c, 82, 7, 12, 16, '#6b4b2b'); R(c, 82, 9, 12, 12, '#f6f1e4'); R(c, 83, 8, 10, 14, '#f6f1e4');
+    // la bacheca
+    var B = M.bacheca;
+    R(c, B.x - 2, B.y - 2, B.w + 4, B.h + 4, '#6b4b2b'); R(c, B.x, B.y, B.w, B.h, '#c79a5d');
+    for (var gx = 0; gx < 5; gx++) for (var gy = 0; gy < 2; gy++) { var cx = cellaBacheca(gx, gy); R(c, cx.x - 1, cx.y - 1, cx.w + 1, cx.h + 1, '#b08648'); R(c, cx.x, cx.y, cx.w, cx.h, '#d2a868'); }
+    // la stanza di Titolare (vista in sezione): muro con la porta, pavimento, scaffale, tappeto
+    var S = M.stanza;
+    R(c, S.x + 4, 0, S.w - 4, 52, '#d3dcea'); R(c, S.x + 4, 52, S.w - 4, 4, '#7b8aa6');
+    R(c, S.x + 4, 56, S.w - 4, 72, '#a9b7cf');
+    for (var ry = 56; ry < 128; ry += 8) R(c, S.x + 4, ry, S.w - 4, 1, '#98a8c2');
+    R(c, S.x - 4, 0, 8, M.porta.y, '#a07a4f'); R(c, S.x - 4, M.porta.y + M.porta.h, 8, 128 - M.porta.y - M.porta.h, '#a07a4f');
+    R(c, S.x + 4, 0, 2, 128, '#8a6a46'); R(c, S.x - 4, 126, S.w + 4, 2, '#7b5b37');
+    R(c, S.x - 4, M.porta.y - 3, 8, 3, '#6b4b2b'); R(c, S.x - 4, M.porta.y + M.porta.h, 8, 2, '#6b4b2b');
+    R(c, S.x + 8, 94, 56, 30, '#5b7aa8'); R(c, S.x + 9, 95, 54, 28, '#6a8bbd');
+    R(c, S.x + 8, 8, 24, 38, '#7a5530');
+    for (var sh = 0; sh < 4; sh++) {
+      R(c, S.x + 9, 10 + sh * 9, 22, 1, '#a07a4f');
+      var rb = seme(40 + sh), bk = ['#c0392b', '#2e86c1', '#27ae60', '#f1c40f', '#8e44ad', '#e67e22'];
+      for (var b = 0; b < 7; b++) R(c, S.x + 9 + b * 3, 3 + sh * 9 + 4 - Math.floor(rb() * 3), 2, 5 + Math.floor(rb() * 3), bk[Math.floor(rb() * bk.length)]);
+    }
+    // le scrivanie e le sedie
+    for (var i = 0; i < M.MAX_SCRIVANIE; i++) {
+      var d = M.scrivania(i);
+      R(c, d.seduto.x - 6, d.seduto.y - 11, 12, 6, '#454a60'); R(c, d.seduto.x - 6, d.seduto.y - 6, 12, 7, '#555b75'); R(c, d.seduto.x - 5, d.seduto.y + 1, 10, 1, '#2b2e3c');
+      R(c, d.x, d.y, d.w, d.h, '#b78552'); R(c, d.x, d.y, d.w, 1, '#d09b66'); R(c, d.x, d.y + d.h, d.w, 3, '#8c6540');
+      R(c, d.x + 2, d.y + d.h + 3, 2, 3, '#6b4b2b'); R(c, d.x + d.w - 4, d.y + d.h + 3, 2, 3, '#6b4b2b');
+      R(c, d.x + 7, d.y + 6, 14, 4, '#2f3140'); R(c, d.x + 8, d.y + 7, 12, 1, '#454a60');
+    }
+    R(c, 270, 74, 36, 12, '#a87848'); R(c, 270, 74, 36, 1, '#c79a5d'); R(c, 270, 86, 36, 3, '#7b5b37');
+    R(c, 285, 98, 12, 6, '#3a4660'); R(c, 285, 104, 12, 7, '#46557a');
+    // il divano e il tappeto
+    R(c, 8, 168, 64, 40, '#8aa88a'); R(c, 8, 168, 64, 1, '#759475'); R(c, 8, 207, 64, 1, '#759475');
+    R(c, 14, 174, 48, 10, '#7a4f6d'); R(c, 14, 184, 48, 14, '#9a6a8a'); R(c, 14, 184, 48, 1, '#7a4f6d');
+    R(c, 14, 176, 5, 22, '#6a4160'); R(c, 57, 176, 5, 22, '#6a4160'); R(c, 38, 185, 1, 12, '#7a4f6d');
+    // l'angolo del caffe: un bancone di legno con sopra una macchina da espresso (corpo cromato, frontale rosso, manometro, braccio
+    // del filtro, tazzina sotto l'erogatore, tazzine che scaldano sul tetto) e un'insegna CAFFE, cosi si riconosce a colpo d'occhio
+    R(c, 290, 134, 24, 9, '#3b2a1a'); R(c, 291, 135, 22, 7, '#f6f1e4'); U.testo(c, 'CAFFE', 293, 136, '#8a4b1f');
+    R(c, 301, 143, 2, 3, '#3b2a1a');
+    R(c, 289, 161, 24, 15, '#7b5232'); R(c, 289, 160, 24, 2, '#b07a4a'); R(c, 289, 175, 24, 1, '#4e321d');
+    R(c, 291, 164, 9, 9, '#6b4529'); R(c, 302, 164, 9, 9, '#6b4529'); R(c, 297, 168, 2, 1, '#c9a26b'); R(c, 303, 168, 2, 1, '#c9a26b');
+    R(c, 292, 147, 18, 13, '#8c929c'); R(c, 293, 147, 16, 12, '#d6dbe2'); R(c, 293, 147, 16, 1, '#f4f6f9');
+    R(c, 294, 150, 14, 4, '#c0392b'); R(c, 294, 150, 14, 1, '#e05a4b');
+    R(c, 295, 151, 3, 2, '#f4f6f9'); R(c, 296, 151, 1, 1, '#1d1b2b'); R(c, 305, 151, 2, 2, '#5fe08a');
+    R(c, 299, 154, 4, 2, '#4a4f63'); R(c, 302, 155, 6, 1, '#2b2d3a'); R(c, 307, 154, 2, 2, '#2b2d3a');
+    R(c, 298, 157, 6, 3, '#4a4f63'); R(c, 299, 156, 4, 1, '#f4f6f9');
+    R(c, 299, 158, 4, 2, '#ffffff'); R(c, 303, 158, 1, 1, '#ffffff');
+    R(c, 294, 145, 3, 2, '#ffffff'); R(c, 298, 145, 3, 2, '#ffffff'); R(c, 302, 145, 3, 2, '#ffffff'); R(c, 292, 146, 18, 1, '#8c929c');
+    R(c, 310, 157, 3, 3, '#ffffff'); R(c, 310, 158, 1, 1, '#6b4226');
+    // la macchina da gioco
+    R(c, 262, 148, 20, 28, '#3a4aa8'); R(c, 262, 148, 20, 6, '#e63946'); R(c, 265, 156, 14, 11, '#0f1428'); R(c, 264, 168, 16, 7, '#2c3a8a');
+    R(c, 267, 170, 2, 2, '#ffd166'); R(c, 272, 170, 2, 2, '#ef476f'); R(c, 276, 170, 2, 2, '#06d6a0');
+    // l'acquario
+    R(c, 96, 188, 36, 14, '#bfe4f7'); R(c, 97, 189, 34, 12, '#5fb7d9'); R(c, 97, 198, 34, 3, '#e8d8a0'); R(c, 96, 202, 36, 6, '#6b4b2b'); R(c, 98, 208, 3, 0, '#6b4b2b');
+    R(c, 100, 193, 2, 5, '#2d9a5a'); R(c, 118, 191, 2, 7, '#2d9a5a'); R(c, 122, 194, 2, 4, '#3dba70');
+    // il refrigeratore dell'acqua
+    R(c, 146, 130, 12, 22, '#dfe6ee'); R(c, 148, 124, 8, 8, '#8fd0f0'); R(c, 148, 124, 8, 1, '#bfe4f7'); R(c, 148, 142, 3, 2, '#d1495b'); R(c, 153, 142, 3, 2, '#4a90d9');
+    // il tavolo dei portatili contro il muro a sinistra, con gli sgabelli
+    var T = M.tavolo;
+    R(c, T.x, T.y, T.w, T.h, '#a87848'); R(c, T.x, T.y, T.w, 1, '#c79a5d'); R(c, T.x + T.w - 1, T.y, 1, T.h, '#8c6540'); R(c, T.x, T.y + T.h, T.w, 3, '#7b5b37');
+    R(c, T.x + 2, T.y + T.h + 3, 2, 2, '#6b4b2b'); R(c, T.x + T.w - 4, T.y + T.h + 3, 2, 2, '#6b4b2b');
+    for (var ps = 0; ps < M.POSTI_TAVOLO; ps++) { var pt = M.postoTavolo(ps); R(c, pt.x - 3, pt.y - 5, 7, 4, '#555b75'); R(c, pt.x - 2, pt.y - 1, 1, 2, '#2b2e3c'); R(c, pt.x + 2, pt.y - 1, 1, 2, '#2b2e3c'); }
+    // la porta verso l'open space, nel muro a sinistra, con lo zerbino
+    var PO = M.portaOpenSpace;
+    R(c, PO.x, PO.y - 2, PO.w, PO.h + 4, '#6b4b2b'); R(c, PO.x + 1, PO.y, PO.w - 2, PO.h, '#3a2a1a'); R(c, PO.x + 2, PO.y + 1, 3, PO.h - 2, '#8a6a46');
+    R(c, PO.x + 4, PO.y + 8, 1, 1, '#f2d34f'); R(c, PO.x + 8, PO.y + 3, 9, 10, '#7a6a5a'); R(c, PO.x + 9, PO.y + 4, 7, 8, '#8f7f6f');
+    // la stazione di ricarica dello smistatore
+    R(c, 8, 134, 20, 20, '#8a8fa3'); R(c, 10, 136, 16, 16, '#6c7186'); R(c, 12, 140, 12, 8, '#4a4f63'); R(c, 8, 154, 20, 1, '#555a6e');
+    return cv;
+  };
+
+  function cellaBacheca(gx, gy) {
+    var B = M.bacheca, w = 26, h = 18;
+    return { x: B.x + 2 + gx * (w + 1), y: B.y + 2 + gy * (h + 2), w: w, h: h };
+  }
+
+  // ---- le parti che cambiano ---------------------------------------------------------------------------------------------------
+  var COLORI_FOGLIETTI = ['#fff176', '#ff8fab', '#80deea', '#a5d6a7', '#ffcc80'];
+  function bacheca(c, board) {
+    var B = M.bacheca;
+    for (var k = 0; k < 10; k++) {
+      var cel = cellaBacheca(k % 5, Math.floor(k / 5));
+      var col = board ? board[k] : null;
+      if (!col) { if (board) continue; U.testo(c, '?', cel.x + 1, cel.y + 1, '#6b4b2b'); continue; }
+      U.testo(c, col.sigla, cel.x + 1, cel.y + 1, '#3b2a1a');
+      var n = String(col.conteggio);
+      U.testo(c, n, cel.x + cel.w - U.larghezzaTesto(n) - 1, cel.y + 1, col.conteggio > 0 ? '#b3282d' : '#8a6a46');
+      var visibili = Math.min(col.conteggio, 18);
+      for (var f = 0; f < visibili; f++) {
+        var fx = cel.x + 1 + (f % 6) * 4, fy = cel.y + 8 + Math.floor(f / 6) * 3;
+        R(c, fx, fy, 3, 2, COLORI_FOGLIETTI[(k + f) % COLORI_FOGLIETTI.length]);
+      }
+    }
+  }
+
+  function orologio(c, data) {
+    var h = data.getHours() % 12 + data.getMinutes() / 60, m = data.getMinutes() + data.getSeconds() / 60, s = data.getSeconds();
+    var cx = 88, cy = 15;
+    R(c, cx, cy - 5, 1, 1, '#6b4b2b'); R(c, cx, cy + 5, 1, 1, '#6b4b2b'); R(c, cx - 5, cy, 1, 1, '#6b4b2b'); R(c, cx + 5, cy, 1, 1, '#6b4b2b');
+    function lancetta(ang, len, col) { for (var i = 0; i <= len; i++) R(c, cx + Math.round(Math.sin(ang) * i), cy - Math.round(Math.cos(ang) * i), 1, 1, col); }
+    lancetta(h / 12 * Math.PI * 2, 3, '#1d1b2b'); lancetta(m / 60 * Math.PI * 2, 4, '#1d1b2b'); lancetta(s / 60 * Math.PI * 2, 5, '#d1495b');
+  }
+
+  function acquario(c, t) {
+    for (var i = 0; i < 3; i++) {
+      var v = 6 + i * 3, dir = i % 2 ? -1 : 1, per = 30, x = ((t * v * dir) % per + per) % per;
+      var fx = 98 + x, fy = 192 + i * 2 + Math.round(Math.sin(t * 1.5 + i) * 1);
+      R(c, fx, fy, 3, 2, ['#ff8a5c', '#ffd166', '#ef476f'][i]); R(c, fx - dir, fy, 1, 2, ['#ff8a5c', '#ffd166', '#ef476f'][i]);
+    }
+    if (Math.floor(t * 2) % 3 === 0) R(c, 126, 195 - Math.floor((t * 6) % 6), 1, 1, '#ffffff');
+  }
+
+  // il vapore sale sempre dalla tazzina sotto l'erogatore; quando qualcuno prende il caffe scende il filo di caffe e la spia lampeggia
+  function vaporeCaffe(c, t, attiva) {
+    for (var i = 0; i < 3; i++) {
+      var k = (t * 0.8 + i / 3) % 1;
+      R(c, 300 + i + Math.round(Math.sin(t * 3 + i) * 1), 156 - Math.round(k * 10), 1, 2, 'rgba(255,255,255,' + (0.7 * (1 - k)).toFixed(2) + ')');
+    }
+    if (attiva) {
+      if (Math.floor(t * 6) % 2) R(c, 301, 157, 1, 1, '#6b4226');
+      R(c, 300, 158, 2, 1, '#6b4226');
+      R(c, 305, 151, 2, 2, Math.floor(t * 3) % 2 ? '#ffd166' : '#5fe08a');
+    }
+  }
+
+  function macchinaGioco(c, t, attiva) {
+    var col = attiva ? ['#ffd166', '#06d6a0', '#ef476f', '#4cc9f0'][Math.floor(t * 6) % 4] : '#1f3a6a';
+    R(c, 267, 158 + Math.floor(t * 3) % 6, 3, 2, col); R(c, 272 + Math.floor(t * 4) % 5, 160, 3, 3, attiva ? '#ffffff' : '#35507a');
+    if (!attiva && Math.floor(t * 1.5) % 2) U.testo(c, 'PLAY', 266, 162, '#3d5f9a');
+  }
+
+  function piante(c, t) {
+    function pianta(x, y) {
+      R(c, x, y + 8, 10, 8, '#a8651f'); R(c, x - 1, y + 8, 12, 2, '#c47a2c');
+      var s = Math.round(Math.sin(t * 1.4 + x));
+      R(c, x + 1 + s, y + 1, 3, 8, '#2d9a5a'); R(c, x + 6 - s, y, 3, 9, '#3dba70'); R(c, x + 3, y - 3 + s, 3, 9, '#2d9a5a'); R(c, x - 1, y + 3, 3, 5, '#3dba70'); R(c, x + 8, y + 3, 3, 5, '#2d9a5a');
+    }
+    pianta(66, 50); pianta(232, 194);
+    R(c, 306, 54, 10, 8, '#a8651f'); R(c, 307 + Math.round(Math.sin(t * 1.2)), 46, 3, 9, '#3dba70'); R(c, 311, 44, 3, 11, '#2d9a5a');
+  }
+
+  function schermo(c, i, p, t) {
+    var d = M.scrivania(i), m = d.monitor;
+    R(c, m.x, m.y, m.w, m.h, '#2f3140'); R(c, m.x + 9, m.y + m.h, 4, 2, '#2f3140'); R(c, m.x + 6, m.y + m.h + 1, 10, 1, '#454a60');
+    var sx = m.x + 1, sy = m.y + 1, sw = m.w - 2, sh = m.h - 2;
+    if (p && p.sessione) {
+      R(c, sx, sy, sw, sh, '#0c2a22');
+      var id = '#' + p.sessione.id;
+      U.testo(c, id, sx + 1, sy + 1, '#eafff6');
+      var r = Math.floor(t * 2.5);
+      for (var l = 0; l < 2; l++) {
+        var len = 5 + ((r + l * 7 + i * 3) * 7) % 12;
+        R(c, sx + 1, sy + 8 + l * 2, len, 1, l ? '#35c98a' : '#4df0a0');
+      }
+      if (Math.floor(t * 2) % 2) R(c, sx + 1 + ((r * 7) % 12) + 6, sy + 8, 1, 1, '#ffffff');
+      // la tastiera lampeggia
+      R(c, d.x + 7 + ((r * 5) % 12), d.y + 6, 2, 1, '#7ee8b0');
+    } else {
+      R(c, sx, sy, sw, sh, '#10131f');
+      // salvaschermo: un quadratino che rimbalza piano
+      var px = Math.abs(((t * 4 + i * 5) % (2 * (sw - 3))) - (sw - 3)), py = Math.abs(((t * 2.5 + i * 3) % (2 * (sh - 3))) - (sh - 3));
+      R(c, sx + px, sy + py, 3, 3, ['#4a90d9', '#7a4fd1', '#2a9d8f', '#e76f51', '#e9c46a'][i % 5]);
+    }
+  }
+
+  function pila(c, x, y, n, colore) {
+    var vis = Math.min(n, 10);
+    for (var k = 0; k < vis; k++) R(c, x + (k % 2), y - k, 6, 1, k % 2 ? '#e4dcc4' : '#fffdf5');
+    if (vis > 0) R(c, x + 4, y - vis + 1, 2, 1, colore || '#d1495b');
+    if (n > 0) {
+      var s = String(n);
+      U.etichetta(c, s, x + 3, y - vis - 7, n > 10 ? '#ffd166' : '#ffffff');
+    }
+  }
+
+  U.pile = { pila: pila };
+
+  // I portatili sul tavolo: acceso con l'id della sessione sullo schermo (in piccolo, una riga) se qualcuno ci lavora, spento se no.
+  function portatili(c, G, t) {
+    var occupati = {};
+    (G.colleghi || []).forEach(function (k) { if (k.posto >= 0 && k.seduto) occupati[k.posto] = k; });
+    for (var i = 0; i < M.POSTI_TAVOLO; i++) {
+      var p = M.postoTavolo(i), x = M.tavolo.x + 3, y = p.y - 13;
+      var k = occupati[i];
+      R(c, x, y + 6, 9, 3, '#9aa0ab'); R(c, x + 1, y + 7, 7, 1, '#6c7280');
+      R(c, x, y, 2, 8, '#2f3140');
+      R(c, x + 1, y + 1, 1, 6, k ? (Math.floor(t * 3 + i) % 4 ? '#4df0a0' : '#35c98a') : '#10131f');
+      if (k) R(c, x + 3 + Math.floor(t * 7 + i) % 5, y + 7, 1, 1, '#7ee8b0');
+    }
+  }
+  U.portatili = portatili;
+
+  // Tutto cio che sta sotto i personaggi. G: modello, t (secondi di gioco), ora (Date), drops (cartelline appena posate).
+  U.disegnaFondo = function (c, sfondo, G) {
+    var data = G.ora, ora = data.getHours() + data.getMinutes() / 60, t = G.t;
+    c.clearRect(0, 0, M.W, M.H);
+    cielo(c, ora, t);
+    c.drawImage(sfondo, 0, 0);
+    bacheca(c, G.modello ? G.modello.board : null);
+    orologio(c, data);
+    acquario(c, t);
+    piante(c, t);
+    vaporeCaffe(c, t, G.usoCaffe);
+    macchinaGioco(c, t, G.usoGioco);
+    // il refrigeratore: ogni tanto una bolla
+    if (Math.floor(t * 1.1) % 4 === 0) R(c, 151, 128 + Math.floor((t * 5) % 5), 1, 1, '#ffffff');
+    var P = G.modello ? G.modello.personaggi : [];
+    for (var i = 0; i < M.MAX_SCRIVANIE; i++) {
+      var p = P[i];
+      schermo(c, i, p, t);
+      var d = M.scrivania(i);
+      if (p && p.codaTotale > 0) pila(c, d.pila.x, d.pila.y, p.codaTotale, null);
+    }
+    portatili(c, G, t);
+    // le cartelline posate da poco sulle scrivanie
+    (G.drops || []).forEach(function (dr) {
+      var d = M.scrivania(dr.scrivania);
+      U.cartella(c, d.appoggio.x + 5, d.appoggio.y - 1, dr.verso);
+      if (Math.floor(G.t * 2) % 2 || dr.verso !== 'indietro') U.etichetta(c, '#' + dr.id, d.x + 14, d.y - 22, dr.verso === 'indietro' ? '#ff9aa8' : '#9affc0');
+    });
+    // la stazione dello smistatore
+    U.etichetta(c, 'SMIST', 18, 157, '#ffffff');
+    // la stanza di Titolare: le voci "da fare tu" sono fogli sulla sua scrivania, tanti quanti sono
+    var n = G.modello ? G.modello.daFareTu.length : 0, S = M.stanza;
+    var vis = Math.min(n, 16);
+    for (var k = 0; k < vis; k++) R(c, M.pilaTitolare.x - 10 + (k % 2), M.pilaTitolare.y - 4 - k, 12, 1, k % 2 ? '#e4dcc4' : '#fffdf5');
+    if (vis > 0) R(c, M.pilaTitolare.x - 1, M.pilaTitolare.y - 3 - vis, 3, 1, '#d1495b');
+    R(c, S.x + 8, 56, 34, 14, '#2f3140'); R(c, S.x + 9, 57, 32, 12, '#10131f');
+    if (G.modello && G.modello.erroreAdo) U.testo(c, 'ADO?', S.x + 11, 60, '#ff9aa8');
+    else U.testo(c, 'LEGGE ' + (Math.floor(t) % 2 ? '.' : ' '), S.x + 11, 60, '#9ad1ff');
+    // la targa sopra: DA FARE TU e il numero grande
+    R(c, S.x + 36, 6, 28, 22, '#3a3f55'); R(c, S.x + 37, 7, 26, 20, '#f6f1e4');
+    U.testo(c, 'DA FARE', S.x + 39, 9, '#1d1b2b'); U.testo(c, 'TU', S.x + 39, 16, '#1d1b2b');
+    var ns = String(n);
+    U.testo(c, ns, S.x + 62 - U.larghezzaTesto(ns, 2) - 1, 14, n > 0 ? '#d1495b' : '#2a9d4e', 2);
+  };
+
+  // Sopra tutto: il buio della sera, che segue l'ora vera.
+  U.disegnaVelo = function (c, G) {
+    var data = G.ora, ora = data.getHours() + data.getMinutes() / 60, b = bui(ora);
+    if (b > 0) { c.fillStyle = 'rgba(16,24,70,' + b.toFixed(3) + ')'; c.fillRect(0, 0, M.W, M.H); }
+  };
+
+  U.coloriCielo = coloriCielo;
+  U.cielo = cielo;
+  U.bui = bui;
+  U.cellaBacheca = cellaBacheca;
+})(U);
+
+// Il cervello del gioco: cosa fa ogni personaggio, un passo alla volta. Niente DOM, niente disegno.
+//
+// Due strati, tenuti separati di proposito:
+//  - il dato vero (G.modello, dalla vista) decide SOLO: chi siede alla scrivania, chi fa la fila alla porta, chi fa una consegna e di che
+//    verso, quanti fogli ci sono. Da li' vengono tutti gli id di card che la pagina mostra;
+//  - la vita (la pausa, le chiacchiere, il gatto, il meteo) e' movimento di contorno: non porta id di card e non finge lavoro.
+// Un personaggio non cambia mai posto di colpo: ha un piano (andare, fare, fare) e cammina lungo un percorso che evita mobili e muri.
+(function (U) {
+  'use strict';
+  var M = U.M;
+  var VEL = 34;                    // pixel al secondo
+  var PESI = { caffe: 3, gioco: 2, finestra: 2, divano: 2.5, chiacchiere: 2, vaga: 1.5 };
+  var ICONE_CHIACCHIERE = ['cuore', 'nota', 'domanda', 'esclama', 'stella', 'sorriso', 'puntini'];
+
+  function Gioco(opz) {
+    opz = opz || {};
+    this.rnd = opz.rnd || Math.random;
+    this.t = 0; this.ridotto = !!opz.ridotto; this.modello = null;
+    this.salvato = null;
+    this.colleghi = []; this.openSpace = [];
+    this.agenti = []; this.inAttesa = []; this.drops = []; this.fatte = opz.fatte || {}; this.occ = {}; this.chat = [];
+    this.usoCaffe = false; this.usoGioco = false;
+    this.robot = nuovoRobot(this); this.gatto = nuovoGatto(this);
+  }
+  U.Gioco = Gioco;
+
+  // ---- movimento ------------------------------------------------------------------------------------------------------------------
+  function muovi(e, dt, vel) {
+    var tgt = e.percorso.length ? e.percorso[0] : (e.slide || null);
+    if (!tgt) { e.cammina = false; return true; }
+    var dx = tgt.x - e.x, dy = tgt.y - e.y, d = Math.sqrt(dx * dx + dy * dy), passo = (vel || VEL) * dt;
+    if (d <= passo) {
+      e.x = tgt.x; e.y = tgt.y;
+      if (e.percorso.length) e.percorso.shift(); else e.slide = null;
+    } else { e.x += dx / d * passo; e.y += dy / d * passo; }
+    if (d > 0.01) e.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'r' : 'l') : (dy > 0 ? 'd' : 'u');
+    e.cammina = true; e.tPasso += dt; e.passo = Math.floor(e.tPasso * 7) % 4;
+    return !e.percorso.length && !e.slide;
+  }
+  function avvia(e, spot) {
+    var p = M.percorso(e.x, e.y, spot.ax, spot.ay) || [];
+    p.push({ x: spot.ax, y: spot.ay });   // l'ultimo tratto va al punto esatto, non al centro della cella
+    e.percorso = p;
+    e.slide = (spot.x !== spot.ax || spot.y !== spot.ay) ? { x: spot.x, y: spot.y } : null;
+  }
+
+  // ---- il piano di un personaggio ---------------------------------------------------------------------------------------------
+  // Passi: { k:'vai', spot }, { k:'fai', posa, dir, dur | fino(a), inizio(a), fine(a), tick(a,dt) }, { k:'fn', f }
+  function esegui(G, e, dt, quandoVuoto) {
+    var s = e.piano[0];
+    if (!s) { quandoVuoto(e); return; }
+    if (s.k === 'vai') {
+      if (!s.avviato) { s.avviato = true; e.seduto = false; e.posa = 'in piedi'; avvia(e, s.spot); }
+      if (muovi(e, dt)) { e.dir = s.spot.dir || e.dir; e.piano.shift(); }
+    } else if (s.k === 'fai') {
+      e.cammina = false;
+      if (!s.t0 && s.t0 !== 0) { s.t0 = 0; e.posa = s.posa || 'in piedi'; if (s.dir) e.dir = s.dir; if (s.inizio) s.inizio(e); }
+      s.t0 += dt;
+      if (s.tick) s.tick(e, dt, s.t0);
+      if (s.fino ? s.fino(e) : s.t0 >= s.dur) { if (s.fine) s.fine(e); e.posa = 'in piedi'; e.piano.shift(); }
+    } else { s.f(e); e.piano.shift(); }
+  }
+  function libera(G, e) { (e.prenota || []).forEach(function (k) { if (G.occ[k] === e) delete G.occ[k]; }); e.prenota = []; }
+  function prendi(G, e, k) { G.occ[k] = e; e.prenota.push(k); }
+  function interrompi(G, e) {
+    libera(G, e);
+    if (e.chat) { e.chat.fatta = true; e.chat = null; }
+    e.piano = []; e.percorso = []; e.slide = null; e.cammina = false; e.seduto = false; e.posa = 'in piedi'; e.bolla = null; e.portando = null; e.consegnaCorrente = null;
+  }
+  function durata(G, e, lo, hi) { return (lo + G.rnd() * (hi - lo)) * e.car.tempo; }
+  function fumetto(G, e, icona, colore, secondi) { e.bolla = { icona: icona, colore: colore || '#1d1b2b', fino: G.t + secondi }; }
+
+  // ---- gli agenti -----------------------------------------------------------------------------------------------------------------
+  function nuovoAgente(G, ruolo, indice) {
+    var pesi = {}; Object.keys(PESI).forEach(function (k) { pesi[k] = 0.35 + G.rnd() * 1.7; });
+    return {
+      ruolo: ruolo, indice: indice, stile: U.stile(ruolo), x: 0, y: 0, dir: 'd', passo: 0, tPasso: 0, cammina: false, posa: 'in piedi', seduto: false, t: G.rnd() * 10,
+      modo: 'pausa', piano: [], percorso: [], slide: null, vuole: { lavora: false, fila: -1 }, slot: -1, portando: null, bolla: null, prenota: [], chat: null,
+      ultima: '', attivita: '', car: { pesi: pesi, tempo: 0.8 + G.rnd() * 0.6 }, micro: null, microT: 4 + G.rnd() * 8, occhi: 0
+    };
+  }
+  function spotScrivania(a) { var d = M.scrivania(a.indice); return { ax: d.seduto.x, ay: d.seduto.y, x: d.seduto.x, y: d.seduto.y, dir: 'u' }; }
+  function spotVisita(i) { var d = M.scrivania(i); return { ax: d.visita.x, ay: d.visita.y, x: d.visita.x, y: d.visita.y, dir: 'u' }; }
+
+  // Seduti al lavoro, alla scrivania o al tavolo dei portatili: si digita, ogni tanto ci si stiracchia o si beve, ma non si lascia il posto
+  function faiSeduto(G, dir, fino) {
+    return {
+      k: 'fai', posa: 'scrivania', dir: dir, fino: fino,
+      inizio: function (e) { e.seduto = true; e.microT = 5 + G.rnd() * 8; },
+      tick: function (e, dt) {
+        if (e.micro) { e.micro.t += dt; if (e.micro.t >= e.micro.dur) { e.micro = null; e.posa = 'scrivania'; e.microT = 6 + G.rnd() * 12; } return; }
+        e.microT -= dt;
+        if (e.microT <= 0) {
+          e.micro = G.rnd() < 0.5 ? { posa: 'stira', dur: 1.3, t: 0 } : { posa: 'bevi', dur: 2.2, t: 0 };
+          e.posa = e.micro.posa;
+        }
+      },
+      fine: function (e) { e.seduto = false; e.micro = null; }
+    };
+  }
+  function pianoLavoro(G, a) {
+    a.modo = 'lavoro'; a.attivita = 'lavora';
+    a.piano = [
+      { k: 'vai', spot: spotScrivania(a) },
+      faiSeduto(G, 'u', function (e) { return !e.vuole.lavora; })
+    ];
+  }
+  function pianoFila(G, a, slot) {
+    a.modo = 'fila'; a.slot = slot; a.attivita = 'in fila';
+    var s = M.codaPorta(slot);
+    a.piano = [{ k: 'vai', spot: { ax: s.x, ay: s.y, x: s.x, y: s.y, dir: 'r' } },
+      { k: 'fai', posa: 'in piedi', dir: 'r', fino: function (e) { return e.vuole.fila !== slot; } }];
+  }
+
+  // La pausa: sceglie da solo cosa fare, con pesi e durate diversi per ognuno, cosi due fermi non fanno la stessa cosa insieme.
+  function liberoQualsiasi(G, base, n) {
+    var l = [];
+    for (var i = 0; i < n; i++) if (!G.occ[base + i]) l.push(i);
+    return l.length ? l[Math.floor(G.rnd() * l.length)] : -1;
+  }
+  function coppiaLibera(G) {
+    var l = [];
+    for (var i = 0; i < M.posti.chiacchiere.length; i++) if (!G.occ['chat' + i]) l.push(i);
+    return l.length ? l[Math.floor(G.rnd() * l.length)] : -1;
+  }
+  function partnerPossibile(G, a) {
+    var l = G.agenti.filter(function (b) { return b !== a && b.modo === 'pausa' && !b.chat && b.attivita !== 'consegna'; });
+    return l.length ? l[Math.floor(G.rnd() * l.length)] : null;
+  }
+  function scegliPausa(G, a) {
+    var o = [];
+    function agg(nome, ok) { if (!ok) return; var p = PESI[nome] * a.car.pesi[nome]; if (nome === a.ultima) p *= 0.12;
+      // se altri stanno gia facendo la stessa cosa si preferisce altro: due fermi non fanno la stessa cosa insieme
+      G.agenti.forEach(function (b) { if (b !== a && b.modo === 'pausa' && b.attivita === nome) p *= 0.4; });
+      o.push([nome, p]);
+    }
+    agg('caffe', !G.occ.caffe0); agg('gioco', !G.occ.gioco0); agg('finestra', liberoQualsiasi(G, 'finestra', 3) >= 0);
+    agg('divano', liberoQualsiasi(G, 'divano', 2) >= 0); agg('chiacchiere', coppiaLibera(G) >= 0 && partnerPossibile(G, a) !== null); agg('vaga', true);
+    var tot = 0; o.forEach(function (x) { tot += x[1]; });
+    var r = G.rnd() * tot;
+    for (var i = 0; i < o.length; i++) { r -= o[i][1]; if (r <= 0) return o[i][0]; }
+    return 'vaga';
+  }
+  function pianoPausa(G, a) {
+    a.modo = 'pausa';
+    var nome = scegliPausa(G, a); a.ultima = nome; a.attivita = nome; a.prenota = [];
+    function fineAtt(e) { libera(G, e); }
+    if (nome === 'caffe') {
+      prendi(G, a, 'caffe0'); var sp = M.posti.caffe[0];
+      a.piano = [{ k: 'vai', spot: sp }, { k: 'fai', posa: 'bevi', dir: 'u', dur: durata(G, a, 4, 9), fine: fineAtt },
+        { k: 'fn', f: function (e) { fumetto(G, e, G.rnd() < 0.5 ? 'sorriso' : 'tazza', '#6b4226', 2.5); } }, { k: 'fai', posa: 'in piedi', dir: 'd', dur: durata(G, a, 0.8, 2) }];
+    } else if (nome === 'gioco') {
+      prendi(G, a, 'gioco0'); var sg = M.posti.gioco[0];
+      a.piano = [{ k: 'vai', spot: sg }, { k: 'fai', posa: 'gioca', dir: 'u', dur: durata(G, a, 8, 18), fine: fineAtt },
+        { k: 'fn', f: function (e) { fumetto(G, e, G.rnd() < 0.5 ? 'stella' : 'esclama', '#e0a800', 2.2); } }, { k: 'fai', posa: 'in piedi', dir: 'd', dur: 1 }];
+    } else if (nome === 'finestra') {
+      var i = liberoQualsiasi(G, 'finestra', 3); prendi(G, a, 'finestra' + i);
+      a.piano = [{ k: 'vai', spot: M.posti.finestra[i] }, {
+        k: 'fai', posa: 'in piedi', dir: 'u', dur: durata(G, a, 6, 15), fine: fineAtt,
+        inizio: function (e) { e.microT = 2 + G.rnd() * 4; },
+        tick: function (e, dt) { e.microT -= dt; if (e.microT <= 0) { fumetto(G, e, G.rnd() < 0.5 ? 'nota' : 'puntini', '#4a5a8a', 2); e.microT = 4 + G.rnd() * 6; } }
+      }];
+    } else if (nome === 'divano') {
+      var j = liberoQualsiasi(G, 'divano', 2); prendi(G, a, 'divano' + j);
+      var dorme = G.rnd() < 0.3;
+      a.piano = [{ k: 'vai', spot: M.posti.divano[j] }, { k: 'fai', posa: dorme ? 'dorme' : 'divano', dir: 'd', dur: durata(G, a, 10, 26), fine: fineAtt }];
+    } else if (nome === 'chiacchiere') {
+      var k = coppiaLibera(G), b = partnerPossibile(G, a);
+      if (k < 0 || !b) { a.ultima = ''; return pianoPausa(G, a); }
+      interrompi(G, b); b.modo = 'pausa'; b.attivita = 'chiacchiere'; b.ultima = 'chiacchiere';
+      var ch = { fatta: false, pronti: 0, t: 0, dur: durata(G, a, 9, 20), parla: 0, cambio: 0, a: a, b: b };
+      a.chat = ch; b.chat = ch; G.chat.push(ch);
+      G.occ['chat' + k] = a; a.prenota = ['chat' + k];
+      var coppia = M.posti.chiacchiere[k];
+      var pronto = function () { ch.pronti++; };
+      a.piano = [{ k: 'vai', spot: coppia[0] }, { k: 'fn', f: pronto }, { k: 'fai', posa: 'parla', dir: coppia[0].dir, fino: function () { return ch.fatta; }, fine: function (e) { e.chat = null; libera(G, e); } }];
+      b.piano = [{ k: 'vai', spot: coppia[1] }, { k: 'fn', f: pronto }, { k: 'fai', posa: 'parla', dir: coppia[1].dir, fino: function () { return ch.fatta; }, fine: function (e) { e.chat = null; } }];
+    } else {
+      var n = 1 + Math.floor(G.rnd() * 3), p = [];
+      for (var q = 0; q < n; q++) {
+        var c = M.cellaLibera(G.rnd);
+        p.push({ k: 'vai', spot: { ax: c.x, ay: c.y, x: c.x, y: c.y, dir: ['d', 'l', 'r', 'u'][Math.floor(G.rnd() * 4)] } });
+        p.push({ k: 'fai', posa: 'in piedi', dur: durata(G, a, 1.2, 4.5) });
+      }
+      a.piano = p;
+    }
+  }
+
+  // Cosa fare quando il piano e finito: dipende da cosa dice il dato.
+  function quandoVuoto(G, a) {
+    if (a.modo === 'consegna') a.modo = 'pausa';
+    rivaluta(G, a, true);
+  }
+  function rivaluta(G, a, finito) {
+    if (a.modo === 'consegna') return;
+    if (a.vuole.lavora) { if (a.modo !== 'lavoro') { interrompi(G, a); pianoLavoro(G, a); } else if (finito) pianoLavoro(G, a); return; }
+    if (a.vuole.fila >= 0) { if (a.modo !== 'fila' || a.slot !== a.vuole.fila) { interrompi(G, a); pianoFila(G, a, a.vuole.fila); } else if (finito) pianoFila(G, a, a.vuole.fila); return; }
+    if (a.modo === 'lavoro' || a.modo === 'fila') { interrompi(G, a); a.modo = 'pausa'; pianoPausa(G, a); return; }
+    if (finito || !a.piano.length) pianoPausa(G, a);
+  }
+
+  // ---- le consegne ----------------------------------------------------------------------------------------------------------------
+  // Chi consegna si alza, prende la cartellina col suo id, attraversa l'ufficio, la posa sulla scrivania dell'altro e torna al suo posto.
+  function avviaConsegna(G, a, dest, c) {
+    var eraSeduto = a.seduto;
+    interrompi(G, a); a.modo = 'consegna'; a.attivita = 'consegna'; a.consegnaCorrente = c;
+    var portare = { id: c.id, verso: c.verso, da: c.da, a: c.a };
+    a.piano = [];
+    if (eraSeduto) a.piano.push({ k: 'fai', posa: 'in piedi', dir: 'u', dur: 0.6 });   // prima si alza dalla sedia
+    a.piano.push({ k: 'vai', spot: spotVisita(a.indice) });
+    a.piano.push({ k: 'fai', posa: 'in piedi', dir: 'u', dur: 0.7, inizio: function (e) { e.portando = portare; fumetto(G, e, c.verso === 'indietro' ? 'esclama' : 'freccia', c.verso === 'indietro' ? '#d1495b' : '#2a9d4e', 2.5); } });
+    a.piano.push({ k: 'vai', spot: spotVisita(dest.indice) });
+    a.piano.push({
+      k: 'fai', posa: 'in piedi', dir: 'u', dur: 1.3,
+      fine: function (e) {
+        e.portando = null;
+        G.drops = G.drops.filter(function (d) { return d.scrivania !== dest.indice; });
+        G.drops.push({ scrivania: dest.indice, id: c.id, verso: c.verso, fino: G.t + 25 });
+        fumetto(G, dest, c.verso === 'indietro' ? 'domanda' : 'sorriso', '#1d1b2b', 3);
+      }
+    });
+    a.piano.push({ k: 'vai', spot: spotScrivania(a) });
+    a.piano.push({ k: 'fai', posa: 'in piedi', dir: 'u', dur: 1.5, fine: function (e) { e.consegnaCorrente = null; } });
+  }
+
+  // Una consegna alla volta: due cartelline che si incrociano nello stesso corridoio si coprirebbero le etichette.
+  function prossimaConsegna(G) {
+    if (G.agenti.some(function (a) { return a.modo === 'consegna'; })) return;
+    while (G.inAttesa.length) {
+      var x = G.inAttesa.shift();
+      var da = G.agenti.filter(function (a) { return a.ruolo === x.da; })[0], a = G.agenti.filter(function (b) { return b.ruolo === x.a; })[0];
+      if (da && a) { avviaConsegna(G, da, a, x.c); return; }
+    }
+  }
+
+  // ---- il dato nuovo ---------------------------------------------------------------------------------------------------------------
+  Gioco.prototype.applica = function (modello) {
+    var G = this;
+    G.modello = modello;
+    if (G.salvato && !G.agenti.length) ripristinaGenerale(G);
+    var ruoli = modello.personaggi.slice(0, M.MAX_SCRIVANIE).map(function (p) { return p.ruolo; });
+    // personaggi nuovi: compaiono dove stanno gia (un ruolo con una sessione e gia seduto), senza camminare da fuori
+    ruoli.forEach(function (r, i) {
+      var a = G.agenti.filter(function (x) { return x.ruolo === r; })[0];
+      if (!a) { a = nuovoAgente(G, r, i); G.agenti.push(a); a.nuovo = true; }
+      a.indice = i;
+    });
+    G.agenti = G.agenti.filter(function (a) { return ruoli.indexOf(a.ruolo) >= 0; });
+    G.agenti.forEach(function (a) {
+      var p = modello.personaggi.filter(function (x) { return x.ruolo === a.ruolo; })[0];
+      var fila = (modello.fila || []).map(function (f) { return f.ruolo; }).indexOf(a.ruolo);
+      a.vuole = { lavora: !!(p && p.sessione), fila: fila };
+      a.sessione = p ? p.sessione : null;
+      if (a.nuovo) { a.nuovo = false; piazza(G, a); }
+    });
+    // le consegne nuove: si recitano una volta sola (e non quando si riduce il movimento)
+    (modello.consegne || []).forEach(function (c) {
+      var chiave = c.id + '|' + c.da + '|' + c.a;
+      if (G.fatte[chiave]) return;
+      G.fatte[chiave] = true;
+      var da = G.agenti.filter(function (x) { return x.ruolo === c.da; })[0], a = G.agenti.filter(function (x) { return x.ruolo === c.a; })[0];
+      if (G.ridotto || !da || !a) return;
+      G.inAttesa.push({ da: c.da, a: c.a, c: c });
+    });
+    prossimaConsegna(G);
+    G.agenti.forEach(function (a) { if (a.piano.length === 0 || a.modo !== 'consegna') rivaluta(G, a, false); });
+    aggiornaColleghi(G, modello);
+    if (G.ridotto) G.metti();
+    G.salvato = null;
+  };
+
+  // ---- i colleghi al tavolo dei portatili -----------------------------------------------------------------------------------------
+  // Una persona per ogni sessione oltre la prima di un ruolo (modello.altreSessioni). Entra dalla porta dell'open space, siede a un posto
+  // libero del tavolo e lavora finche la sessione e aperta; poi si alza ed esce dalla stessa porta. Senza posto resta nell'open space
+  // (non si vede: la porta dice quanti sono). Al primo dato (o dopo un ricarico) chi lavora e gia seduto: non entra da fuori.
+  function chiaveSessione(s) { return s.ruolo + '#' + s.id; }
+  function aggiornaColleghi(G, modello) {
+    var voluti = modello.altreSessioni || [], perChiave = {};
+    voluti.forEach(function (s) { perChiave[chiaveSessione(s)] = s; });
+    var primo = !G.colleghiVisti; G.colleghiVisti = true;
+    G.colleghi.forEach(function (k) {
+      var s = perChiave[k.chiave];
+      if (s) { k.sessione = s; return; }
+      if (k.modo === 'esce') return;
+      // sessione finita: si alza ed esce dall'open space
+      interrompi(G, k); k.modo = 'esce'; k.posto = -1;
+      k.piano = [{ k: 'vai', spot: M.ingressoOpenSpace }, { k: 'fn', f: function (e) { e.via = true; } }];
+    });
+    var occupati = {};
+    G.colleghi.forEach(function (k) { if (k.posto >= 0) occupati[k.posto] = true; });
+    var presenti = {};
+    G.colleghi.forEach(function (k) { if (k.modo !== 'esce') presenti[k.chiave] = true; });
+    G.openSpace = [];
+    var entrano = 0;   // chi entra insieme entra uno alla volta, non tutti sulla soglia
+    voluti.forEach(function (s) {
+      var chiave = chiaveSessione(s);
+      if (presenti[chiave]) return;
+      // dopo un ricarico ognuno torna al suo posto (non a uno qualsiasi: sarebbe un salto)
+      var sv0 = salvatoCollega(G, chiave), posto = -1;
+      if (sv0 && sv0.posto >= 0 && !occupati[sv0.posto]) posto = sv0.posto;
+      for (var i = 0; posto < 0 && i < M.POSTI_TAVOLO; i++) if (!occupati[i]) posto = i;
+      if (posto < 0) { G.openSpace.push(s); return; }
+      occupati[posto] = true;
+      var k = nuovoAgente(G, s.ruolo, -1);
+      k.chiave = chiave; k.sessione = s; k.posto = posto; k.modo = 'lavoro'; k.attivita = 'lavora';
+      var spot = M.postoTavolo(posto), sv = salvatoCollega(G, chiave);
+      var siediSubito = G.ridotto || primo || (sv && sv.seduto);
+      if (sv && !sv.seduto) { k.x = sv.x; k.y = sv.y; k.dir = sv.dir || 'r'; }
+      else if (siediSubito) { k.x = spot.x; k.y = spot.y; k.dir = 'l'; }
+      else { k.x = M.ingressoOpenSpace.x; k.y = M.ingressoOpenSpace.y; k.dir = 'r'; }
+      var resta = function (e) { return e.modo === 'esce'; };
+      if (siediSubito && !(sv && !sv.seduto)) { var f = faiSeduto(G, 'l', resta); k.piano = [f]; k.seduto = true; k.posa = 'scrivania'; f.t0 = 0; f.inizio(k); }
+      // chi entra dall'open space aspetta un attimo sulla porta: il posto si libera da chi esce
+      else {
+        var attesa = 1.5 + 2 * entrano; entrano++;
+        k.piano = [{ k: 'fai', posa: 'in piedi', dir: 'r', dur: 0.1 }, { k: 'fai', posa: 'in piedi', dir: 'r', dur: attesa, inizio: function (e) { e.nascosto = true; }, fine: function (e) { e.nascosto = false; } },
+          { k: 'vai', spot: spot }, faiSeduto(G, 'l', resta)];
+      }
+      G.colleghi.push(k);
+    });
+    // chi non trova posto al tavolo lavora nell'open space, la stanza oltre la porta (openspace.js)
+    if (U.OS) U.OS.aggiorna(G, G.openSpace, primo);
+  }
+  function salvatoCollega(G, chiave) {
+    var l = G.salvato && G.salvato.colleghi ? G.salvato.colleghi.filter(function (x) { return x.chiave === chiave; }) : [];
+    return l.length ? l[0] : null;
+  }
+
+  // Lo stato che sopravvive a un ricarico della pagina: dove stanno tutti, le cartelline posate da poco, il tempo del gioco.
+  // Si salva a intervalli e quando la pagina si nasconde o si chiude (sessionStorage, nel gioco che lo chiama).
+  Gioco.prototype.salva = function () {
+    var G = this;
+    return {
+      quando: Date.now(), t: G.t,
+      agenti: G.agenti.map(function (a) { return { ruolo: a.ruolo, x: a.x, y: a.y, dir: a.dir, modo: a.modo, slot: a.slot, seduto: !!a.seduto, consegna: a.consegnaCorrente || null }; }),
+      colleghi: G.colleghi.filter(function (k) { return k.modo !== 'esce'; }).map(function (k) { return { chiave: k.chiave, posto: k.posto, x: k.x, y: k.y, dir: k.dir, seduto: !!k.seduto }; }),
+      osPersone: U.OS ? U.OS.salva(G) : [],
+      robot: { x: G.robot.x, y: G.robot.y }, gatto: { x: G.gatto.x, y: G.gatto.y, stato: G.gatto.stato, dir: G.gatto.dir },
+      drops: G.drops.map(function (d) { return { scrivania: d.scrivania, id: d.id, verso: d.verso, resto: d.fino - G.t }; })
+    };
+  };
+  function ripristinaGenerale(G) {
+    var s = G.salvato;
+    G.t = s.t + Math.max(0, (Date.now() - s.quando) / 1000);
+    G.robot.x = s.robot.x; G.robot.y = s.robot.y;
+    G.gatto.x = s.gatto.x; G.gatto.y = s.gatto.y; G.gatto.dir = s.gatto.dir || 'l'; G.gatto.stato = s.gatto.stato === 'cammina' ? 'siede' : s.gatto.stato;
+    G.drops = s.drops.filter(function (d) { return d.resto > 0; }).map(function (d) { return { scrivania: d.scrivania, id: d.id, verso: d.verso, fino: G.t + d.resto }; });
+  }
+  function salvatoDi(G, ruolo) {
+    var l = G.salvato ? G.salvato.agenti.filter(function (x) { return x.ruolo === ruolo; }) : [];
+    return l.length ? l[0] : null;
+  }
+  function siediSubito(G, a) { pianoLavoro(G, a); a.piano.shift(); a.seduto = true; a.posa = 'scrivania'; a.piano[0].t0 = 0; if (a.piano[0].inizio) a.piano[0].inizio(a); }
+  function piazza(G, a) {
+    var sv = G.ridotto ? null : salvatoDi(G, a.ruolo);
+    if (sv) {
+      // la pagina si e ricaricata (la vista lo fa da sola): si riparte da dove stava, senza salti
+      a.x = sv.x; a.y = sv.y; a.dir = sv.dir || 'd';
+      if (a.vuole.lavora) { if (sv.seduto) siediSubito(G, a); else pianoLavoro(G, a); }
+      else if (a.vuole.fila >= 0) { if (sv.modo === 'fila' && sv.slot === a.vuole.fila) { pianoFila(G, a, a.vuole.fila); a.piano.shift(); } else pianoFila(G, a, a.vuole.fila); }
+      else { a.modo = 'pausa'; a.piano = [{ k: 'fai', posa: 'in piedi', dur: G.rnd() * 3 }]; }
+      // una consegna interrotta dal ricarico riparte: chi la portava ricomincia da dov'e
+      if (sv.consegna && a.modo !== 'consegna') G.inAttesa.unshift({ da: sv.consegna.da, a: sv.consegna.a, c: sv.consegna });
+      return;
+    }
+    if (a.vuole.lavora) { var s = M.scrivania(a.indice); a.x = s.seduto.x; a.y = s.seduto.y; a.dir = 'u'; pianoLavoro(G, a); a.piano.shift(); a.seduto = true; a.posa = 'scrivania'; a.piano[0].t0 = 0; a.piano[0].inizio && a.piano[0].inizio(a); }
+    else if (a.vuole.fila >= 0) { var q = M.codaPorta(a.vuole.fila); a.x = q.x; a.y = q.y; a.dir = 'r'; pianoFila(G, a, a.vuole.fila); a.piano.shift(); }
+    else if (G.ridotto) { a.x = 96 + a.indice * 26; a.y = 126; a.dir = 'd'; a.piano = [{ k: 'fai', posa: 'in piedi', dur: 1e9 }]; a.modo = 'pausa'; }
+    else { var c = M.cellaLibera(G.rnd); a.x = c.x; a.y = c.y; a.dir = 'd'; a.modo = 'pausa'; a.piano = [{ k: 'fai', posa: 'in piedi', dur: G.rnd() * 5 }]; }
+  }
+  // Con il movimento ridotto i personaggi stanno al loro posto: si riposizionano direttamente, senza camminare.
+  Gioco.prototype.metti = function () {
+    var G = this;
+    G.agenti.forEach(function (a) {
+      interrompi(G, a); a.cammina = false;
+      if (a.vuole.lavora) { var s = M.scrivania(a.indice); a.x = s.seduto.x; a.y = s.seduto.y; a.dir = 'u'; a.modo = 'lavoro'; a.seduto = true; a.posa = 'scrivania'; a.piano = [{ k: 'fai', posa: 'scrivania', dur: 1e9 }]; }
+      else if (a.vuole.fila >= 0) { var q = M.codaPorta(a.vuole.fila); a.x = q.x; a.y = q.y; a.dir = 'r'; a.modo = 'fila'; a.piano = [{ k: 'fai', posa: 'in piedi', dur: 1e9 }]; }
+      else { a.x = 96 + a.indice * 26; a.y = 126; a.dir = 'd'; a.modo = 'pausa'; a.piano = [{ k: 'fai', posa: 'in piedi', dur: 1e9 }]; }
+    });
+  };
+
+  // ---- lo smistatore --------------------------------------------------------------------------------------------------------------
+  function nuovoRobot(G) {
+    return { x: M.stazione.x, y: M.stazione.y, dir: 'd', stato: 'riposo', cammina: false, tPasso: 0, passo: 0, percorso: [], slide: null, piano: [], t: 0, ronda: false, attesa: 0 };
+  }
+  function pianoGiro(G, r) {
+    var p = [];
+    for (var i = 0; i < Math.min(M.MAX_SCRIVANIE, G.agenti.length); i++) {
+      var d = M.scrivania(i);
+      p.push({ k: 'vai', spot: { ax: d.x + 8, ay: 104, x: d.x + 8, y: 104, dir: 'u' } });
+      p.push({ k: 'fai', posa: 'scan', dir: 'u', dur: 1.1 });
+    }
+    p.push({ k: 'vai', spot: M.stazione });
+    p.push({ k: 'fai', posa: 'riposo', dir: 'd', dur: 1.2 });
+    r.piano = p; r.ronda = true;
+  }
+  function passoRobot(G, r, dt) {
+    var m = G.modello, inGiro = !!(m && m.smistatore && m.smistatore.inGiro === true);
+    var pausa = !!(m && m.quota && (m.quota.stato === 'riserva' || m.quota.stato === 'limite'));
+    r.t += dt;
+    if (r.piano.length) {
+      esegui(G, r, dt, function () { });
+      if (!r.piano.length) { r.ronda = false; r.attesa = 2; }
+      return;
+    }
+    r.cammina = false;
+    if (inGiro) {
+      r.stato = 'giro'; r.attesa -= dt;
+      if (r.attesa <= 0) pianoGiro(G, r);
+    } else {
+      r.stato = pausa ? 'dorme' : 'riposo';
+      // un giro interrotto lo lascia fuori posto: torna alla stazione
+      if (Math.abs(r.x - M.stazione.x) > 1 || Math.abs(r.y - M.stazione.y) > 1) r.piano = [{ k: 'vai', spot: M.stazione }];
+    }
+  }
+
+  // ---- il gatto -------------------------------------------------------------------------------------------------------------------
+  function nuovoGatto(G) { return { x: M.gatto.x, y: M.gatto.y, dir: 'l', stato: 'siede', cammina: false, tPasso: 0, passo: 0, percorso: [], slide: null, t: 0, timer: 2 + G.rnd() * 4 }; }
+  function passoGatto(G, g, dt) {
+    g.t += dt;
+    if (g.stato === 'cammina') {
+      if (muovi(g, dt, 20)) { g.stato = 'siede'; g.timer = 3 + G.rnd() * 9; }
+      if (g.percorso.length === 0 && !g.slide) g.cammina = false;
+      g.dir = (g.dir === 'r' || g.dir === 'l') ? g.dir : 'l';
+      return;
+    }
+    g.cammina = false; g.timer -= dt;
+    if (g.timer <= 0) {
+      var r = G.rnd();
+      if (r < 0.55) {
+        var c = M.cellaLibera(G.rnd, 100), p = M.percorso(g.x, g.y, c.x, c.y);
+        if (p) { g.percorso = p; g.slide = null; g.stato = 'cammina'; }
+        else g.timer = 2;
+      } else if (r < 0.8) { g.stato = 'dorme'; g.timer = 10 + G.rnd() * 20; }
+      else { g.stato = 'siede'; g.timer = 3 + G.rnd() * 6; }
+    }
+  }
+
+  // ---- un passo di gioco -----------------------------------------------------------------------------------------------------------
+  Gioco.prototype.passo = function (dt) {
+    var G = this;
+    G.t += dt;
+    if (G.ridotto) return;
+    G.drops = G.drops.filter(function (d) { return d.fino > G.t; });
+    G.chat = G.chat.filter(function (c) { return !c.fatta || c.a.chat === c || c.b.chat === c; });
+    G.chat.forEach(function (c) {
+      if (c.a.modo !== 'pausa' || c.b.modo !== 'pausa') { c.fatta = true; return; }
+      if (c.pronti >= 2 && !c.fatta) {
+        c.t += dt; c.cambio -= dt;
+        if (c.cambio <= 0) {
+          c.parla = 1 - c.parla; c.cambio = 1.4 + G.rnd() * 1.4;
+          var chi = c.parla ? c.a : c.b;
+          fumetto(G, chi, ICONE_CHIACCHIERE[Math.floor(G.rnd() * ICONE_CHIACCHIERE.length)], ['#d1495b', '#2a7de1', '#2a9d4e', '#c97a00'][Math.floor(G.rnd() * 4)], c.cambio - 0.1);
+        }
+        if (c.t >= c.dur) c.fatta = true;
+      }
+    });
+    G.agenti.forEach(function (a) {
+      a.t += dt;
+      if (a.bolla && a.bolla.fino <= G.t) a.bolla = null;
+      a.occhi -= dt; if (a.occhi < -3.2 - (a.indice % 3)) a.occhi = 0.14;
+      esegui(G, a, dt, function (e) { quandoVuoto(G, e); });
+    });
+    G.usoCaffe = G.agenti.some(function (a) { return a.posa === 'bevi' && a.modo === 'pausa'; });
+    G.usoGioco = G.agenti.some(function (a) { return a.posa === 'gioca'; });
+    prossimaConsegna(G);
+    G.colleghi.forEach(function (k) {
+      k.t += dt;
+      if (k.bolla && k.bolla.fino <= G.t) k.bolla = null;
+      esegui(G, k, dt, function () { });
+    });
+    G.colleghi = G.colleghi.filter(function (k) { return !k.via; });
+    if (U.OS) U.OS.passo(G, dt);
+    passoRobot(G, G.robot, dt);
+    passoGatto(G, G.gatto, dt);
+  };
+
+  // Chi aveva chiesto meno movimento sceglie di vederlo: i personaggi ripartono da dove stanno.
+  Gioco.prototype.sciogli = function () {
+    var G = this; G.ridotto = false;
+    G.agenti.forEach(function (a) { interrompi(G, a); a.modo = 'pausa'; rivaluta(G, a, true); });
+  };
+
+  // Per i test e per guardare: cosa fa ognuno adesso.
+  Gioco.prototype.diag = function () {
+    return this.agenti.map(function (a) { return { ruolo: a.ruolo, modo: a.modo, attivita: a.attivita, posa: a.posa, x: Math.round(a.x), y: Math.round(a.y), cammina: a.cammina }; });
+  };
+})(U);
+
+// Le entita sulla scena: i personaggi, lo smistatore, il gatto e Titolare, ordinati per profondita', con le loro etichette e i fumetti;
+// poi gli avvisi a tutta scena (la pausa dello smistatore, i dati fermi). Disegna e basta: le decisioni stanno nel cervello.
+(function (U) {
+  'use strict';
+  var M = U.M;
+  function R(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); }
+  function chiaro(hex) { var r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16); return (r * 299 + g * 587 + b * 114) / 1000 > 170; }
+  function sfondoEtichetta(s) { return /^#/.test(s.top) && chiaro(s.top) ? s.dettaglio : s.top; }
+
+  function agente(c, G, a) {
+    var o = { x: a.x, y: a.y, dir: a.dir, passo: a.passo, cammina: a.cammina, posa: a.posa, t: a.t, stile: a.stile, seduto: a.seduto, blink: a.occhi > 0 };
+    if (a.portando) o.cartella = { verso: a.portando.verso };
+    U.persona(c, o);
+  }
+  function sopra(c, G, a) {
+    var x = Math.round(a.x), y = Math.round(a.y), top = a.seduto ? y - 18 : (a.posa === 'divano' || a.posa === 'dorme' ? y - 20 : y - 22);
+    var fondo = sfondoEtichetta(a.stile);
+    U.etichetta(c, a.stile.sigla, x, top, '#ffffff', fondo);
+    var alto = top - 2;
+    if (a.portando) {
+      var verso = a.portando.verso, col = verso === 'indietro' ? '#d1495b' : (verso === 'avanti' ? '#2a9d4e' : '#2a6fb0');
+      var nome = verso === 'indietro' ? 'INDIETRO' : (verso === 'avanti' ? 'AVANTI' : 'LATER');
+      U.etichetta(c, nome, x, alto - 7, '#ffffff', col);
+      U.etichetta(c, '#' + a.portando.id, x, alto - 15, '#ffffff', col);
+      alto -= 17;
+    }
+    if (a.modo === 'fila' && G.modello && G.modello.fila && G.modello.fila[a.slot]) {
+      U.etichetta(c, '#' + G.modello.fila[a.slot].id, x, alto - 7, '#ffffff', '#8a6a46');
+      alto -= 9;
+    }
+    var ic = a.bolla ? a.bolla.icona : null, colIc = a.bolla ? a.bolla.colore : '#1d1b2b';
+    if (!ic && a.modo === 'fila') { ic = (Math.floor(G.t * 1.1) % 3 === 0) ? 'esclama' : 'puntini'; colIc = '#8a6a46'; }
+    if (ic) U.fumetto(c, ic, x, alto, colIc);
+    if (a.posa === 'dorme') {
+      for (var k = 0; k < 3; k++) {
+        var f = ((G.t * 0.7 + k / 3) % 1);
+        U.testo(c, 'Z', x + 6 + k * 2, y - 24 - Math.round(f * 12), 'rgba(255,255,255,' + (1 - f).toFixed(2) + ')', k === 2 ? 2 : 1);
+      }
+    }
+  }
+
+  function robot(c, G, r) {
+    U.robot(c, { x: r.x, y: r.y, stato: r.stato, cammina: r.cammina, t: r.t });
+    var x = Math.round(r.x), y = Math.round(r.y);
+    if (r.piano.length && r.piano[0].k === 'fai' && r.piano[0].posa === 'scan') {
+      for (var k = 0; k < 6; k++) R(c, x, y - 28 - k * 5 + (Math.floor(G.t * 8) % 2) * 2, 1, 3, '#7fe3ff');
+    }
+    if (r.stato === 'dorme') {
+      for (var z = 0; z < 3; z++) {
+        var f = ((G.t * 0.6 + z / 3) % 1);
+        U.testo(c, 'Z', x + 6 + z * 3, y - 28 - Math.round(f * 16), 'rgba(255,255,255,' + (1 - f).toFixed(2) + ')', 2);
+      }
+    }
+  }
+
+  function titolare(c, G) {
+    var t = G.t, st = U.stile('titolare');
+    var pos = Math.floor(t / 7) % 3 === 2 ? 'stira' : 'scrivania';
+    U.persona(c, { x: 288, y: 102, dir: 'u', passo: 0, cammina: false, posa: pos, t: t, stile: st, seduto: true });
+  }
+
+  U.disegnaEntita = function (c, G) {
+    var lista = [];
+    G.agenti.forEach(function (a) { lista.push({ y: a.y, f: function () { agente(c, G, a); } }); });
+    (G.colleghi || []).forEach(function (k) { if (!k.nascosto) lista.push({ y: k.y, f: function () { agente(c, G, k); } }); });
+    lista.push({ y: G.robot.y, f: function () { robot(c, G, G.robot); } });
+    lista.push({ y: G.gatto.y, f: function () { U.gatto(c, { x: G.gatto.x, y: G.gatto.y, stato: G.gatto.stato, dir: G.gatto.dir, t: G.gatto.t }); } });
+    lista.push({ y: 102, f: function () { titolare(c, G); } });
+    lista.sort(function (a, b) { return a.y - b.y; });
+    lista.forEach(function (e) { e.f(); });
+    G.agenti.forEach(function (a) { sopra(c, G, a); });
+    // i colleghi: la sigla del ruolo e l'id della card della loro sessione (dato vero)
+    (G.colleghi || []).forEach(function (k) {
+      if (k.nascosto) return;
+      var x = Math.round(k.x), testo = k.stile.sigla + ' #' + k.sessione.id;
+      // al tavolo le persone sono una sopra l'altra: l'etichetta sta a destra, accanto alla testa, non sopra
+      if (k.seduto) U.etichetta(c, testo, x + 8 + Math.ceil((U.larghezzaTesto(testo) + 3) / 2), Math.round(k.y) - 13, '#ffffff', sfondoEtichetta(k.stile));
+      else U.etichetta(c, testo, x, Math.round(k.y) - 22, '#ffffff', sfondoEtichetta(k.stile));
+      if (k.bolla) U.fumetto(c, k.bolla.icona, x, Math.round(k.y) - (k.seduto ? 18 : 24), k.bolla.colore);
+    });
+    // la porta dell'open space dice quanti ci lavorano (sessioni senza posto al tavolo)
+    var n = (G.openSpace || []).length;
+    if (n > 0) U.etichetta(c, 'OPEN SPACE +' + n, 40, M.portaOpenSpace.y + 7, '#ffffff', '#6b4b2b');
+    U.etichetta(c, 'RIC', 288, 83, '#ffffff', '#3a6ea5');
+    if (G.robot.stato === 'dorme') U.etichetta(c, 'PAUSA', Math.round(G.robot.x), Math.round(G.robot.y) - 33, '#ffffff', '#b3282d');
+    else if (G.robot.stato === 'giro') U.etichetta(c, 'SMIST', Math.round(G.robot.x), Math.round(G.robot.y) - 29, '#ffffff', '#4a4f63');
+  };
+
+  // Cosa si puo cliccare, dal piu in alto al piu in basso. rif: l'oggetto di cui aprire la scheda.
+  U.bersagli = function (G) {
+    var b = [];
+    b.push({ tipo: 'robot', x: G.robot.x - 8, y: G.robot.y - 26, w: 16, h: 28 });
+    G.agenti.forEach(function (a) { b.push({ tipo: 'persona', rif: a.ruolo, x: a.x - 8, y: a.y - 22, w: 16, h: 24 }); });
+    (G.colleghi || []).forEach(function (k) { if (!k.nascosto) b.push({ tipo: 'collega', rif: k.chiave, ruolo: k.ruolo, x: k.x - 8, y: k.y - 22, w: 16, h: 24 }); });
+    b.push({ tipo: 'openspace', x: 0, y: M.portaOpenSpace.y - 4, w: 22, h: M.portaOpenSpace.h + 8 });
+    if (G.modello) {
+      G.modello.personaggi.slice(0, M.MAX_SCRIVANIE).forEach(function (p, i) {
+        var d = M.scrivania(i);
+        if (p.codaTotale > 0) b.push({ tipo: 'coda', rif: p.ruolo, x: d.pila.x - 3, y: d.pila.y - 20, w: 12, h: 24 });
+        b.push({ tipo: 'persona', rif: p.ruolo, x: d.monitor.x, y: d.monitor.y, w: d.monitor.w, h: d.monitor.h });
+      });
+    }
+    b.push({ tipo: 'porta', x: M.stanza.x - 8, y: 0, w: M.stanza.w + 8, h: 128 });
+    b.push({ tipo: 'bacheca', x: M.bacheca.x, y: M.bacheca.y, w: M.bacheca.w, h: M.bacheca.h });
+    return b;
+  };
+  U.trova = function (G, x, y) {
+    var l = U.bersagli(G);
+    for (var i = 0; i < l.length; i++) { var r = l[i]; if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r; }
+    return null;
+  };
+
+  // ---- gli avvisi a tutta scena ------------------------------------------------------------------------------------------------------
+  function pannello(c, x, y, w, h) { R(c, x - 2, y - 2, w + 4, h + 4, '#1d1b2b'); R(c, x, y, w, h, 'rgba(22,20,40,0.86)'); }
+  function centro(c, s, y, col, scala) { U.testo(c, s, Math.round(M.W / 2 - U.larghezzaTesto(s, scala) / 2), y, col, scala); }
+
+  // Lo smistatore e in pausa (riserva settimanale oltre soglia, o limite di token): lo dice tutta la scena, non un'etichetta.
+  U.disegnaPausa = function (c, G) {
+    var q = G.modello && G.modello.quota;
+    if (!q || (q.stato !== 'riserva' && q.stato !== 'limite')) return;
+    c.fillStyle = 'rgba(14,20,58,0.42)'; c.fillRect(0, 0, M.W, M.H);
+    var p = (Math.sin(G.t * 3) + 1) / 2, col = 'rgba(255,' + Math.round(120 + 80 * p) + ',60,1)';
+    for (var i = 0; i < 3; i++) { c.strokeStyle = i === 0 ? col : 'rgba(255,170,60,0.35)'; c.strokeRect(1 + i, 1 + i, M.W - 2 - i * 2, M.H - 2 - i * 2); }
+    // La pausa per il limite NON e la riserva settimanale: e il limite di una finestra (5 ore o settimana) arrivato al 100%. Si dice
+    // quale, quanto e usata e quando riparte; la soglia settimanale qui non c'entra e non si disegna.
+    if (q.stato === 'limite') {
+      var y1 = 84, conUso = q.usoFinestra !== null && q.usoFinestra !== undefined;
+      pannello(c, 56, y1, 208, conUso ? 74 : 56);
+      centro(c, 'PAUSA', y1 + 5, '#ffb347', 4);
+      centro(c, q.finestra === 'cinqueOre' ? 'LIMITE DELLE 5 ORE' : (q.finestra === 'settimana' ? 'LIMITE SETTIMANALE' : 'LIMITE DI TOKEN'), y1 + 29, '#ffffff', 2);
+      var ry = y1 + 44;
+      if (conUso) {
+        var bx1 = 76, bw1 = 168, u1 = Math.max(0, Math.min(1, q.usoFinestra));
+        R(c, bx1 - 1, ry - 1, bw1 + 2, 10, '#ffffff'); R(c, bx1, ry, bw1, 8, '#3a3f55'); R(c, bx1, ry, Math.round(bw1 * u1), 8, u1 >= 1 ? '#ff5c5c' : '#ffb347');
+        centro(c, 'USATO ' + Math.round(q.usoFinestra * 100) + '%', ry + 12, '#ffffff', 1);
+        ry += 20;
+      }
+      var fino = new Date(q.fino);
+      if (!isNaN(fino)) {
+        var oggi = new Date(), dueCifre = function (n) { return (n < 10 ? '0' : '') + n; };
+        var giorno = fino.toDateString() === oggi.toDateString() ? '' : dueCifre(fino.getDate()) + '/' + dueCifre(fino.getMonth() + 1) + ' ';
+        centro(c, 'RIPARTE ' + giorno + 'ALLE ' + dueCifre(fino.getHours()) + ':' + dueCifre(fino.getMinutes()), ry, '#ffd166', 1);
+      }
+      return;
+    }
+    var haBarra = q.uso !== null && q.uso !== undefined;
+    var h = haBarra ? 62 : 44, y0 = 84;
+    pannello(c, 56, y0, 208, h);
+    centro(c, 'PAUSA', y0 + 5, '#ffb347', 4);
+    centro(c, 'RISERVA SETTIMANALE', y0 + 29, '#ffffff', 2);
+    if (haBarra) {
+      var bx = 76, bw = 168, by = y0 + 44, uso = Math.max(0, Math.min(1, q.uso));
+      R(c, bx - 1, by - 1, bw + 2, 10, '#ffffff'); R(c, bx, by, bw, 8, '#3a3f55');
+      R(c, bx, by, Math.round(bw * uso), 8, uso >= (q.soglia || 2) ? '#ff5c5c' : '#4cc38a');
+      if (q.soglia) { R(c, bx + Math.round(bw * Math.min(1, q.soglia)), by - 3, 2, 14, '#ffd166'); }
+      var tt = Math.round(q.uso * 100) + '%' + (q.soglia ? ' / SOGLIA ' + Math.round(q.soglia * 100) + '%' : '');
+      centro(c, tt, by + 12, '#ffffff', 1);
+    }
+  };
+
+  // I dati sono fermi: l'ufficio non finge. Si grida a tutta scena, con l'ora dell'ultimo dato buono.
+  U.disegnaFermo = function (c, ultimo) {
+    c.fillStyle = 'rgba(20,20,26,0.45)'; c.fillRect(0, 0, M.W, M.H);
+    pannello(c, 40, 88, 240, 46);
+    centro(c, 'DATI FERMI', 93, '#ff9aa8', 3);
+    centro(c, 'ULTIMO DATO ' + ultimo, 117, '#ffffff', 1);
+  };
+})(U);
+
+// L'open space: la seconda stanza, oltre la porta in basso a sinistra dell'ufficio. Ci lavorano le sessioni che non trovano posto al
+// tavolo dei portatili (G.openSpace, deciso dal cervello sul dato vero): una persona per sessione, al suo banco, con l'id della card.
+// Chi arriva entra dalla porta e cammina fino al banco; a sessione finita (o se si libera un posto al tavolo dell'ufficio) si alza ed
+// esce. I percorsi sono a tratti dritti lungo i corridoi, che passano sempre fuori dai banchi.
+(function (U) {
+  'use strict';
+  var M = U.M;
+  function R(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); }
+  var VEL = 30;
+  var OS = {};
+
+  // tre file di banchi; si siede sul lato sotto il banco, guardando il banco (di schiena). Sotto ogni fila corre il suo corridoio, e a
+  // sinistra un corridoio verticale li unisce tutti alla porta.
+  var FILE = [{ y: 58 }, { y: 104 }, { y: 150 }];
+  var PER_FILA = 11, X0 = 44, PASSO = 24, ALTO_BANCO = 9;
+  OS.POSTI = FILE.length * PER_FILA;
+  OS.porta = { x: 0, y: 128, w: 8, h: 18 };
+  OS.ingresso = { x: 14, y: 137 };
+  OS.posto = function (i) {
+    var f = Math.floor(i / PER_FILA), k = i % PER_FILA, b = FILE[f];
+    return { x: X0 + k * PASSO, y: b.y + ALTO_BANCO + 17, corridoio: b.y + ALTO_BANCO + 27, fila: f };
+  };
+  function percorso(da, a) {
+    // dalla porta: su per il corridoio di sinistra fino al corridoio della fila, lungo il corridoio, poi su al banco
+    var p = OS.posto(a);
+    return [{ x: OS.ingresso.x, y: p.corridoio }, { x: p.x, y: p.corridoio }, { x: p.x, y: p.y }];
+  }
+  function percorsoUscita(e) {
+    var p = OS.posto(e.posto);
+    return [{ x: p.x, y: p.corridoio }, { x: OS.ingresso.x, y: p.corridoio }, { x: OS.ingresso.x, y: OS.ingresso.y }];
+  }
+
+  // ---- il dato: chi lavora nell'open space ------------------------------------------------------------------------------------------
+  OS.aggiorna = function (G, sessioni, primo) {
+    G.osPersone = G.osPersone || [];
+    var voluti = {}; (sessioni || []).forEach(function (s) { voluti[s.ruolo + '#' + s.id] = s; });
+    G.osPersone.forEach(function (e) {
+      if (voluti[e.chiave]) { e.sessione = voluti[e.chiave]; return; }
+      if (e.stato === 'esce') return;
+      e.stato = 'esce'; e.seduto = false; e.attesa = 0; e.cammino = percorsoUscita(e);
+    });
+    var occupati = {}, presenti = {};
+    G.osPersone.forEach(function (e) { if (e.stato !== 'esce') { occupati[e.posto] = true; presenti[e.chiave] = true; } });
+    var entrano = 0;
+    (sessioni || []).forEach(function (s) {
+      var chiave = s.ruolo + '#' + s.id;
+      if (presenti[chiave]) return;
+      var sv = G.salvato && G.salvato.osPersone ? G.salvato.osPersone.filter(function (x) { return x.chiave === chiave; })[0] : null;
+      var posto = sv && !occupati[sv.posto] ? sv.posto : -1;
+      for (var i = 0; posto < 0 && i < OS.POSTI; i++) if (!occupati[i]) posto = i;
+      if (posto < 0) return;   // oltre i posti dell'open space: si contano, non si disegnano
+      occupati[posto] = true;
+      var p = OS.posto(posto), subito = G.ridotto || primo || !!sv;
+      var e = { chiave: chiave, ruolo: s.ruolo, sessione: s, stile: U.stile(s.ruolo), posto: posto, t: G.rnd() * 10, tPasso: 0, passo: 0, dir: 'u' };
+      if (subito) { e.x = p.x; e.y = p.y; e.stato = 'siede'; e.seduto = true; e.cammino = []; e.attesa = 0; }
+      else { e.x = OS.ingresso.x; e.y = OS.ingresso.y; e.stato = 'entra'; e.seduto = false; e.cammino = percorso(null, posto); e.attesa = 1.2 + 1.8 * entrano++; }
+      G.osPersone.push(e);
+    });
+    G.osOltre = Math.max(0, (sessioni || []).length - G.osPersone.filter(function (e) { return e.stato !== 'esce'; }).length);
+  };
+
+  OS.passo = function (G, dt) {
+    (G.osPersone || []).forEach(function (e) {
+      e.t += dt;
+      if (e.attesa > 0) { e.attesa -= dt; return; }
+      var tgt = e.cammino[0];
+      if (!tgt) {
+        e.cammina = false;
+        if (e.stato === 'entra') { e.stato = 'siede'; e.seduto = true; e.dir = 'u'; }
+        else if (e.stato === 'esce') e.via = true;
+        return;
+      }
+      var dx = tgt.x - e.x, dy = tgt.y - e.y, d = Math.sqrt(dx * dx + dy * dy), s = VEL * dt;
+      if (d <= s) { e.x = tgt.x; e.y = tgt.y; e.cammino.shift(); } else { e.x += dx / d * s; e.y += dy / d * s; }
+      if (d > 0.01) e.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'r' : 'l') : (dy > 0 ? 'd' : 'u');
+      e.cammina = true; e.tPasso += dt; e.passo = Math.floor(e.tPasso * 7) % 4;
+    });
+    if (G.osPersone) G.osPersone = G.osPersone.filter(function (e) { return !e.via; });
+  };
+
+  OS.salva = function (G) {
+    return (G.osPersone || []).filter(function (e) { return e.stato !== 'esce'; }).map(function (e) { return { chiave: e.chiave, posto: e.posto }; });
+  };
+
+  // ---- il disegno ---------------------------------------------------------------------------------------------------------------------
+  var FINESTRE = [{ x: 40, y: 8, w: 56, h: 30 }, { x: 132, y: 8, w: 56, h: 30 }, { x: 224, y: 8, w: 56, h: 30 }];
+  var sfondo = null;
+  function creaSfondo() {
+    var cv = document.createElement('canvas'); cv.width = M.W; cv.height = M.H;
+    var c = cv.getContext('2d');
+    // moquette a quadrotte
+    for (var y = 48; y < M.H; y += 16) for (var x = 0; x < M.W; x += 16) R(c, x, y, 16, 16, ((x + y) / 16) % 2 ? '#7c8aa0' : '#76849a');
+    for (var y2 = 48; y2 < M.H; y2 += 16) R(c, 0, y2, M.W, 1, '#6c7a90');
+    // muro in alto con le finestre, a sinistra, in basso
+    R(c, 0, 0, M.W, 46, '#e4e8ee'); R(c, 0, 46, M.W, 4, '#9aa6b8'); R(c, 0, 50, M.W, 1, '#7a869a');
+    FINESTRE.forEach(function (f) {
+      R(c, f.x - 2, f.y - 2, f.w + 4, f.h + 4, '#5a6478'); c.clearRect(f.x, f.y, f.w, f.h);
+      R(c, f.x + f.w / 2 - 1, f.y, 2, f.h, '#5a6478'); R(c, f.x, f.y + 13, f.w, 2, '#5a6478'); R(c, f.x - 3, f.y + f.h + 2, f.w + 6, 2, '#9aa6b8');
+    });
+    R(c, 0, 48, 8, M.H - 48, '#cfd5de'); R(c, 7, 48, 1, M.H - 48, '#9aa6b8');
+    R(c, 0, 208, M.W, 16, '#e4e8ee'); R(c, 0, 208, M.W, 3, '#9aa6b8');
+    // la porta verso l'ufficio, con lo zerbino
+    var P = OS.porta;
+    R(c, P.x, P.y - 2, P.w, P.h + 4, '#6b4b2b'); R(c, P.x + 1, P.y, P.w - 2, P.h, '#3a2a1a'); R(c, P.x + 2, P.y + 1, 3, P.h - 2, '#8a6a46'); R(c, P.x + 4, P.y + 9, 1, 1, '#f2d34f');
+    R(c, P.x + 8, P.y + 3, 9, 12, '#5a5048');
+    // i banchi bianchi lunghi, con le sedie
+    FILE.forEach(function (b) {
+      var x0 = X0 - 14, w = PER_FILA * PASSO + 4;
+      R(c, x0, b.y, w, ALTO_BANCO, '#f1f2f4'); R(c, x0, b.y, w, 1, '#ffffff'); R(c, x0, b.y + ALTO_BANCO, w, 3, '#b8bfca');
+      R(c, x0 + 2, b.y + ALTO_BANCO + 3, 2, 3, '#8a93a3'); R(c, x0 + w - 4, b.y + ALTO_BANCO + 3, 2, 3, '#8a93a3');
+      for (var k = 0; k < PER_FILA; k++) { var sx = X0 + k * PASSO; R(c, sx - 5, b.y + ALTO_BANCO + 10, 10, 5, '#3f4a63'); R(c, sx - 5, b.y + ALTO_BANCO + 15, 10, 4, '#4c5877'); }
+    });
+    return cv;
+  }
+  function pianta(c, x, y, t) {
+    R(c, x, y + 8, 10, 8, '#a8651f'); R(c, x - 1, y + 8, 12, 2, '#c47a2c');
+    var s = Math.round(Math.sin(t * 1.3 + x));
+    R(c, x + 1 + s, y + 1, 3, 8, '#2d9a5a'); R(c, x + 6 - s, y, 3, 9, '#3dba70'); R(c, x + 3, y - 3 + s, 3, 9, '#2d9a5a');
+  }
+
+  OS.disegna = function (c, G) {
+    var data = G.ora, ora = data.getHours() + data.getMinutes() / 60, t = G.t;
+    if (!sfondo) sfondo = creaSfondo();
+    c.clearRect(0, 0, M.W, M.H);
+    FINESTRE.forEach(function (f) { U.cielo(c, ora, t + f.x, f); });
+    c.drawImage(sfondo, 0, 0);
+    U.testo(c, 'OPEN SPACE', 160 - Math.round(U.larghezzaTesto('OPEN SPACE') / 2), 41, '#5a6478');
+    pianta(c, 296, 182, t); pianta(c, 296, 56, t); pianta(c, 14, 182, t);
+    // i portatili sui banchi: accesi dove qualcuno siede
+    var seduti = {};
+    (G.osPersone || []).forEach(function (e) { if (e.seduto) seduti[e.posto] = true; });
+    for (var i = 0; i < OS.POSTI; i++) {
+      var p = OS.posto(i), by = FILE[p.fila].y;
+      R(c, p.x - 5, by + 2, 10, 2, '#9aa0ab'); R(c, p.x - 4, by - 4, 8, 6, '#2f3140');
+      R(c, p.x - 3, by - 3, 6, 4, seduti[i] ? (Math.floor(t * 3 + i) % 4 ? '#4df0a0' : '#35c98a') : '#10131f');
+    }
+    // le persone, per profondita
+    var l = (G.osPersone || []).filter(function (e) { return !(e.stato === 'entra' && e.attesa > 0); }).slice().sort(function (a, b) { return a.y - b.y; });
+    l.forEach(function (e) {
+      U.persona(c, { x: e.x, y: e.y, dir: e.dir, passo: e.passo, cammina: e.cammina, posa: e.seduto ? 'scrivania' : 'in piedi', t: e.t, stile: e.stile, seduto: !!e.seduto });
+    });
+    l.forEach(function (e) {
+      var fondo = /^#/.test(e.stile.top) && parseInt(e.stile.top.substr(1, 2), 16) * 0.3 + parseInt(e.stile.top.substr(3, 2), 16) * 0.59 + parseInt(e.stile.top.substr(5, 2), 16) * 0.11 > 170 ? e.stile.dettaglio : e.stile.top;
+      U.etichetta(c, '#' + e.sessione.id, Math.round(e.x), Math.round(e.y) - (e.seduto ? 18 : 22), '#ffffff', fondo);
+    });
+    U.etichetta(c, 'UFFICIO', 30, OS.porta.y - 9, '#ffffff', '#6b4b2b');
+    if (G.osOltre > 0) U.etichetta(c, 'E ALTRI ' + G.osOltre, 160, 200, '#ffffff', '#6b4b2b');
+  };
+
+  OS.trova = function (G, x, y) {
+    var l = (G.osPersone || []).filter(function (e) { return !(e.stato === 'entra' && e.attesa > 0); });
+    for (var i = 0; i < l.length; i++) {
+      var e = l[i];
+      if (x >= e.x - 8 && x < e.x + 8 && y >= e.y - 22 && y < e.y + 2) return { tipo: 'collega', rif: e.chiave, ruolo: e.ruolo };
+    }
+    if (x < 24 && y >= OS.porta.y - 14 && y < OS.porta.y + OS.porta.h + 4) return { tipo: 'ufficio' };
+    return null;
+  };
+
+  U.OS = OS;
+})(U);
+
+// L'interfaccia a fianco del canvas: la scheda che si apre cliccando, gli avvisi, l'elenco in testo e la lista delle consegne.
+// Ogni testo che arriva dai dati (titoli, nomi) entra nella pagina SOLO come testo (textContent): mai come markup.
+(function (U) {
+  'use strict';
+  var TITOLI = { responsabile: 'Responsabile', dev: 'Dev', reviewer: 'Reviewer', collaudatore: 'Collaudatore', mentore: 'Mentore', supervisore: 'Supervisore' };
+  // Chi e' ciascun ruolo, in una riga (dai brief dei ruoli): serve a chi guarda e non sa chi sia, per esempio il mentore.
+  var DESCRIZIONI = {
+    responsabile: 'Prende la richiesta, decide quello che il repo sa decidere e la segue fino alla PR e al deploy in Test.',
+    dev: 'Implementa la card in un worktree, con i test.',
+    reviewer: 'Rivede le modifiche prima della PR: correttezza e regole di sviluppo.',
+    collaudatore: 'Prova la card nell\'ambiente di Test.',
+    mentore: 'Parte quando un superiore corregge un ruolo: ricava la lezione e la scrive nella memoria di quel ruolo. Non tocca il codice delle card.'
+  };
+  U.descrizioneRuolo = function (r) { return DESCRIZIONI[r] || ''; };
+  U.titoloRuolo = function (r) { return TITOLI[r] || (String(r).charAt(0).toUpperCase() + String(r).slice(1)); };
+
+  function el(tag, testo, classe) {
+    var e = document.createElement(tag);
+    if (testo !== undefined && testo !== null) e.textContent = String(testo);
+    if (classe) e.className = classe;
+    return e;
+  }
+  // Un collegamento solo se l'indirizzo e' http o https: un indirizzo dei dati non puo' essere uno script.
+  function collegamento(testo, url) {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      var a = el('a', testo); a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a;
+    }
+    return el('span', testo);
+  }
+  function titolo(t) { return t ? String(t) : '(senza titolo)'; }
+  function riga(lista, etichetta, valore) {
+    var li = el('li'); li.appendChild(el('strong', etichetta + ': ')); li.appendChild(typeof valore === 'object' && valore ? valore : document.createTextNode(String(valore))); lista.appendChild(li);
+  }
+  function cardLink(c) { return collegamento('#' + c.id + ' ' + titolo(c.titolo), c.urlCard); }
+  function ora(s) { var d = new Date(s); return isNaN(d) ? '?' : d.toLocaleString('it-IT'); }
+  function percento(v) { return (v === null || v === undefined) ? '?' : Math.round(v * 100) + '%'; }
+
+  // La voce di "Da fare tu" per una card: dice perche' Titolare e' aspettato (verbo e testo vengono dal dato).
+  function voceDi(m, id) { return (m.daFareTu || []).filter(function (v) { return v.id === id; })[0] || null; }
+  function cosaServe(v) { return v ? (v.verbo || '') + (v.testo ? ': ' + v.testo : '') : ''; }
+
+  U.testoQuota = function (q) {
+    if (!q) return '';
+    if (q.stato === 'riserva') return 'Riserva settimanale raggiunta: uso ' + percento(q.uso) + ', soglia ' + percento(q.soglia) + '. Lo smistatore e\' in pausa e non lancia sessioni nuove fino al ' + ora(q.fino) + '.';
+    if (q.stato === 'limite') {
+      var quale = q.finestra === 'cinqueOre' ? 'delle 5 ore' : (q.finestra === 'settimana' ? 'settimanale' : 'di token');
+      var usato = (q.usoFinestra !== null && q.usoFinestra !== undefined) ? ' (usato ' + percento(q.usoFinestra) + ')' : '';
+      return 'Pausa per il limite ' + quale + usato + ': lo smistatore non lancia sessioni nuove fino al ' + ora(q.fino) + '. Non e la riserva settimanale.';
+    }
+    // la soglia che conta e quella effettiva della vista: alzata a mano fino al reset, o la riserva ignorata
+    if (q.stato === 'libera') return 'Quota: uso ' + percento(q.uso) + ', soglia ' + percento(q.soglia) + (q.alzata ? ' (alzata dalla vista fino al reset)' : '') + (q.ignorata ? '; riserva ignorata fino al reset' : '') + '.';
+    return 'Quota: non si sa (nessuna lettura).';
+  };
+
+  // La frase vera su un personaggio: la stessa informazione del disegno, in testo. Nessun movimento di scena.
+  U.frasePersonaggio = function (p, fila, m) {
+    var parti = [];
+    if (p.sessione) parti.push('al lavoro sulla card #' + p.sessione.id + ' ' + titolo(p.sessione.titolo));
+    else parti.push('nessuna sessione in corso');
+    if (fila) { var v = m ? voceDi(m, fila.id) : null; parti.push('aspetta Titolare sulla card #' + fila.id + (v ? ' ' + titolo(v.titolo) + ' (' + cosaServe(v) + ')' : '')); }
+    parti.push(p.codaTotale + ' card in coda');
+    return parti.join(' \u00b7 ');
+  };
+  // la riga dell'elenco con i collegamenti alle card (sessione e card che aspetta Titolare)
+  U.rigaPersonaggio = function (p, fila, m) {
+    var f = document.createDocumentFragment();
+    function sep() { f.appendChild(document.createTextNode(' \u00b7 ')); }
+    if (p.sessione) { f.appendChild(document.createTextNode('al lavoro sulla card ')); f.appendChild(cardLink(p.sessione)); }
+    else f.appendChild(document.createTextNode('nessuna sessione in corso'));
+    if (fila) {
+      var v = voceDi(m, fila.id); sep();
+      f.appendChild(document.createTextNode('aspetta Titolare sulla card '));
+      f.appendChild(cardLink(v || { id: fila.id, titolo: null, urlCard: null }));
+      if (v) f.appendChild(document.createTextNode(' \u2014 ' + cosaServe(v)));
+    }
+    var altre = m ? (m.altreSessioni || []).filter(function (x) { return x.ruolo === p.ruolo; }) : [];
+    if (altre.length) {
+      sep(); f.appendChild(document.createTextNode((altre.length === 1 ? 'un\'altra sessione su ' : altre.length + ' altre sessioni su ')));
+      altre.forEach(function (x, i) { if (i) f.appendChild(document.createTextNode(', ')); f.appendChild(cardLink(x)); });
+    }
+    sep(); f.appendChild(document.createTextNode(p.codaTotale + ' card in coda'));
+    return f;
+  };
+
+  U.scheda = function (G, hit) {
+    var m = G.modello, f = document.createDocumentFragment();
+    if (!m) return f;
+    if (hit.tipo === 'persona') {
+      var p = m.personaggi.filter(function (x) { return x.ruolo === hit.rif; })[0];
+      if (!p) return f;
+      var fila = (m.fila || []).filter(function (x) { return x.ruolo === p.ruolo; })[0];
+      f.appendChild(el('h2', U.titoloRuolo(p.ruolo)));
+      if (U.descrizioneRuolo(p.ruolo)) f.appendChild(el('p', U.descrizioneRuolo(p.ruolo), 'nota'));
+      var ul = el('ul');
+      if (p.sessione) {
+        var s = p.sessione;
+        riga(ul, 'Sta lavorando su', cardLink(s));
+        if (s.task) riga(ul, 'Task', 'n. ' + s.task + (s.titoloTask ? ': ' + s.titoloTask : ''));
+        if (s.minuti !== null && s.minuti !== undefined) riga(ul, 'Sessione aperta da', s.minuti + ' minuti');
+        riga(ul, 'Token usati', s.tokenTesto ? s.tokenTesto : 'non ancora letti');
+        var altre = (m.altreSessioni || []).filter(function (x) { return x.ruolo === p.ruolo; });
+        if (altre.length) {
+          var la = el('span');
+          altre.forEach(function (x, i) { if (i) la.appendChild(document.createTextNode(', ')); la.appendChild(cardLink(x)); });
+          riga(ul, 'Altre sessioni dello stesso ruolo (al tavolo dei portatili)', la);
+        }
+      } else {
+        riga(ul, 'Sessione', 'nessuna in corso');
+      }
+      if (fila) {
+        var vf = voceDi(m, fila.id);
+        riga(ul, 'Aspetta Titolare sulla card', vf ? cardLink(vf) : '#' + fila.id);
+        if (vf) riga(ul, 'Cosa serve', cosaServe(vf));
+      }
+      riga(ul, 'Card in coda per questo ruolo', p.codaTotale);
+      f.appendChild(ul);
+      f.appendChild(el('p', 'La scheda dice cosa fa davvero lo smistatore. Quando non ha una sessione, quello che fa nell\'ufficio e\' solo scena.', 'nota'));
+    } else if (hit.tipo === 'collega') {
+      var k = (m.altreSessioni || []).filter(function (x) { return x.ruolo + '#' + x.id === hit.rif; })[0];
+      if (!k) return f;
+      f.appendChild(el('h2', U.titoloRuolo(k.ruolo) + ' \u2014 un\'altra sessione'));
+      f.appendChild(el('p', 'Una persona per sessione: questa e una sessione in piu dello stesso ruolo. Lavora al tavolo dei portatili o, se il tavolo e pieno, nell\'open space.', 'nota'));
+      var ulk = el('ul');
+      riga(ulk, 'Sta lavorando su', cardLink(k));
+      if (k.task) riga(ulk, 'Task', 'n. ' + k.task + (k.titoloTask ? ': ' + k.titoloTask : ''));
+      if (k.minuti !== null && k.minuti !== undefined) riga(ulk, 'Sessione aperta da', k.minuti + ' minuti');
+      riga(ulk, 'Token usati', k.tokenTesto ? k.tokenTesto : 'non ancora letti');
+      f.appendChild(ulk);
+    } else if (hit.tipo === 'coda') {
+      var q = m.personaggi.filter(function (x) { return x.ruolo === hit.rif; })[0];
+      if (!q) return f;
+      f.appendChild(el('h2', 'Coda del ' + U.titoloRuolo(q.ruolo).toLowerCase() + ': ' + q.codaTotale));
+      var ul2 = el('ul');
+      q.coda.forEach(function (c) { var li = el('li'); li.appendChild(cardLink(c)); ul2.appendChild(li); });
+      if (!q.coda.length) ul2.appendChild(el('li', 'Nessuna card in coda.'));
+      f.appendChild(ul2);
+    } else if (hit.tipo === 'porta') {
+      f.appendChild(el('h2', 'Da fare tu: ' + m.daFareTu.length));
+      if (m.erroreAdo) f.appendChild(el('p', 'Azure DevOps non risponde: le voci non si conoscono.', 'nota'));
+      var ul3 = el('ul');
+      m.daFareTu.forEach(function (v) {
+        var li = el('li'); li.appendChild(cardLink(v));
+        li.appendChild(document.createTextNode(' — ' + (v.verbo || '') + (v.testo ? ': ' + v.testo : '') + (v.ferma ? ' (tiene ferma la card)' : '')));
+        ul3.appendChild(li);
+      });
+      if (!m.daFareTu.length && !m.erroreAdo) ul3.appendChild(el('li', 'Niente da fare per te.'));
+      f.appendChild(ul3);
+    } else if (hit.tipo === 'robot') {
+      f.appendChild(el('h2', 'Smistatore'));
+      var ul4 = el('ul'), g = m.smistatore;
+      riga(ul4, 'Adesso', g.inGiro === true ? 'sta facendo il giro' : (g.inGiro === false ? 'non sta girando' : 'non si sa se sta girando'));
+      if (g.ultimoGiro) riga(ul4, 'Ultimo giro', g.ultimoGiro);
+      if (g.prossimoGiro) riga(ul4, 'Prossimo giro', g.prossimoGiro);
+      riga(ul4, 'Quota', U.testoQuota(m.quota));
+      f.appendChild(ul4);
+    } else if (hit.tipo === 'bacheca') {
+      f.appendChild(el('h2', 'La board'));
+      if (!m.board) f.appendChild(el('p', 'Azure DevOps non risponde: i numeri non si conoscono.', 'nota'));
+      else {
+        var ul5 = el('ul');
+        m.board.forEach(function (c) { riga(ul5, c.titolo, c.conteggio); });
+        f.appendChild(ul5);
+        f.appendChild(el('p', 'Le card che lo smistatore vede, per fase.', 'nota'));
+      }
+    }
+    return f;
+  };
+
+  // I testi sempre visibili sotto la scena: chi fa cosa (vero) e le consegne in corso.
+  U.riempiElenco = function (ul, G, apri) {
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+    var m = G.modello; if (!m) return;
+    m.personaggi.forEach(function (p) {
+      var li = el('li'), b = el('button', U.titoloRuolo(p.ruolo)); b.type = 'button'; b.className = 'tasto';
+      b.addEventListener('click', function () { apri({ tipo: 'persona', rif: p.ruolo }); });
+      li.appendChild(b);
+      li.appendChild(document.createTextNode(' ')); li.appendChild(U.rigaPersonaggio(p, (m.fila || []).filter(function (x) { return x.ruolo === p.ruolo; })[0], m));
+      ul.appendChild(li);
+    });
+    function voce(testo, hit, frase) {
+      var li = el('li'), b = el('button', testo); b.type = 'button'; b.className = 'tasto';
+      b.addEventListener('click', function () { apri(hit); }); li.appendChild(b); li.appendChild(document.createTextNode(' ' + frase)); ul.appendChild(li);
+    }
+    voce('Da fare tu', { tipo: 'porta' }, m.erroreAdo ? 'non si sa (Azure DevOps non risponde)' : m.daFareTu.length + (m.daFareTu.length === 1 ? ' voce' : ' voci'));
+    var g = m.smistatore;
+    voce('Smistatore', { tipo: 'robot' }, g.inGiro === true ? 'sta facendo il giro' : (g.inGiro === false ? 'non sta girando' : 'non si sa se sta girando'));
+    voce('Board', { tipo: 'bacheca' }, m.board ? m.board.reduce(function (n, c) { return n + c.conteggio; }, 0) + ' card' : 'non si sa');
+  };
+  U.riempiConsegne = function (ul, G) {
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+    var m = G.modello; if (!m) return;
+    m.consegne.forEach(function (c) {
+      var verso = c.verso === 'indietro' ? 'RIMANDO INDIETRO' : (c.verso === 'avanti' ? 'Consegna' : 'Passaggio');
+      var li = el('li', verso + ': ', c.verso === 'indietro' ? 'indietro' : 'avanti'); li.appendChild(cardLink(c));
+      li.appendChild(document.createTextNode(' — ' + U.titoloRuolo(c.da) + ' → ' + U.titoloRuolo(c.a)));
+      ul.appendChild(li);
+    });
+    if (!m.consegne.length) ul.appendChild(el('li', 'Nessuna consegna recente.'));
+  };
+
+  // Gli avvisi in testo sopra la scena. tipo: 'allarme' (rosso), 'pausa' (arancio), 'nota'.
+  U.riempiAvvisi = function (box, voci) {
+    while (box.firstChild) box.removeChild(box.firstChild);
+    voci.forEach(function (v) {
+      var p = el('p', v.testo + (v.azione ? ' ' : ''), 'avviso ' + v.tipo);
+      if (v.azione) { var b = el('button', v.azione.testo); b.type = 'button'; b.addEventListener('click', v.azione.f); p.appendChild(b); }
+      box.appendChild(p);
+    });
+  };
+  U.el = el;
+})(U);
+
+// Il ciclo di gioco e il collegamento con i dati. Passo fisso, risoluzione interna bassa scalata a multipli interi, si ferma quando la scheda
+// non si vede; con prefers-reduced-motion i personaggi stanno al loro posto. I dati: incorporati nella pagina (primo disegno) e riletti da
+// ufficio.json; se sono fermi o il server non risponde la pagina lo scrive in chiaro, con l'ora dell'ultimo dato buono, e si ferma.
+(function (U) {
+  'use strict';
+  var M = U.M, STEP = 1 / 30;
+  var cv = document.getElementById('schermo'), c = cv.getContext('2d');
+  c.imageSmoothingEnabled = false;
+  var scena = document.getElementById('scena'), riquadro = document.getElementById('riquadro'), scheda = document.getElementById('scheda'), corpoScheda = document.getElementById('corpo-scheda');
+  var elenco = document.getElementById('elenco'), consegne = document.getElementById('consegne'), avvisi = document.getElementById('avvisi'), sotto = document.getElementById('sotto');
+  var sfondo = U.creaSfondo();
+  var dati = JSON.parse(document.getElementById('dati').textContent);
+  var esempio = !!dati.esempio, scenari = dati.scenari || null;
+  // la versione compatta sta dentro il pannello della vista (iframe ufficio.html?compatto=1): e la stessa pagina, senza il contorno
+  var compatto = /[?&]compatto=1(&|$)/.test(location.search);
+  if (compatto) document.body.classList.add('compatto');
+  var origineGenitore = function () { return location.origin === 'null' ? '*' : location.origin; };
+  var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
+  // chi chiede meno movimento lo ottiene; puo chiedere di vedere comunque l'ufficio muoversi (vale per questa scheda del browser)
+  // Il movimento e' attivo sempre: la pagina e' un gioco che si apre per vederlo muovere. La preferenza di sistema (su certi PC e' sempre
+  // attiva, per esempio con le animazioni di Windows spente) non decide da sola: fa solo comparire una nota con il comando per fermare.
+  // Chi vuole fermarlo lo fa con il tasto in cima, e la scelta si ricorda fra un'apertura e l'altra (localStorage).
+  var scelta = null;   // se la memoria del browser non c'e', la scelta vale finche la pagina resta aperta
+  function movimentoFermato() {
+    try { return localStorage.getItem('ufficio-movimento') === 'fermo'; } catch (e) { return scelta === 'fermo'; }
+  }
+  function ricordaMovimento(fermo) {
+    scelta = fermo ? 'fermo' : 'attivo';
+    try { if (fermo) localStorage.setItem('ufficio-movimento', 'fermo'); else localStorage.removeItem('ufficio-movimento'); } catch (e) { /* vale solo per questa apertura */ }
+  }
+  var ridotto = movimentoFermato();
+  var fermo = false, fermoSimulato = 0, ultimoBuono = null, erroriRete = 0, orarioForzato = null, scalaIntera = 1, schedaAperta = null;
+
+  function leggiFatte() { try { return JSON.parse(sessionStorage.getItem('ufficio-consegne') || '{}') || {}; } catch (e) { return {}; } }
+  function salvaFatte() { if (esempio) return; try { sessionStorage.setItem('ufficio-consegne', JSON.stringify(G.fatte)); } catch (e) { /* senza memoria di sessione si rivedono le consegne al ricarico */ } }
+  var G = new U.Gioco({ ridotto: ridotto, fatte: esempio ? {} : leggiFatte() });
+  U.G = G;
+  // lo stato del gioco: la vista si ricarica da sola ogni pochi secondi, e il gioco deve riprendere da dove stava
+  var ETA_MASSIMA = 120000;
+  function salvaStato() { if (esempio || !G.agenti.length) return; try { sessionStorage.setItem('ufficio-stato', JSON.stringify(G.salva())); } catch (e) { /* senza memoria di sessione si riparte da capo */ } }
+  function leggiStato() {
+    try {
+      var s = JSON.parse(sessionStorage.getItem('ufficio-stato') || 'null');
+      if (s && typeof s.quando === 'number' && Date.now() - s.quando < ETA_MASSIMA && Array.isArray(s.agenti) && s.robot && s.gatto && Array.isArray(s.drops) && typeof s.t === 'number') return s;
+    } catch (e) { /* stato illeggibile: si riparte da capo */ }
+    return null;
+  }
+  if (!esempio) G.salvato = leggiStato();
+  window.addEventListener('pagehide', salvaStato);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) salvaStato(); });
+  setInterval(function () { if (!document.hidden) salvaStato(); }, 2000);
+
+  // ---- i dati ---------------------------------------------------------------------------------------------------------------------
+  function valido(m) { return m && typeof m.generata === 'string' && Array.isArray(m.personaggi) && Array.isArray(m.consegne) && m.smistatore && m.quota; }
+  function applica(m) {
+    if (esempio) m = Object.assign({}, m, { generata: new Date().toISOString(), esempio: true });
+    ultimoBuono = new Date(m.generata);
+    // nell'esempio una scena puo simulare i dati fermi: l'ora dell'ultimo dato buono e' di qualche minuto fa
+    if (esempio) { fermo = fermoSimulato > 0; if (fermo) ultimoBuono = new Date(Date.now() - fermoSimulato * 60000); }
+    G.applica(m); salvaFatte();
+    aggiornaTesti();
+  }
+  function attivaMovimento() {
+    ricordaMovimento(false);
+    ridotto = false; fermaCiclo(); G.sciogli(); G.fatte = {}; G.applica(G.modello); aggiornaTesti(); avviaCiclo();
+  }
+  function fermaMovimento() {
+    ricordaMovimento(true);
+    ridotto = true; fermaCiclo(); G.ridotto = true; G.metti(); aggiornaTesti(); avviaCiclo();
+  }
+  function aggiornaTesti() {
+    var m = G.modello; if (!m) return;
+    var voci = [];
+    if (fermo) voci.push({ tipo: 'allarme', testo: 'I dati sono fermi dalle ' + ultimoBuono.toLocaleTimeString('it-IT') + ': ' + (erroriRete > 0 ? 'il server non risponde' : 'la vista non scrive piu\' nuovi dati') + '. Quello che si vede puo\' non essere vero: l\'ufficio e\' fermo.' });
+    if (esempio) voci.push({ tipo: 'pausa', testo: 'PAGINA D\'ESEMPIO: i dati sono inventati e non rispecchiano gli agenti veri. I dati veri stanno nella vista (pulsante Ufficio) o in ufficio.html servita dalla vista.' });
+    if (m.erroreAdo) voci.push({ tipo: 'allarme', testo: 'Azure DevOps non risponde (' + m.erroreAdo + '): le card in coda, le voci per Titolare e la board non si conoscono. Si vedono solo le sessioni in corso.' });
+    if (m.quota.stato === 'riserva' || m.quota.stato === 'limite') voci.push({ tipo: 'pausa', testo: U.testoQuota(m.quota) });
+    if (!ridotto && mq.matches) voci.push({ tipo: 'nota', testo: "Il sistema chiede meno movimento (su Windows: animazioni spente), ma qui l'ufficio si muove perche' e' un gioco.", azione: { testo: 'Ferma il movimento', f: fermaMovimento } });
+    var tasto = document.getElementById('tasto-movimento');
+    tasto.textContent = ridotto ? "Fai muovere l'ufficio" : 'Ferma il movimento';
+    tasto.onclick = ridotto ? attivaMovimento : fermaMovimento;
+    U.riempiAvvisi(avvisi, voci);
+    U.riempiElenco(elenco, G, apri);
+    U.riempiConsegne(consegne, G);
+    sotto.textContent = esempio ? 'Pagina d\'esempio: i dati sono inventati, servono a vedere tutti i comportamenti.' :
+      'Dati delle ' + ultimoBuono.toLocaleTimeString('it-IT') + ', riletti ogni ' + (m.secondi || 10) + ' secondi.';
+    scena.classList.toggle('fermo', fermo);
+    if (schedaAperta) apri(schedaAperta, true);
+    ridimensiona();   // un avviso in piu o in meno cambia lo spazio per l'ufficio
+    aggiornaTastoStanza();
+  }
+  function controllaFermo() {
+    if (esempio || !ultimoBuono) return;
+    var m = G.modello, soglia = Math.max(30, 4 * ((m && m.secondi) || 10)) * 1000;
+    var f = (Date.now() - ultimoBuono.getTime() > soglia) || erroriRete >= 3;
+    if (f !== fermo) { fermo = f; aggiornaTesti(); disegna(); if (!f) avviaCiclo(); }
+  }
+  function leggi() {
+    if (esempio || document.hidden || location.protocol === 'file:') return;
+    fetch('ufficio.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (m) { if (!valido(m)) throw new Error('forma inattesa'); erroriRete = 0; applica(m); controllaFermo(); })
+      .catch(function () { erroriRete++; controllaFermo(); });
+  }
+
+  function mostraScheda(si) { scheda.hidden = !si; document.getElementById('layout').classList.toggle('con-scheda', si); ridimensiona(); }
+  // ---- le schede ------------------------------------------------------------------------------------------------------------------
+  function apri(hit, soloAggiorna) {
+    schedaAperta = hit;
+    while (corpoScheda.firstChild) corpoScheda.removeChild(corpoScheda.firstChild);
+    corpoScheda.appendChild(U.scheda(G, hit));
+    mostraScheda(true);
+    if (!soloAggiorna) { var x = scheda.querySelector('button'); if (x) x.focus(); }
+  }
+  document.getElementById('chiudi-scheda').addEventListener('click', function () { schedaAperta = null; mostraScheda(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && schedaAperta) { schedaAperta = null; mostraScheda(false); } });
+  function puntoDa(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * M.W, y: (e.clientY - r.top) / r.height * M.H };
+  }
+  cv.addEventListener('click', function (e) {
+    if (ignoraClic) { ignoraClic = false; return; }
+    var p = puntoDa(e), h = trovaQui(p.x, p.y);
+    if (!h) { schedaAperta = null; mostraScheda(false); return; }
+    // le porte portano all'altra stanza
+    if (h.tipo === 'openspace') { vaiStanza('openspace'); return; }
+    if (h.tipo === 'ufficio') { vaiStanza('ufficio'); return; }
+    // dentro il pannello della vista un personaggio porta la vista alla sua colonna (se la vista non ce l'ha, risponde e si apre la scheda)
+    if (compatto && (h.tipo === 'persona' || h.tipo === 'collega') && window.parent !== window) { window.parent.postMessage({ tipo: 'ufficio-persona', ruolo: h.tipo === 'collega' ? h.ruolo : h.rif }, origineGenitore()); return; }
+    apri(h);
+  });
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent || e.origin !== location.origin) return;
+    var d = e.data;
+    if (d && d.tipo === 'ufficio-risposta' && typeof d.ruolo === 'string' && d.trovato === false) apri({ tipo: 'persona', rif: d.ruolo });
+  });
+  cv.addEventListener('mousemove', function (e) { var p = puntoDa(e); cv.style.cursor = trovaQui(p.x, p.y) ? 'pointer' : (scorrevole() ? 'grab' : 'default'); });
+
+  // ---- il disegno e il ciclo ------------------------------------------------------------------------------------------------------
+  // Lo zoom e' a multipli interi (i pixel restano nitidi): 'adatta' sceglie il piu grande che sta nello spazio, i tasti fissano una misura
+  // (ricordata). Se l'ufficio e' piu grande dello spazio, si sposta la vista trascinando.
+  var ZOOM_MAX = 8, zoom = null;
+  (function () { try { var z = localStorage.getItem('ufficio-zoom'); if (z && z !== 'auto' && +z >= 1 && +z <= ZOOM_MAX) zoom = Math.round(+z); } catch (e) { /* senza memoria si parte da adatta */ } })();
+  function ricordaZoom() { try { localStorage.setItem('ufficio-zoom', zoom === null ? 'auto' : String(zoom)); } catch (e) { /* vale solo per questa apertura */ } }
+  var kAdatta = 1;
+  // la stanza che si guarda: l'ufficio o l'open space oltre la porta. Si ricorda fra un ricarico e l'altro della vista.
+  var stanza = 'ufficio';
+  try { if (sessionStorage.getItem('ufficio-stanza') === 'openspace') stanza = 'openspace'; } catch (e) { /* si parte dall'ufficio */ }
+  function vaiStanza(s) {
+    stanza = s;
+    try { sessionStorage.setItem('ufficio-stanza', s); } catch (e) { /* vale per questa apertura */ }
+    schedaAperta = null; mostraScheda(false); aggiornaTastoStanza(); if (!rafId) disegna();
+  }
+  function aggiornaTastoStanza() {
+    var b = document.getElementById('cambia-stanza'); if (!b) return;
+    var n = (G.openSpace || []).length;
+    b.textContent = stanza === 'ufficio' ? 'Open space' + (n ? ' (' + n + ')' : '') : 'Ufficio';
+  }
+  function trovaQui(x, y) { return stanza === 'openspace' ? U.OS.trova(G, x, y) : U.trova(G, x, y); }
+  function ridimensiona() {
+    var disponibileL = riquadro.clientWidth || scena.clientWidth, disponibileA;
+    if (compatto) { disponibileA = Math.max(M.H, window.innerHeight - avvisi.offsetHeight); riquadro.style.height = disponibileA + 'px'; }
+    else disponibileA = Math.max(1, window.innerHeight - 90);
+    kAdatta = Math.max(1, Math.floor(Math.min(disponibileL / M.W, disponibileA / M.H)));
+    var k = zoom === null ? kAdatta : zoom;
+    scalaIntera = k; cv.style.width = (M.W * k) + 'px'; cv.style.height = (M.H * k) + 'px';
+    var l = document.getElementById('zoom-livello'); if (l) l.textContent = '\u00d7' + k + (zoom === null ? ' (adatta)' : '');
+  }
+  function centroVista() { return { x: (riquadro.scrollLeft + riquadro.clientWidth / 2) / (cv.offsetWidth || 1), y: (riquadro.scrollTop + riquadro.clientHeight / 2) / (cv.offsetHeight || 1) }; }
+  function mettiCentro(c) { riquadro.scrollLeft = c.x * cv.offsetWidth - riquadro.clientWidth / 2; riquadro.scrollTop = c.y * cv.offsetHeight - riquadro.clientHeight / 2; }
+  // si ingrandisce o rimpicciolisce attorno a quello che si sta guardando, non verso l'angolo
+  function cambiaZoom(nuovo) {
+    var c = centroVista();
+    zoom = nuovo === null ? null : Math.max(1, Math.min(ZOOM_MAX, nuovo));
+    ricordaZoom(); ridimensiona(); mettiCentro(c); salvaVista();
+  }
+  document.getElementById('zoom-piu').addEventListener('click', function () { cambiaZoom((zoom === null ? kAdatta : zoom) + 1); });
+  document.getElementById('zoom-meno').addEventListener('click', function () { cambiaZoom((zoom === null ? kAdatta : zoom) - 1); });
+  document.getElementById('zoom-adatta').addEventListener('click', function () { cambiaZoom(null); });
+  document.getElementById('cambia-stanza').addEventListener('click', function () { vaiStanza(stanza === 'ufficio' ? 'openspace' : 'ufficio'); });
+
+  // dove si sta guardando dentro l'ufficio sopravvive al ricarico della vista (come lo stato del gioco)
+  var timerVista = null;
+  function salvaVista() { try { sessionStorage.setItem('ufficio-vista', JSON.stringify(centroVista())); } catch (e) { /* si riparte dal centro */ } }
+  function ripristinaVista() {
+    try { var v = JSON.parse(sessionStorage.getItem('ufficio-vista') || 'null'); if (v && isFinite(v.x) && isFinite(v.y)) mettiCentro(v); } catch (e) { /* dal centro */ }
+  }
+  riquadro.addEventListener('scroll', function () { if (timerVista === null) timerVista = setTimeout(function () { timerVista = null; salvaVista(); }, 250); });
+  window.addEventListener('pagehide', salvaVista);
+
+  // si sposta la vista trascinando; un trascinamento non e' un clic
+  var trascinamento = null, ignoraClic = false;
+  function scorrevole() { return riquadro.scrollWidth > riquadro.clientWidth + 1 || riquadro.scrollHeight > riquadro.clientHeight + 1; }
+  cv.addEventListener('pointerdown', function (e) {
+    if ((e.pointerType === 'mouse' && e.button !== 0) || !scorrevole()) return;
+    trascinamento = { x: e.clientX, y: e.clientY, sx: riquadro.scrollLeft, sy: riquadro.scrollTop, mosso: false };
+    cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!trascinamento) return;
+    var dx = e.clientX - trascinamento.x, dy = e.clientY - trascinamento.y;
+    if (!trascinamento.mosso && Math.sqrt(dx * dx + dy * dy) > 4) { trascinamento.mosso = true; cv.classList.add('trascinato'); }
+    if (trascinamento.mosso) { riquadro.scrollLeft = trascinamento.sx - dx; riquadro.scrollTop = trascinamento.sy - dy; }
+  });
+  function fineTrascinamento(e) {
+    if (!trascinamento) return;
+    if (trascinamento.mosso) { ignoraClic = true; setTimeout(function () { ignoraClic = false; }, 0); }
+    trascinamento = null; cv.classList.remove('trascinato');
+    try { cv.releasePointerCapture(e.pointerId); } catch (x) { /* gia rilasciato */ }
+  }
+  cv.addEventListener('pointerup', fineTrascinamento);
+  cv.addEventListener('pointercancel', fineTrascinamento);
+  function disegna() {
+    var d = new Date();
+    if (orarioForzato !== null) d.setHours(Math.floor(orarioForzato), Math.round((orarioForzato % 1) * 60), 0, 0);
+    G.ora = d; G.drops = G.drops || [];
+    if (stanza === 'openspace') U.OS.disegna(c, G);
+    else { U.disegnaFondo(c, sfondo, G); U.disegnaEntita(c, G); }
+    U.disegnaVelo(c, G);
+    // con i dati fermi parla solo l'avviso dei dati fermi: la pausa dello smistatore potrebbe non essere piu vera
+    if (fermo && ultimoBuono) U.disegnaFermo(c, ultimoBuono.toLocaleTimeString('it-IT'));
+    else U.disegnaPausa(c, G);
+  }
+  var rafId = null, tPrec = 0, acc = 0, timerRidotto = null;
+  function frame(ts) {
+    rafId = requestAnimationFrame(frame);
+    var dt = (ts - tPrec) / 1000; tPrec = ts;
+    if (dt > 0.25) dt = 0.25;
+    if (!fermo) { acc += dt; var n = 0; while (acc >= STEP && n < 6) { G.passo(STEP); acc -= STEP; n++; } if (n === 6) acc = 0; }
+    disegna();
+  }
+  function avviaCiclo() {
+    if (document.hidden) return;
+    if (ridotto) { if (timerRidotto === null) { timerRidotto = setInterval(function () { if (!fermo) G.passo(1); disegna(); }, 1000); } disegna(); return; }
+    if (rafId === null) { tPrec = performance.now(); acc = 0; rafId = requestAnimationFrame(frame); }
+  }
+  function fermaCiclo() {
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    if (timerRidotto !== null) { clearInterval(timerRidotto); timerRidotto = null; }
+  }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) fermaCiclo(); else { avviaCiclo(); leggi(); controllaFermo(); } });
+  if (mq.addEventListener) mq.addEventListener('change', function () { aggiornaTesti(); });
+  window.addEventListener('resize', function () { ridimensiona(); if (!rafId) disegna(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { ridimensiona(); }).observe(scena);
+
+  // ---- l'esempio: scene, ora del giorno, consegne da rivedere ---------------------------------------------------------------------
+  function preparaEsempio() {
+    var box = document.getElementById('comandi-esempio'); box.hidden = false;
+    var sel = document.getElementById('scelta-scena');
+    scenari.forEach(function (s, i) { var o = document.createElement('option'); o.value = String(i); o.textContent = s.nome; sel.appendChild(o); });
+    function mostra() { var sc = scenari[+sel.value]; G.fatte = {}; G.inAttesa = []; G.drops = []; fermoSimulato = sc.fermoDaMinuti || 0; applica(sc.modello); }
+    sel.addEventListener('change', mostra);
+    var ore = document.getElementById('scelta-ora');
+    ore.addEventListener('change', function () { orarioForzato = ore.value === '' ? null : parseFloat(ore.value); if (!rafId) disegna(); });
+    document.getElementById('ripeti-consegne').addEventListener('click', mostra);
+    setInterval(function () { if (!document.hidden && !ridotto && !fermoSimulato) mostra(); }, 70000);
+  }
+
+  // ---- si parte -------------------------------------------------------------------------------------------------------------------
+  ridimensiona(); ripristinaVista();
+  if (esempio && scenari) { preparaEsempio(); fermoSimulato = scenari[0].fermoDaMinuti || 0; applica(scenari[0].modello); }
+  else if (valido(dati)) applica(dati);
+  else sotto.textContent = 'Dati non validi.';
+  controllaFermo();
+  aggiornaTesti();
+  avviaCiclo();
+  if (!esempio) {
+    var passoLettura = ((G.modello && G.modello.secondi) || 10) * 1000;
+    setInterval(leggi, passoLettura);
+    setInterval(controllaFermo, 1000);
+    // aperta da disco (file://) non puo' rileggere ufficio.json: si ricarica, e il dato incorporato e' quello che la vista ha scritto per ultimo
+    if (location.protocol === 'file:') setTimeout(function () { location.reload(); }, passoLettura);
+  }
+})(U);
+
+</script>
+</body>
+</html>
