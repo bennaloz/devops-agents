@@ -134,6 +134,10 @@ public sealed record SuiteConfig(
             ReleaseDays = rel?["predefinito"]?["giorni"]?.GetValue<int>() ?? 7,
             ReleaseByArea = byArea,
             UpdateCheckMinutes = I("minutiControlloAggiornamenti", 30),
+            QueueMinutes = I("minutiInCoda", 60),
+            DiagnosesPerDay = I("diagnosiAlGiorno", 3),
+            InfrastructureTexts = o["testiInfrastruttura"]?.AsArray().Select(x => x!.GetValue<string>()).ToList() ?? [],
+            Rerunnable = o["pipelineRilanciabili"]?.AsArray().Select(x => new DevOpsAgents.Core.Supervision.RerunnablePipeline(x!["progetto"]!.GetValue<string>(), x["definizioneId"]!.GetValue<int>())).ToList() ?? [],
             UpdateWaitHours = o["oreAttesaAggiornamento"]?.GetValue<double>() ?? 6,
         };
     }

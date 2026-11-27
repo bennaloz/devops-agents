@@ -104,3 +104,49 @@ public class CardCreatorAdoTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => b.CreateWorkItemAsync(new("Feature", "F", "A\\B", "d", "c", [], "t", [], null)));
     }
 }
+
+public class AdoPipelineReaderTests
+{
+    [Fact]
+    public async Task Le_pipeline_si_leggono_da_tutti_i_progetti_con_fasi_motivi_e_agenti()
+    {
+        var h = new FakeHttp((r, _) =>
+        {
+            var u = r.RequestUri!.PathAndQuery;
+            if (u.StartsWith("/_apis/projects")) return FakeHttp.Ok("""{"value":[{"name":"Acme.AI"},{"name":"Rotto"}]}""");
+            if (u.StartsWith("/Rotto/")) return (System.Net.HttpStatusCode.Forbidden, "{}");
+            if (u.Contains("/definitions?name=")) return FakeHttp.Ok("""{"value":[]}""");
+            if (u.Contains("statusFilter=inProgress")) return FakeHttp.Ok("""{"value":[{"id":30,"status":"inProgress","sourceBranch":"refs/heads/main","definition":{"id":9,"name":"release-app"},"reason":"manual","startTime":"2026-11-26T09:00:00Z"}]}""");
+            if (u.Contains("statusFilter=completed")) return FakeHttp.Ok("""{"value":[{"id":41,"status":"completed","result":"failed","sourceBranch":"refs/heads/develop","definition":{"id":5,"name":"build-ci"},"reason":"individualCI"}]}""");
+            if (u.Contains("/builds/30/timeline")) return FakeHttp.Ok("""{"records":[{"id":"s","type":"Stage","name":"Produzione","state":"inProgress"},{"id":"a","parentId":"s","type":"Checkpoint.Approval","state":"inProgress"}]}""");
+            if (u.Contains("/builds/41/timeline")) return FakeHttp.Ok("""{"records":[{"type":"Task","result":"failed","issues":[{"message":"lost communication with the server"}],"log":{"url":"https://acme.visualstudio.com/Acme.AI/_apis/build/builds/41/logs/7"}}]}""");
+            if (u.Contains("/logs/7")) return (System.Net.HttpStatusCode.OK, "2026-11-26T09:00:00.1234567Z ##[error]Agente perso");
+            if (u.Contains("definitions=5&branchName")) return FakeHttp.Ok("""{"value":[{"id":41,"result":"failed"}]}""");
+            if (u.StartsWith("/_apis/distributedtask/pools?")) return FakeHttp.Ok("""{"value":[{"id":1,"name":"Azure Pipelines","isHosted":true},{"id":2,"name":"Interni"}]}""");
+            if (u.Contains("/pools/2/agents")) return FakeHttp.Ok("""{"value":[{"name":"srv-1","status":"offline","enabled":true}]}""");
+            return (System.Net.HttpStatusCode.NotFound, "{}");
+        });
+        var v = await new AdoPipelineReader(Tx.Ado(h)).ReadAsync(["Acme.AI"], [115], new DateTimeOffset(2026, 11, 26, 10, 0, 0, TimeSpan.Zero));
+        Assert.True(v.Read);
+        Assert.Single(v.Errors, e => e.StartsWith("Rotto:"));
+        var run = Assert.Single(v.Active);
+        Assert.Equal(("inAttesa", "Produzione", "rilascio", "main"), (run.Status, run.Stage, run.Kind, run.Branch));
+        Assert.Equal(41, Assert.Single(v.Failed).Id);
+        Assert.Equal("lost communication with the server\n##[error]Agente perso", v.Reasons[41]);
+        Assert.Equal((41, "failed"), v.Latest["Acme.AI|5|develop"]);
+        Assert.Equal(("Interni", "srv-1", false), (v.Pools.Single().Pool, v.Pools.Single().Agents.Single().Name, v.Pools.Single().Agents.Single().Online));
+    }
+
+    [Fact]
+    public async Task Il_rilancio_rifa_lo_stesso_run_e_un_ramo_di_PR_non_si_rilancia()
+    {
+        var h = new FakeHttp((r, _) => FakeHttp.Ok("""{"id":77}"""));
+        var reader = new AdoPipelineReader(Tx.Ado(h));
+        var run = new DevOpsAgents.Core.Supervision.RunInfo(41, "Acme.AI", "build-ci", "develop", null, "concluso", null, null, null, "failed", 5, "ci", null,
+            SourceVersion: "abc123", TemplateParameters: new Dictionary<string, string> { ["deployApi"] = "true" });
+        Assert.Equal(77, await reader.RerunAsync(run));
+        var body = JsonNode.Parse(h.Calls[0].Body)!;
+        Assert.Equal(("refs/heads/develop", "abc123", "true", 5), (body["sourceBranch"]!.GetValue<string>(), body["sourceVersion"]!.GetValue<string>(), body["templateParameters"]!["deployApi"]!.GetValue<string>(), body["definition"]!["id"]!.GetValue<int>()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reader.RerunAsync(run with { Branch = "PR #12" }));
+    }
+}

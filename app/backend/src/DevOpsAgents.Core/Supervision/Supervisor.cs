@@ -22,6 +22,12 @@ public sealed record SupervisorSettings
     /// <summary>D53: ogni quanti minuti l'aggiornamento della suite fa fetch, e dopo quante ore di attesa delle sessioni lo dice.</summary>
     public int UpdateCheckMinutes { get; init; } = 30;
     public double UpdateWaitHours { get; init; } = 6;
+    /// <summary>Le pipeline: oltre quanti minuti in coda un run e un problema, quali il supervisore puo rilanciare, i testi di un guasto dell'infrastruttura.</summary>
+    public int QueueMinutes { get; init; } = 60;
+    public IReadOnlyList<RerunnablePipeline> Rerunnable { get; init; } = [];
+    public IReadOnlyList<string> InfrastructureTexts { get; init; } = [];
+    /// <summary>Quante diagnosi con un modello al giorno, al piu.</summary>
+    public int DiagnosesPerDay { get; init; } = 3;
 }
 
 /// <summary>
@@ -29,7 +35,7 @@ public sealed record SupervisorSettings
 /// persona. Elements: gli elementi di una voce aggregata (i rilasci): uno nuovo la fa riapparire. Topic: dove va su Telegram.
 /// </summary>
 public sealed record Problem(string Key, string Text, string Action, string? Link = null, bool Urgent = false,
-    IReadOnlyList<string>? Lines = null, IReadOnlyList<string>? Elements = null, bool Remind = true, string Topic = "riepilogo");
+    IReadOnlyList<string>? Lines = null, IReadOnlyList<string>? Elements = null, bool Remind = true, string Topic = "riepilogo", bool Diagnose = false);
 
 /// <summary>Quello che il supervisore ha visto: lo smistatore (ultimo giro, errori), le card dell'ultimo giro, quota e token.</summary>
 public sealed record Observation(
@@ -42,7 +48,11 @@ public sealed record Observation(
     IReadOnlyDictionary<int, double> HoursWithoutMovement,
     BlockReason? QuotaBlock,
     DateTimeOffset? PatExpiry,
-    string? CardUrlBase = null);
+    string? CardUrlBase = null,
+    PipelineView? Pipelines = null,
+    string? OrganizationUrl = null,
+    IReadOnlyCollection<string>? MapProjects = null,
+    IReadOnlyCollection<int>? DeployDefinitions = null);
 
 /// <summary>Un problema aperto, come in supervisore.json: quando e comparso, l'ultimo avviso, gli elementi gia avvisati.</summary>
 public sealed class OpenProblem
@@ -53,7 +63,12 @@ public sealed class OpenProblem
     public DateTimeOffset? LastNotice { get; set; }
     public int Absences { get; set; }
     public List<string> Notified { get; set; } = [];
+    /// <summary>D51: la diagnosi del modello (o "diagnosi non riuscita"), che resta finche il problema e aperto.</summary>
+    public string? Diagnosis { get; set; }
 }
+
+/// <summary>La sessione di diagnosi in corso: l'id, il problema, quando e partita, l'impronta della copia degli attrezzi al lancio.</summary>
+public sealed record DiagnosisRun(string SessionId, string Key, DateTimeOffset Started, string? Fingerprint);
 
 public sealed class SupervisorState
 {
@@ -66,6 +81,11 @@ public sealed class SupervisorState
     /// <summary>La firma di ogni card (stato, motivo, sessione) e da quando e uguale: una card ferma da ore senza motivo e un problema.</summary>
     public Dictionary<int, CardSignature> Signatures { get; set; } = new();
     public DateTimeOffset? LastRun { get; set; }
+    /// <summary>I rilanci fatti dal supervisore (id del run fallito -> quando e il run nuovo), una volta per run.</summary>
+    public Dictionary<string, Rerun> Reruns { get; set; } = new();
+    public DiagnosisRun? Diagnosis { get; set; }
+    public string? DiagnosisDay { get; set; }
+    public int DiagnosesToday { get; set; }
 }
 
 public sealed record CardSignature(string Value, DateTimeOffset Since);
@@ -97,6 +117,11 @@ public static class Supervisor
             else if (d.StartsWith("riserva settimanale")) problems.Add(new Problem("quota-riserva", $"Gli agenti non partono: {d}.", "alza la soglia o ignora la riserva dalla dashboard"));
         }
         problems.AddRange(Pat(o, cfg));
+        if (o.Pipelines is { } p)
+        {
+            var groups = PipelineRules.GroupFailed(p, o.MapProjects ?? [], o.DeployDefinitions ?? [], state.Reruns, cfg.Rerunnable, cfg.InfrastructureTexts);
+            problems.AddRange(PipelineRules.Problems(p, o.Now, o.OrganizationUrl ?? "", cfg.QueueMinutes, groups, state.Reruns));
+        }
         return problems;
     }
 
@@ -216,7 +241,7 @@ public static class Supervisor
         foreach (var p in problems)
         {
             var before = state.Problems.GetValueOrDefault(p.Key);
-            next[p.Key] = new OpenProblem { Problem = p, FirstSeen = before?.FirstSeen ?? o.Now, LastSeen = o.Now, LastNotice = before?.LastNotice, Notified = before?.Notified ?? [] };
+            next[p.Key] = new OpenProblem { Problem = p, FirstSeen = before?.FirstSeen ?? o.Now, LastSeen = o.Now, LastNotice = before?.LastNotice, Notified = before?.Notified ?? [], Diagnosis = before?.Diagnosis };
         }
         foreach (var (k, e) in state.Problems)
         {
@@ -255,11 +280,12 @@ public static class Supervisor
                 if (e.LastNotice is null || (o.Now - e.LastNotice.Value).TotalHours >= cfg.UrgentReminderHours) urgent.Add(new Notice(k, e.Problem, e.LastNotice is not null, waiting));
                 continue;
             }
+            var withDiagnosis = e.Diagnosis is { Length: > 0 } dg ? e.Problem with { Lines = (e.Problem.Lines ?? []).Append($"Diagnosi: {dg}").ToList() } : e.Problem;
             var elements = e.Problem.Elements ?? [];
             var fresh = elements.Any(x => !e.Notified.Contains(x));
-            if (e.LastNotice is null || (elements.Count > 0 && fresh)) summary.Add(new Notice(k, e.Problem, false, ""));
+            if (e.LastNotice is null || (elements.Count > 0 && fresh)) summary.Add(new Notice(k, withDiagnosis, false, ""));
             else if (elements.Count > 0 && !e.Problem.Remind) continue;
-            else if (TimeZoneInfo.ConvertTime(e.LastNotice.Value, o.Zone).Date < local.Date) summary.Add(new Notice(k, e.Problem, true, waiting));
+            else if (TimeZoneInfo.ConvertTime(e.LastNotice.Value, o.Zone).Date < local.Date) summary.Add(new Notice(k, withDiagnosis, true, waiting));
         }
         var slots = new List<string>();
         if (local.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))

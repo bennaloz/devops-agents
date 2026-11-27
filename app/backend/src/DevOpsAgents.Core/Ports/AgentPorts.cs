@@ -81,3 +81,11 @@ public interface ICardCreator
     Task TagNewAsync(int id, IReadOnlyList<string> tags, string? stateName, CancellationToken ct = default);
     Task<Person> GetCurrentUserAsync(CancellationToken ct = default);
 }
+
+/// <summary>D51: le pipeline di tutta l'organizzazione, in sola lettura, e il rilancio di un run fallito per infrastruttura.</summary>
+public interface IPipelineReader
+{
+    Task<DevOpsAgents.Core.Supervision.PipelineView> ReadAsync(IReadOnlyCollection<string> mapProjects, IReadOnlyCollection<int> deployDefinitions, DateTimeOffset now, CancellationToken ct = default);
+    /// <summary>Un run nuovo della stessa definizione, sullo stesso ramo, con la stessa versione e gli stessi parametri; restituisce l'id.</summary>
+    Task<int> RerunAsync(DevOpsAgents.Core.Supervision.RunInfo run, CancellationToken ct = default);
+}

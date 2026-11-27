@@ -52,6 +52,7 @@ if (options.Mode == "live")
     builder.Services.AddSingleton(sp => new GitHubCodeHost(sp.GetRequiredService<IHttpClientFactory>().CreateClient("github"), () => tokens.GitHub, sp.GetRequiredService<AdoClient>()));
     builder.Services.AddSingleton<ICodeHostResolver, CodeHostResolver>();
     builder.Services.AddSingleton<ICiService>(sp => new AzurePipelinesCi(sp.GetRequiredService<AdoClient>()));
+    builder.Services.AddSingleton<IPipelineReader>(sp => new AdoPipelineReader(sp.GetRequiredService<AdoClient>()));
     builder.Services.AddSingleton<IWorkspace>(new GitWorkspace(options.WorktreeRoot));
     builder.Services.AddSingleton<ISessionRunner>(new ClaudeSessionRunner(suite, tokens, new ClaudeRunnerOptions { Executable = options.ClaudeExecutable, DataDir = dataDir, McpServer = options.McpCommand(AppContext.BaseDirectory), HookCommand = options.HookCommandOf(AppContext.BaseDirectory), MemoryWorktree = Path.Combine(options.WorktreeRoot, "DevOps.Agents", "memoria") }, new GitMemorySource(root)));
     builder.Services.AddSingleton<IStateStore>(new JsonStateStore(Path.Combine(dataDir, "stato.json")));
@@ -197,6 +198,9 @@ api.MapPost("/update", (HttpRequest req, IServiceProvider sp) =>
     u.Request();
     return Results.Accepted();
 });
+
+// D51: le pipeline lette dall'ultimo giro del supervisore (la sezione Pipeline della dashboard)
+api.MapGet("/pipelines", (SupervisorService s) => s.LastPipelines is { } p ? Results.Ok(p) : Results.Ok(new { read = false, error = "nessuna lettura ancora (modalita demo o primo giro del supervisore)" }));
 
 api.MapGet("/config", (SuiteConfig s) => new
 {
