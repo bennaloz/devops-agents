@@ -28,6 +28,8 @@ public sealed record ClaudeRunnerOptions
     /// anche se in ~/.claude/settings.json non sono installati; senza, valgono solo quelli installati (gli hook PowerShell).
     /// </summary>
     public IReadOnlyList<string>? HookCommand { get; init; }
+    /// <summary>D46: il worktree fisso della memoria, che il server MCP del mentore usa per scrivere; null = il suo predefinito.</summary>
+    public string? MemoryWorktree { get; init; }
 }
 
 /// <summary>
@@ -75,13 +77,14 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
     }
 
     /// <summary>La --mcp-config con il solo server degli agenti, legato a card, ruolo e task della sessione.</summary>
-    public static string McpConfig(IReadOnlyList<string> server, int cardId, string role, int? taskId, string root, string dataDir)
+    public static string McpConfig(IReadOnlyList<string> server, int cardId, string role, int? taskId, string root, string dataDir, string? memoryWorktree = null)
     {
         var args = new System.Text.Json.Nodes.JsonArray();
         foreach (var x in server.Skip(1)) args.Add(x);
         foreach (var x in new[] { "--card", cardId.ToString(), "--ruolo", role }) args.Add(x);
         if (taskId is { } t) { args.Add("--task"); args.Add(t.ToString()); }
         foreach (var x in new[] { "--root", root, "--dati", dataDir }) args.Add(x);
+        if (memoryWorktree is not null && role == "mentore") { args.Add("--worktree-memoria"); args.Add(memoryWorktree); }
         return new JsonObject { ["mcpServers"] = new JsonObject { [Core.Agents.AgentBrief.ServerName] = new JsonObject { ["command"] = server[0], ["args"] = args } } }
             .ToJsonString();
     }
@@ -99,7 +102,7 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
         };
         foreach (var a in options.PrefixArguments) psi.ArgumentList.Add(a);
-        var mcp = UsesMcp(r.Role) ? McpConfig(options.McpServer!, r.CardId, r.Role, r.TaskId, config.Root, options.DataDir) : null;
+        var mcp = UsesMcp(r.Role) ? McpConfig(options.McpServer!, r.CardId, r.Role, r.TaskId, config.Root, options.DataDir, options.MemoryWorktree) : null;
         var hooks = options.HookCommand is { Count: > 0 } h ? HookSettings(h, config.Root) : null;
         foreach (var a in Arguments(role, await BriefAsync(r.Role, role, r.Area.Repo, id, r.TaskId, ct), r.Message, id, r.Resume, mcp, hooks)) psi.ArgumentList.Add(a);
 

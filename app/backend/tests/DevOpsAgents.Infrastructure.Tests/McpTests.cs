@@ -31,7 +31,7 @@ public class McpTests
         Assert.Equal(["card_leggi", "card_commenta", "card_chiudi_task", "card_titolo_pr", "card_descrizione_pr"], Tools("dev", 12));
         Assert.Equal(["card_leggi", "card_commenta"], Tools("reviewer"));
         Assert.Equal(["card_leggi", "card_commenta", "memoria_leggi", "memoria_scrivi", "memoria_rivedi", "memoria_togli", "memoria_conflitto"],
-            Tools("mentore", memory: new PowerShellMemoryWriter(Tx.Root)));
+            Tools("mentore", memory: new NoMemory()));
         Assert.Contains(Suite.Roles["responsabile"].Transitions!, t => t == new RoleTransition(StateKeys.New, StateKeys.Ready));
     }
 
@@ -80,21 +80,13 @@ public class McpTests
         Assert.Contains("| `card.ps1 chiudi-task` | `mcp__agenti__card_chiudi_task` |", brief);
         Assert.DoesNotContain("card_crea_task", brief);
     }
+}
 
-    [Fact]
-    public async Task La_memoria_passa_i_campi_a_memoria_ps1_come_JSON_e_un_suo_errore_torna_come_rifiuto()
-    {
-        if (OperatingSystem.IsWindows()) return;
-        var dir = Directory.CreateTempSubdirectory("pwsh").FullName;
-        var fake = Path.Combine(dir, "pwsh");
-        File.WriteAllText(fake, "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\ncase \"$*\" in *togli*) echo \"memoria: non c'e nessuna lezione con id '$last'\" >&2; exit 1;; esac\necho \"args: $* card=$ATTREZZI_CARD\"\ncat\n");
-        File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        var m = new PowerShellMemoryWriter(Tx.Root, 42, fake);
-        var o = await m.WriteAsync("dev", "Acme.AI", new LessonFields("quando \"x\"", "fai y", "perche z", "42"));
-        Assert.Contains("memoria.ps1 scrivi dev Acme.AI card=42", o);
-        var json = JsonNode.Parse(o[o.IndexOf('{')..])!;
-        Assert.Equal(("quando \"x\"", "fai y", "perche z", "42"), (json["situazione"]!.GetValue<string>(), json["cosaFare"]!.GetValue<string>(), json["perche"]!.GetValue<string>(), json["card"]!.GetValue<string>()));
-        var e = await Assert.ThrowsAsync<CardToolException>(() => m.RemoveAsync("dev-007"));
-        Assert.Equal("non c'e nessuna lezione con id 'dev-007'", e.Message);
-    }
+internal sealed class NoMemory : IMemoryWriter
+{
+    public Task<string> ReadAsync(string role, string repo, CancellationToken ct = default) => Task.FromResult("");
+    public Task<string> WriteAsync(string role, string where, LessonFields lesson, CancellationToken ct = default) => Task.FromResult("");
+    public Task<string> ReviseAsync(string id, LessonFields lesson, CancellationToken ct = default) => Task.FromResult("");
+    public Task<string> RemoveAsync(string id, CancellationToken ct = default) => Task.FromResult("");
+    public Task<string> ConflictAsync(int cardId, string text, CancellationToken ct = default) => Task.FromResult("");
 }

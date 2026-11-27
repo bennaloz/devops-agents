@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 // Il server MCP degli agenti: lo lancia claude -p per la sessione di un ruolo (--mcp-config dello smistatore), su stdio.
-//   devops-agents-mcp --card <id> --ruolo <ruolo> [--task <id>] [--root <repo degli attrezzi>] [--dati <cartella dati>] [--elenca]
+//   devops-agents-mcp --card <id> --ruolo <ruolo> [--task <id>] [--root <repo degli attrezzi>] [--dati <cartella dati>] [--worktree-memoria <cartella>] [--elenca]
 // Card, ruolo e task li decide lo smistatore al lancio: nessuno strumento li prende come argomento, cosi una sessione non scrive su
 // un'altra card. I token li legge il server (variabili DEVOPS_AGENTS_* o ~/.claude), non la sessione. --elenca stampa gli strumenti
 // del ruolo ed esce (per i controlli e per chi scrive i brief).
@@ -44,7 +44,16 @@ void OwnRevision(int card, int rev)
     File.AppendAllText(Path.Combine(folder, $"{card}.txt"), $"{rev}\n");
 }
 var cardTools = new CardTools(session, board, code, suite.Names, suite.Roles, suite.Areas, deploy, OwnRevision);
-var memory = session.Role == "mentore" ? new PowerShellMemoryWriter(root, session.CardId) : null;
+IMemoryWriter? memory = null;
+if (session.Role == "mentore")
+{
+    var area = suite.MemoryArea;
+    var memoryHost = code.For(area);
+    // il worktree fisso della memoria: quello di memoria.ps1 (C:\develop\GIT\_wt\DevOps.Agents\memoria accanto alla copia degli attrezzi)
+    var worktree = opts.MemoryWorktree ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(root).TrimEnd('/', '\\'))!, "_wt", "DevOps.Agents", "memoria");
+    memory = new GitMemoryWriter(new MemoryWriterOptions(root, worktree, area, suite.Roles.Keys.ToList(), suite.Areas.Select(a => a.Repo).Distinct().ToList(), suite.Limits.MemoryCap, opts.DataDir),
+        memoryHost, (IPullRequestEditor)memoryHost, board, session.CardId);
+}
 var tools = ToolCatalog.Build(cardTools, session, memory);
 
 if (opts.List)
@@ -69,11 +78,11 @@ builder.Services.AddMcpServer(o =>
 await builder.Build().RunAsync();
 return 0;
 
-internal sealed record Args(int? Card, string? Role, int? Task, string? Root, string? DataDir, bool List, string? Error)
+internal sealed record Args(int? Card, string? Role, int? Task, string? Root, string? DataDir, bool List, string? Error, string? MemoryWorktree = null)
 {
     public static Args Parse(string[] a)
     {
-        int? card = null, task = null; string? role = null, root = null, data = null; var list = false;
+        int? card = null, task = null; string? role = null, root = null, data = null, memoryWt = null; var list = false;
         for (var i = 0; i < a.Length; i++)
         {
             string Next() => i + 1 < a.Length ? a[++i] : throw new ArgumentException($"manca il valore di {a[i]}");
@@ -86,6 +95,7 @@ internal sealed record Args(int? Card, string? Role, int? Task, string? Root, st
                     case "--task": task = int.TryParse(Next(), out var t) && t > 0 ? t : throw new ArgumentException("--task vuole l'id del task"); break;
                     case "--root": root = Next(); break;
                     case "--dati": data = Next(); break;
+                    case "--worktree-memoria": memoryWt = Next(); break;
                     case "--elenca": list = true; break;
                     default: return new(null, null, null, null, null, false, $"argomento sconosciuto: {a[i]}");
                 }
@@ -93,6 +103,6 @@ internal sealed record Args(int? Card, string? Role, int? Task, string? Root, st
             catch (ArgumentException e) { return new(null, null, null, null, null, false, e.Message); }
         }
         if (card is null || string.IsNullOrWhiteSpace(role)) return new(null, null, null, null, null, false, "mancano --card e --ruolo (li mette lo smistatore)");
-        return new(card, role, task, root, data, list, null);
+        return new(card, role, task, root, data, list, null, memoryWt);
     }
 }

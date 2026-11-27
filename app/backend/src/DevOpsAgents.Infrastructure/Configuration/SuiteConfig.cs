@@ -16,8 +16,15 @@ public sealed record SuiteConfig(
     StateNames Names,
     Limits Limits,
     IReadOnlyDictionary<string, RoleSettings> Roles,
-    IReadOnlyList<AreaMapping> Areas)
+    IReadOnlyList<AreaMapping> Areas,
+    AreaMapping? Memory = null)
 {
+    /// <summary>
+    /// D46: il repo della PR della memoria: quello degli attrezzi, nel progetto della board (come MemoriaRepo.psm1). La voce "memoria" di
+    /// mappa.json lo cambia (repo, progettoAdo, sorgente, repoGithub): la legge solo la versione .NET.
+    /// </summary>
+    public AreaMapping MemoryArea => Memory ?? new AreaMapping("memoria", "DevOps.Agents", Root, BoardProject, "memoria", null, null);
+
     public static SuiteConfig Load(string root)
     {
         JsonNode Read(string name)
@@ -78,7 +85,14 @@ public sealed record SuiteConfig(
                 a["progettoAdo"]!.GetValue<string>(), a["componente"]?.GetValue<string>() ?? "",
                 a["pipelineDeploy"]?.GetValue<int>(), a["urlTest"]?.GetValue<string>(), kind, gh, TestEnvironmentOf(a)));
         }
-        return new SuiteConfig(root, org, board!, new StateNames(stati), limits, roles, areas);
+        AreaMapping? memory = null;
+        if (m["memoria"] is JsonObject mm)
+        {
+            var gh = mm["sorgente"]?.GetValue<string>() == "github";
+            memory = new AreaMapping("memoria", mm["repo"]?.GetValue<string>() ?? "DevOps.Agents", root, mm["progettoAdo"]?.GetValue<string>() ?? board!, "memoria", null, null,
+                gh ? SourceControl.GitHub : SourceControl.AzureRepos, mm["repoGithub"]?.GetValue<string>());
+        }
+        return new SuiteConfig(root, org, board!, new StateNames(stati), limits with { MemoryCap = I("tettoMemoria", 25) }, roles, areas, memory);
     }
 
     /// <summary>config/supervisore.json: soglie e orari del supervisore (D51).</summary>

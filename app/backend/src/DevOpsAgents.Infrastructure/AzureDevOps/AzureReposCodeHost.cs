@@ -130,6 +130,10 @@ public sealed class AzureReposCodeHost(AdoClient ado) : ICodeHost, IPullRequestE
     public Task SetTitleAsync(AreaMapping area, int prId, string title, CancellationToken ct = default) =>
         ado.SendAsync(HttpMethod.Patch, $"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", new { title }, ct: ct);
 
+    public async Task<IReadOnlyList<(int Id, string Status, string? HeadCommit)>> ListPullRequestsAsync(AreaMapping area, string branch, string destination, CancellationToken ct = default) =>
+        (await ListAsync(area, branch, destination, "all", ct)).Items("value").Select(p => (p.Int("pullRequestId")!.Value, p.Str("status") ?? "", p.Str("lastMergeSourceCommit", "commitId")))
+            .OrderByDescending(p => p.Item1).ToList();
+
 }
 
 /// <summary>Il deploy in Test su Azure Pipelines, per i repo di Azure Repos e di GitHub.</summary>

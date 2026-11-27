@@ -79,6 +79,8 @@ public sealed record Limits
     public double? FiveHourQuotaThreshold { get; init; } = 0.60;
     /// <summary>D59: quanti ambienti Docker di collaudo insieme, per i componenti con la voce collaudo.</summary>
     public int TestEnvironments { get; init; } = 3;
+    /// <summary>D46: quante lezioni al massimo in un file di memoria (tettoMemoria).</summary>
+    public int MemoryCap { get; init; } = 25;
 }
 
 /// <summary>Un ruolo di config/ruoli.json: modello, sforzo, brief e strumenti della sessione claude -p.</summary>

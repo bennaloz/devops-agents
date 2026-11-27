@@ -122,8 +122,14 @@ I brief dei ruoli restano uno per le due versioni: descrivono `card.ps1`, e per 
 tabella "comando di `card.ps1` -> strumento" con i soli strumenti del ruolo (`Core/Agents/AgentBrief.cs`). Il server finisce accanto
 all'API (riferimento di progetto) e l'API lo trova da sola; `McpServer=off` torna a `card.ps1`.
 
-Restano in PowerShell: la scrittura della memoria (gli strumenti `memoria_*` chiamano `src/memoria.ps1`, che fa worktree, commit, push e
-PR della memoria; il mentore pero non usa piu la shell per questo) e `card.ps1 crea` (si usa fuori dai ruoli).
+La memoria dei ruoli (D46) la scrive il server stesso (`Infrastructure/Local/GitMemoryWriter.cs`, regole in `Core/Memory/MemoryRules.cs`),
+come `src/memoria.ps1`: worktree fisso del ramo `memoria/in-prova` registrato nella copia degli attrezzi, lucchetto fra processi con lo
+stesso nome del PowerShell (le due versioni non scrivono insieme), base di scrittura (PR attiva: il ramo; ramo unito o chiuso: develop con
+`--force-with-lease`), id che non si riusano (storia di develop, del ramo e del reflog), tetto per file, commit, push e PR con le lezioni in
+prova, le note di conflitto e il riassunto dell'apprendimento. Il repo della PR e quello degli attrezzi nel progetto della board; la voce
+facoltativa `"memoria": { "repo", "progettoAdo", "sorgente", "repoGithub" }` di `mappa.json` lo sposta (per esempio su GitHub).
+
+Resta in PowerShell solo `card.ps1 crea` (si usa fuori dai ruoli).
 
 ## Gli hook
 
@@ -214,10 +220,11 @@ script al posto di claude).
 | Funzionalita di piu card con card di chiusura (D52): ramo della funzionalita, card In feature branch, card di chiusura con PR verso develop, sorelle, vincolo sul commit, CI rossa al responsabile, Bug di correzione e allinea-develop, Feature Active e Resolved, worktree in sola lettura del collaudatore | portato, con test. Manca: la Feature che passa Closed quando la card di chiusura si chiude |
 | Passata del responsabile prima di un on-hold (D42), on-hold sciolti da soli quando la validazione torna verde (D51), ripresa automatica una volta dopo silenzio o processo morto, sessione fallita in on-hold | portato, con test |
 | Presa in carico da un altro PC (`AdottaCard`): worktree dal ramo pubblicato, PR collegata per le card gia unite, attesa se la sessione dell'altro PC e recente; commenti di avvio e fine sessione compatibili con il PowerShell | portato, con test. Manca: togliere i worktree delle card cedute a un collega |
-| Mentore e memoria dei ruoli (D46): il mentore parte dopo una decisione del responsabile su un blocco o un bivio, dopo i rilievi, dopo un commento o un on-hold tolto da una persona, dopo la prova umana e per una Bug rilasciata, una volta per correzione e fuori dal limite di sessioni; le lezioni stabili e in prova entrano nel brief del ruolo | portato, con test. Le lezioni le scrive il mentore con `memoria.ps1`, come nella versione PowerShell. Manca: il registro dell'apprendimento e la sua sezione nella vista |
+| Mentore e memoria dei ruoli (D46): il mentore parte dopo una decisione del responsabile su un blocco o un bivio, dopo i rilievi, dopo un commento o un on-hold tolto da una persona, dopo la prova umana e per una Bug rilasciata, una volta per correzione e fuori dal limite di sessioni; le lezioni stabili e in prova entrano nel brief del ruolo | portato, con test. Le lezioni le scrive il mentore con gli strumenti `memoria_*`. Manca: il registro dell'apprendimento e la sua sezione nella vista |
 | Supervisore (D51): smistatore fermo o che si interrompe, PAT rifiutato o in scadenza, card in on-hold con il gesto e le card che tiene ferme, prove in Test, domande del responsabile, card ferme da ore senza motivo, card che saltano per errore, rilasci in attesa per area con le soglie, quota; problemi aperti con primo visto e ricordi; urgenti subito, riepilogo ai feriali, rilasci a parte; Telegram con i topic | portato, con test; la dashboard ha il riquadro "Da fare per te". Manca: la diagnosi con un modello e i controlli sulle pipeline |
 | Aggiornamento automatico della suite (D53) | **manca** |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
-| `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. Restano PowerShell: la scrittura della memoria (chiamata dal server), `card.ps1 crea` |
+| `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. Resta PowerShell `card.ps1 crea` |
+| Scrittura della memoria dei ruoli (`memoria.ps1`, D46) | portata (`GitMemoryWriter`), con git vero nei test: lettura, scrivi, rivedi, togli, conflitto, base dopo la fusione, tetto, lucchetto condiviso con il PowerShell |
 | Hook di Claude Code (`hooks/*.ps1`) | portati (`devops-agents-hook`), sugli stessi 119 casi di `Test-Hooks.ps1`, passati alle sessioni con `--settings` |
 | Riga di comando, servizio Windows e systemd, container | portato: `devops-agents` (CLI), `UseWindowsService`/`UseSystemd`, `app/Dockerfile` e `app/docker-compose.yml` |

@@ -42,6 +42,8 @@ public interface IPullRequestEditor
     Task<string> GetDescriptionAsync(AreaMapping area, int prId, CancellationToken ct = default);
     Task SetDescriptionAsync(AreaMapping area, int prId, string description, CancellationToken ct = default);
     Task SetTitleAsync(AreaMapping area, int prId, string title, CancellationToken ct = default);
+    /// <summary>Le PR dal ramo verso la destinazione, di ogni stato, dalla piu recente: numero, stato (active, completed, abandoned), commit di testa.</summary>
+    Task<IReadOnlyList<(int Id, string Status, string? HeadCommit)>> ListPullRequestsAsync(AreaMapping area, string branch, string destination, CancellationToken ct = default);
 }
 
 /// <summary>D43: i parametri del deploy in Test che il responsabile puo scegliere: i booleani deploy* dello YAML della pipeline, sul ramo.</summary>

@@ -169,6 +169,9 @@ public sealed class GitHubCodeHost(HttpClient http, Func<string> token, AdoClien
     public Task SetTitleAsync(AreaMapping area, int prId, string title, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Patch, $"/repos/{Repo(area)}/pulls/{prId}", new { title }, ct: ct);
 
+    public async Task<IReadOnlyList<(int Id, string Status, string? HeadCommit)>> ListPullRequestsAsync(AreaMapping area, string branch, string destination, CancellationToken ct = default) =>
+        (await ListAsync(Repo(area), branch, destination, "all", ct)).Select(p => (p.Int("number")!.Value, StatusOf(p), p.Str("head", "sha"))).ToList();
+
     /// <summary>Un file del repo sul ramo, come testo (lo YAML di una pipeline di Azure Pipelines su un repo GitHub).</summary>
     public async Task<string> GetFileAsync(string repo, string path, string branch, CancellationToken ct = default)
     {

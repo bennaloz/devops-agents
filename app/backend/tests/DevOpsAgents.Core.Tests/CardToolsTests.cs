@@ -66,6 +66,7 @@ internal sealed class CardDesk : ICardEditor, ICodeHost, ICodeHostResolver, IPul
     public Task<string> GetDescriptionAsync(AreaMapping area, int prId, CancellationToken ct = default) => Task.FromResult(PrDescription);
     public Task SetDescriptionAsync(AreaMapping area, int prId, string description, CancellationToken ct = default) { Writes.Add($"descrizionePr {prId} {description}"); return Task.CompletedTask; }
     public Task SetTitleAsync(AreaMapping area, int prId, string title, CancellationToken ct = default) { Writes.Add($"titoloPr {prId} {title}"); return Task.CompletedTask; }
+    public Task<IReadOnlyList<(int Id, string Status, string? HeadCommit)>> ListPullRequestsAsync(AreaMapping area, string branch, string destination, CancellationToken ct = default) => throw new NotSupportedException();
 
     public string? DeployBranchRead { get; private set; }
     public Task<IReadOnlyList<string>> GetAsync(AreaMapping area, string branch, CancellationToken ct = default) { DeployBranchRead = branch; return Task.FromResult<IReadOnlyList<string>>(DeployParams); }
