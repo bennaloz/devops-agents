@@ -25,4 +25,7 @@
     <ProjectReference Include="..\..\src\DevOpsAgents.Core\DevOpsAgents.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Hooks/casi-hook.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

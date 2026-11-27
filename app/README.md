@@ -62,6 +62,7 @@ In `src/DevOpsAgents.Api/appsettings.json`, sezione `DevOpsAgents`:
 | `WorktreeRoot` | `C:/develop/GIT/_wt` | Dove nascono i worktree delle card |
 | `DataDir` | `%LOCALAPPDATA%/DevOps.Agents.Net` | Stato locale e flussi delle sessioni (separati da quelli del PowerShell) |
 | `ClaudeExecutable` | `claude` | La CLI di Claude Code |
+| `HookCommand` | accanto all'API | Gli hook .NET (`devops-agents-hook`), passati a ogni sessione con `--settings`. `off`: solo quelli installati in `~/.claude/settings.json` |
 | `McpServer` | accanto all'API | Il server MCP degli agenti (`devops-agents-mcp`, eseguibile o dll). `off`: le sessioni usano `card.ps1` come la versione PowerShell |
 
 I token si leggono dalle variabili `DEVOPS_AGENTS_ADO_PAT` e `DEVOPS_AGENTS_GITHUB_TOKEN`, altrimenti dagli stessi file della
@@ -122,7 +123,20 @@ tabella "comando di `card.ps1` -> strumento" con i soli strumenti del ruolo (`Co
 all'API (riferimento di progetto) e l'API lo trova da sola; `McpServer=off` torna a `card.ps1`.
 
 Restano in PowerShell: la scrittura della memoria (gli strumenti `memoria_*` chiamano `src/memoria.ps1`, che fa worktree, commit, push e
-PR della memoria; il mentore pero non usa piu la shell per questo), `card.ps1 crea` (si usa fuori dai ruoli) e gli hook di Claude Code.
+PR della memoria; il mentore pero non usa piu la shell per questo) e `card.ps1 crea` (si usa fuori dai ruoli).
+
+## Gli hook
+
+I cinque hook PreToolUse di `hooks/*.ps1` sono anche in .NET (`Core/Hooks/HookRules.cs`, eseguibile `devops-agents-hook`), con le
+stesse regole e gli stessi messaggi:
+
+```bash
+echo '{"tool_input":{"command":"cat ~/.claude/pat.txt"}}' | ATTREZZI_RUOLO=dev devops-agents-hook deny-pat
+```
+
+Exit 2 blocca e il messaggio su stderr torna al modello; in circa un decimo di secondo. Lo smistatore .NET li passa a ogni sessione con
+`--settings`, cosi valgono per i ruoli anche dove non sono installati. I test girano sugli stessi 119 casi di `hooks/Test-Hooks.ps1`,
+esportati in `tests/DevOpsAgents.Core.Tests/Hooks/casi-hook.json`: un caso nuovo si aggiunge a `Test-Hooks.ps1` e si riesporta.
 
 ## Come servizio
 
@@ -204,5 +218,6 @@ script al posto di claude).
 | Supervisore (D51): smistatore fermo o che si interrompe, PAT rifiutato o in scadenza, card in on-hold con il gesto e le card che tiene ferme, prove in Test, domande del responsabile, card ferme da ore senza motivo, card che saltano per errore, rilasci in attesa per area con le soglie, quota; problemi aperti con primo visto e ricordi; urgenti subito, riepilogo ai feriali, rilasci a parte; Telegram con i topic | portato, con test; la dashboard ha il riquadro "Da fare per te". Manca: la diagnosi con un modello e i controlli sulle pipeline |
 | Aggiornamento automatico della suite (D53) | **manca** |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
-| `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. Restano PowerShell: la scrittura della memoria (chiamata dal server), `card.ps1 crea`, gli hook |
+| `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. Restano PowerShell: la scrittura della memoria (chiamata dal server), `card.ps1 crea` |
+| Hook di Claude Code (`hooks/*.ps1`) | portati (`devops-agents-hook`), sugli stessi 119 casi di `Test-Hooks.ps1`, passati alle sessioni con `--settings` |
 | Riga di comando, servizio Windows e systemd, container | portato: `devops-agents` (CLI), `UseWindowsService`/`UseSystemd`, `app/Dockerfile` e `app/docker-compose.yml` |

@@ -1,0 +1,1557 @@
+[
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 2,
+    "what": "commit nella working copy",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit -m x"
+      },
+      "cwd": "C:/develop/GIT/Acme.AI"
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 0,
+    "what": "commit nel worktree",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit -m x"
+      },
+      "cwd": "C:/develop/GIT/_wt/Acme.AI/slug"
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 0,
+    "what": "commit con -C nel worktree",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git -C \"C:/develop/GIT/_wt/Acme.AI/slug\" commit -m x"
+      },
+      "cwd": "C:/develop/GIT"
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 0,
+    "what": "cd nel worktree poi commit",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "cd /c/develop/GIT/_wt/Acme.AI/slug && git commit -m x"
+      },
+      "cwd": "C:/develop/GIT"
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 0,
+    "what": "git log innocuo",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git log --oneline"
+      },
+      "cwd": "C:/develop/GIT/Acme.AI"
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "password vera in appsettings",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"ConnectionStrings\": { \"Db\": \"Server=a;Password=Zuppa2026!\" } }",
+        "file_path": "C:/x/appsettings.Test.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "secret in uno script ps1",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$env:Keycloak__ClientSecret = \"8f3a9c21-bb10-4e77\"",
+        "file_path": "C:/x/deploy.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "template con segnaposto",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"Password\": \"{{DB_PASSWORD}}\" }",
+        "file_path": "C:/x/appsettings.Test.template.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "segnaposto changeme",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"Password\": \"changeme\" }",
+        "file_path": "C:/x/appsettings.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "codice .cs che nomina password",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "var password = cfg[\"Secret\"];",
+        "file_path": "C:/x/Service.cs"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "config senza segreti",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"Serilog\": { \"MinimumLevel\": \"Information\" } }",
+        "file_path": "C:/x/appsettings.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 2,
+    "what": "commit nella working copy di un altro repo (Bash)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "cwd": "C:/develop/GIT/DevOps.Agents",
+      "tool_input": {
+        "command": "git commit -m x"
+      }
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 2,
+    "what": "commit nella working copy di un altro repo (PowerShell)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "cwd": "C:/develop/GIT/Acme.Agenda",
+      "tool_input": {
+        "command": "git commit -m x"
+      }
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 0,
+    "what": "commit nel worktree (PowerShell)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "cwd": "C:/develop/GIT/_wt/DevOps.Agents/slug",
+      "tool_input": {
+        "command": "git commit -m x"
+      }
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 0,
+    "what": "Set-Location nel worktree poi commit (PowerShell)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "cwd": "C:/develop/GIT",
+      "tool_input": {
+        "command": "Set-Location C:\\develop\\GIT\\_wt\\Acme.AI\\slug; git commit -m x"
+      }
+    }
+  },
+  {
+    "hook": "deny-commit-outside-worktree",
+    "expected": 2,
+    "what": "Set-Location nella working copy poi commit (PowerShell)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "cwd": "C:/develop/GIT/_wt/Acme.AI/slug",
+      "tool_input": {
+        "command": "Set-Location C:\\develop\\GIT\\Acme.AI; git commit -m x"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "cat del file del PAT (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat ~/.claude/pat.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Get-Content del file del PAT (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Get-Content $HOME\\.claude\\pat.txt -Raw"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "variabile del PAT (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "$env:AZURE_DEVOPS_EXT_PAT"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "variabile del token GitHub (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo $GH_TOKEN"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "gh auth token",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh auth token"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "file del token GitHub in lettura",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/Users/x/.claude/pat-github-lettura.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "gh run view usa il token senza nominarlo",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh run view 123 --log-failed -R acme/web"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Read del file del PAT",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/Users/x/.claude/pat.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Read del file delle credenziali di collaudo",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/Users/x/.claude/collaudo/Acme.AI.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Get-Content del file delle credenziali di collaudo",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Get-Content $HOME\\.claude\\collaudo\\Acme.AI.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "una chiamata che usa le credenziali dall ambiente passa",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-RestMethod -Uri $env:COLLAUDO_TOKENURL -Method Post -Body @{ username = $env:COLLAUDO_UTENTE }"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Read del file del PAT in lettura",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/Users/x/.claude/pat-read-only.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "cat del file del PAT in lettura (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat ~/.claude/pat-read-only.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "script che usa il PAT dall ambiente senza nominarlo",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File azure-pipelines/scripts/orchestrator/queue-branch-builds.ps1 -BuildSourceBranch 'refs/heads/develop' -DryRun"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "chiamata a card.ps1 (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 leggi"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "chiamata a card.ps1 (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 commenta \"il file pat.txt non va letto\""
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "card.ps1 concatenato con la lettura del PAT",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -File C:/x/src/card.ps1 leggi; Get-Content ~/.claude/pat.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "testo su stdin a card.ps1 (here-string PowerShell)",
+    "role": "responsabile",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "@'\n1. Il PAT si legge da AZURE_DEVOPS_EXT_PAT.\n'@ | pwsh -NoProfile -File C:/x/src/card.ps1 criteri"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "testo su stdin a card.ps1 (heredoc Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File C:/x/src/card.ps1 commenta <<'EOF'\nil file pat.txt non va letto\nEOF"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "here-string a card.ps1 seguito da altro comando",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "@'\nAZURE_DEVOPS_EXT_PAT\n'@ | pwsh -File C:/x/src/card.ps1 commenta; Get-Content ~/.claude/pat.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "here-string con il PAT verso un altro comando",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "@'\nAZURE_DEVOPS_EXT_PAT\n'@ | Set-Content x.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "here-string doppio (espande la variabile del PAT)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "@\"\n$env:AZURE_DEVOPS_EXT_PAT\n\"@ | pwsh -File C:/x/src/card.ps1 commenta"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "heredoc Bash non quotato (espande la variabile del PAT)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pwsh -File C:/x/src/card.ps1 commenta <<EOF\n$AZURE_DEVOPS_EXT_PAT\nEOF"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "az account get-access-token (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "az account get-access-token in maiuscolo (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "az account Get-Access-Token -o json"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "cambio di AZURE_CONFIG_DIR (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "$env:AZURE_CONFIG_DIR = \"$HOME\\.azure\"; az account show"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "AZURE_CONFIG_DIR davanti a un comando (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "AZURE_CONFIG_DIR=~/.azure az repos pr list"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "lettura della cache dei token in .azure (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat ~/.azure/msal_token_cache.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Get-ChildItem della cartella .azure (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Get-ChildItem $HOME\\.azure"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Read della cache dei token in .azure",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/Users/x/.azure/msal_token_cache.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "az login (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "az login --use-device-code"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "AZ LOGIN in maiuscolo (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "AZ  Login"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "az login fuori da un ruolo",
+    "role": "",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "az login"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "msal_token_cache senza la cartella .azure (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "find / -name msal_token_cache.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "Read di pat-smistatore.txt",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/Users/x/.claude/pat-smistatore.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "cat di pat-smistatore-lettura.txt (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat ~/.claude/pat-smistatore-lettura.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "un file path.txt non e un file del PAT",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/x/path.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 2,
+    "what": "card.ps1 concatenato con get-access-token",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -File C:/x/src/card.ps1 leggi; az account get-access-token"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "chiamata a card.ps1 il cui testo nomina get-access-token",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File C:/x/src/card.ps1 commenta \"il login usa az account get-access-token\""
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "az repos senza toccare il login (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "az repos pr list --status active"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "un percorso azure-pipelines non e la cartella .azure",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/develop/GIT/Acme.AI/azure-pipelines/build-paths.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "get-access-token fuori da un ruolo",
+    "role": "",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "az account get-access-token"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "comando innocuo (PowerShell)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "git status"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "Read di un file qualunque",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/x/README.md"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "az con il PAT fuori da un ruolo (PowerShell)",
+    "role": "",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "$env:AZURE_DEVOPS_EXT_PAT = (Get-Content $HOME\\.claude\\pat.txt -Raw).Trim(); az repos pr list"
+      }
+    }
+  },
+  {
+    "hook": "deny-pat",
+    "expected": 0,
+    "what": "Read del file del PAT fuori da un ruolo",
+    "role": "",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "C:/Users/x/.claude/pat.txt"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 2,
+    "what": "cambio di ATTREZZI_CARD (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "$env:ATTREZZI_CARD = 456; pwsh -File C:/x/src/card.ps1 leggi"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 2,
+    "what": "cambio di ATTREZZI_TASK (PowerShell): il task e quello della sessione",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "$env:ATTREZZI_TASK = 63; pwsh -File C:/x/src/card.ps1 chiudi-task"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 0,
+    "what": "chiudi-task e crea-task da una sessione di ruolo",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 chiudi-task"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 2,
+    "what": "cambio di ATTREZZI_RUOLO (Bash)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ATTREZZI_RUOLO=responsabile pwsh -File C:/x/src/card.ps1 sposta pronto"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 2,
+    "what": "SetEnvironmentVariable (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "[Environment]::SetEnvironmentVariable(\"ATTREZZI_\" + \"CARD\", \"5\")"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 2,
+    "what": "Import-Module di un modulo sotto src (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Import-Module C:/develop/GIT/DevOps.Agents/src/Ado.psm1; Set-AdoCard -Id 5 -Stato \"Human test\""
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 2,
+    "what": "dot-source di un modulo sotto src (PowerShell)",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": ". C:\\develop\\GIT\\DevOps.Agents\\src\\Card.psm1"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 0,
+    "what": "chiamata a card.ps1 da una sessione di ruolo",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 leggi"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 0,
+    "what": "git status da una sessione di ruolo",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "git status"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 0,
+    "what": "fuori da un ruolo non fa niente (Import-Module)",
+    "role": "",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Import-Module C:/develop/GIT/DevOps.Agents/src/Ado.psm1"
+      }
+    }
+  },
+  {
+    "hook": "deny-identita",
+    "expected": 0,
+    "what": "fuori da un ruolo non fa niente (ATTREZZI_CARD)",
+    "role": "",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ATTREZZI_CARD=5 echo ok"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: assegnazione da Get-Content (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$Token = Get-Content -LiteralPath $percorso -Raw",
+        "file_path": "C:/x/Lettura.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: campo di un oggetto da una somma (psm1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "[pscustomobject]@{ TotalTokens = $totale.Somma }",
+        "file_path": "C:/x/Conti.psm1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: assegnazione da un campo (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$tokenIn = $Esito.TokenIn",
+        "file_path": "C:/x/Registro.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: campo = cmdlet (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$h = @{ Token = Get-TokenCorrente }",
+        "file_path": "C:/x/Auth.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: campo = cast e variabile (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "TokenOut = [int64]$x.Uscita",
+        "file_path": "C:/x/Conti.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: valore = (espressione) (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$token = (Get-Content $f).Trim()",
+        "file_path": "C:/x/Auth.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: valore = chiamata di metodo (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$token = GetTokenCorrente($utente)",
+        "file_path": "C:/x/Auth.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: valore letto da variabile in uno script sh",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "token=$ALTRA_VARIABILE",
+        "file_path": "C:/x/deploy.sh"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: Edit con new_string che legge un file (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "file_path": "C:/x/Auth.ps1",
+        "old_string": "x",
+        "new_string": "    $Token = Get-Content ~/.claude/file.txt -Raw"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: valore tra apici singoli (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$Token = 'ghp_a1b2c3d4e5f6g7'",
+        "file_path": "C:/x/Auth.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: valore tra virgolette (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$Token = \"ghp_a1b2c3d4e5f6g7\"",
+        "file_path": "C:/x/Auth.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: un valore tra apici che sembra un comando (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$Token = \"Get-Content\"",
+        "file_path": "C:/x/Auth.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: chiave in una hashtable (psm1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "@{ ApiKey = 'abcdef123456' }",
+        "file_path": "C:/x/Conf.psm1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: password dentro una stringa di connessione (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$conn = \"Server=a;Database=b;Password=Zuppa2026!\"",
+        "file_path": "C:/x/Db.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: valore senza apici dentro un here-string (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "@'\nUser=x\nPassword=Zuppa2026!\n'@ | Set-Content c.ini",
+        "file_path": "C:/x/Scrivi.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: export in uno script sh",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "export API_TOKEN=abcdef123456",
+        "file_path": "C:/x/deploy.sh"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: valore in un file yaml",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "token: ghp_abcdef123456",
+        "file_path": "C:/x/pipeline.yml"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: valore in un file json",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"token\": \"abcdef123456\" }",
+        "file_path": "C:/x/appsettings.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: password in un file ini",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "password=Zuppa2026!",
+        "file_path": "C:/x/conn.ini"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: password json che comincia con il dollaro",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"Password\": \"$uperSegreta99\" }",
+        "file_path": "C:/x/appsettings.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: nel new_string di un Edit (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "file_path": "C:/x/Auth.ps1",
+        "old_string": "x",
+        "new_string": "$env:Keycloak__ClientSecret = \"8f3a9c21-bb10-4e77\""
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 0,
+    "what": "falso positivo: indirizzo in una chiave con token nel nome (json)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"tokenUrl\": \"https://srv-test:8443/realms/X/protocol/openid-connect/token\" }",
+        "file_path": "C:/x/collaudo.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: password dentro un indirizzo (json)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"tokenUrl\": \"https://utente:Zuppa2026!@srv-test/token\" }",
+        "file_path": "C:/x/collaudo.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: token nella query di un indirizzo (json)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "{ \"url\": \"https://srv-test/api?token=ghp_a1b2c3d4e5f6\" }",
+        "file_path": "C:/x/collaudo.json"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: valore predefinito in ${NOME:-valore} (sh)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "API_TOKEN=${API_TOKEN:-ghp_a1b2c3d4e5f6g7h8}",
+        "file_path": "C:/x/deploy.sh"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: password che comincia con il dollaro in una stringa di connessione tra apici (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$c = 'Server=a;Password=$uperSegreta99'",
+        "file_path": "C:/x/Db.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: password a forma di chiamata di metodo in una stringa tra apici (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$c = 'Server=a;Password=Estate(2026)x'",
+        "file_path": "C:/x/Db.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: password a forma di verbo-nome in una stringa tra apici (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$c = 'Server=a;Password=Open-Sesame2026'",
+        "file_path": "C:/x/Db.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-secrets-in-repo",
+    "expected": 2,
+    "what": "segreto vero: letterale di ripiego dopo ?? (ps1)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "content": "$token = $env:X ?? 'ghp_a1b2c3d4e5f6g7h8'",
+        "file_path": "C:/x/Auth.ps1"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "host di Test della mappa con porta della mappa",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-RestMethod -Uri https://srv-app-test:5480/api/health"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "host di Test con una porta diversa (Keycloak 8443)",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-RestMethod -Uri \"https://srv-app-test:8443/realms/x/protocol/openid-connect/token\" -Method Post"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "Azure DevOps ammesso (visualstudio.com)",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "az pipelines runs list --org https://acme.visualstudio.com/"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "Azure DevOps ammesso (dev.azure.com)",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "curl -s https://dev.azure.com/acme/_apis/projects"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "localhost e 127.0.0.1 ammessi",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "curl http://localhost:5000/health && curl http://127.0.0.1:5001/x"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 2,
+    "what": "host di produzione (sso)",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-RestMethod -Uri https://sso.acme.com/realms/x/protocol/openid-connect/token"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 2,
+    "what": "host di produzione (formsapi) in Bash",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "curl -s \"https://formsapi.acme.com/api/forms\""
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 2,
+    "what": "un host ammesso e uno no nello stesso comando",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "irm https://srv-app-test:5480/a; irm https://formsapi.acme.com/b"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 2,
+    "what": "-Uri con host senza schema",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-WebRequest -Uri formsapi.acme.com/api"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 2,
+    "what": "curl con host senza schema",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "curl -sk formsapi.acme.com:443/api"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 2,
+    "what": "WebFetch verso un host non ammesso",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "WebFetch",
+      "tool_input": {
+        "prompt": "x",
+        "url": "https://sso.acme.com/"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "host degli ambienti di collaudo (collaudo.json) con la porta dello slot",
+    "role": "collaudatore",
+    "hostCollaudo": "collaudo.example.invalid",
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "curl -s http://collaudo.example.invalid:21101/api/health"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 2,
+    "what": "un host che collaudo.json non ha e un host di produzione restano bloccati",
+    "role": "collaudatore",
+    "hostCollaudo": "localhost",
+    "input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "curl -s http://collaudo.example.invalid:21101/api/health"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "comando senza URL",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "pwsh -NoProfile -File C:/x/src/card.ps1 leggi"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "URL in variabile",
+    "role": "collaudatore",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-RestMethod -Uri $env:COLLAUDO_URLLOGIN -Method Post; irm \"https://$env:HOSTX/api\""
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "stesso host di produzione in una sessione dev",
+    "role": "dev",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-RestMethod -Uri https://sso.acme.com/realms/x"
+      }
+    }
+  },
+  {
+    "hook": "deny-host-collaudo",
+    "expected": 0,
+    "what": "stesso host di produzione in una sessione interattiva",
+    "role": "",
+    "hostCollaudo": null,
+    "input": {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Invoke-RestMethod -Uri https://sso.acme.com/realms/x"
+      }
+    }
+  }
+]

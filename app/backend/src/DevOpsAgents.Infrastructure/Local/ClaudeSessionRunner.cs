@@ -23,6 +23,11 @@ public sealed record ClaudeRunnerOptions
     /// Con questo le sessioni usano gli strumenti MCP al posto di card.ps1 e memoria.ps1; senza, card.ps1 come la versione PowerShell.
     /// </summary>
     public IReadOnlyList<string>? McpServer { get; init; }
+    /// <summary>
+    /// Gli hook .NET (devops-agents-hook): il comando e i suoi primi argomenti. Con questo ogni sessione riceve gli hook PreToolUse con --settings,
+    /// anche se in ~/.claude/settings.json non sono installati; senza, valgono solo quelli installati (gli hook PowerShell).
+    /// </summary>
+    public IReadOnlyList<string>? HookCommand { get; init; }
 }
 
 /// <summary>
@@ -41,7 +46,7 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
 
     private string LogPath(string id) => Path.Combine(options.DataDir, "sessioni", $"{id}.jsonl");
 
-    public static IReadOnlyList<string> Arguments(RoleSettings role, string brief, string message, string sessionId, bool resume, string? mcpConfig = null)
+    public static IReadOnlyList<string> Arguments(RoleSettings role, string brief, string message, string sessionId, bool resume, string? mcpConfig = null, string? settings = null)
     {
         var a = new List<string> { "-p", message, "--model", role.Model };
         if (!string.IsNullOrEmpty(role.Effort)) a.AddRange(["--effort", role.Effort]);
@@ -50,8 +55,23 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
         a.Add("--tools"); a.AddRange(role.Tools);
         // il server degli agenti espone solo gli strumenti del ruolo: si permettono tutti quelli che ha
         a.Add("--allowedTools"); a.AddRange(role.Tools); if (mcpConfig is not null) a.Add($"mcp__{Core.Agents.AgentBrief.ServerName}");
-        a.AddRange(["--strict-mcp-config", "--mcp-config", mcpConfig ?? "{\"mcpServers\":{}}", "--permission-mode", "acceptEdits"]);
+        a.AddRange(["--strict-mcp-config", "--mcp-config", mcpConfig ?? "{\"mcpServers\":{}}"]);
+        if (settings is not null) a.AddRange(["--settings", settings]);
+        a.AddRange(["--permission-mode", "acceptEdits"]);
         return a;
+    }
+
+    /// <summary>Le impostazioni della sessione con i soli hook PreToolUse .NET, uno per regola con il matcher di setup/Install-Attrezzi.ps1.</summary>
+    public static string HookSettings(IReadOnlyList<string> hook, string root)
+    {
+        static string Q(string x) => x.Contains(' ') || x.Contains('"') ? $"\"{x.Replace("\"", "\\\"")}\"" : x;
+        var pre = new System.Text.Json.Nodes.JsonArray();
+        foreach (var (name, matcher) in Core.Hooks.HookRules.Matchers)
+        {
+            var command = string.Join(' ', hook.Select(Q).Concat([name, "--root", Q(root.Replace('\\', '/'))]));
+            pre.Add(new JsonObject { ["matcher"] = matcher, ["hooks"] = new System.Text.Json.Nodes.JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }) });
+        }
+        return new JsonObject { ["hooks"] = new JsonObject { ["PreToolUse"] = pre } }.ToJsonString();
     }
 
     /// <summary>La --mcp-config con il solo server degli agenti, legato a card, ruolo e task della sessione.</summary>
@@ -80,7 +100,8 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
         };
         foreach (var a in options.PrefixArguments) psi.ArgumentList.Add(a);
         var mcp = UsesMcp(r.Role) ? McpConfig(options.McpServer!, r.CardId, r.Role, r.TaskId, config.Root, options.DataDir) : null;
-        foreach (var a in Arguments(role, await BriefAsync(r.Role, role, r.Area.Repo, id, r.TaskId, ct), r.Message, id, r.Resume, mcp)) psi.ArgumentList.Add(a);
+        var hooks = options.HookCommand is { Count: > 0 } h ? HookSettings(h, config.Root) : null;
+        foreach (var a in Arguments(role, await BriefAsync(r.Role, role, r.Area.Repo, id, r.TaskId, ct), r.Message, id, r.Resume, mcp, hooks)) psi.ArgumentList.Add(a);
 
         // le variabili che leggono hook e card.ps1; mai i token di chi lancia, solo quelli in lettura
         var env = psi.Environment;

@@ -22,12 +22,20 @@ public sealed record ApiOptions
     /// </summary>
     public string? McpServer { get; init; }
 
+    /// <summary>Gli hook .NET (devops-agents-hook): vuoto, accanto all'API; "off": solo gli hook installati in ~/.claude/settings.json.</summary>
+    public string? HookCommand { get; init; }
+
     /// <summary>Il comando del server MCP, o null se spento o non trovato.</summary>
-    public IReadOnlyList<string>? McpCommand(string baseDir)
+    public IReadOnlyList<string>? McpCommand(string baseDir) => Resolve(McpServer, "devops-agents-mcp", baseDir);
+
+    public IReadOnlyList<string>? HookCommandOf(string baseDir) => Resolve(HookCommand, "devops-agents-hook", baseDir);
+
+    /// <summary>Un eseguibile .NET della suite: quello configurato, o la dll accanto all'API (bin, o ../mcp e ../hook nel container).</summary>
+    private static IReadOnlyList<string>? Resolve(string? configured, string name, string baseDir)
     {
-        if (string.Equals(McpServer, "off", StringComparison.OrdinalIgnoreCase)) return null;
-        var path = McpServer is { Length: > 0 } p ? p
-            : new[] { Path.Combine(baseDir, "devops-agents-mcp.dll"), Path.Combine(baseDir, "..", "mcp", "devops-agents-mcp.dll") }.FirstOrDefault(File.Exists);
+        if (string.Equals(configured, "off", StringComparison.OrdinalIgnoreCase)) return null;
+        var path = configured is { Length: > 0 } p ? p
+            : new[] { Path.Combine(baseDir, $"{name}.dll"), Path.Combine(baseDir, "..", name.Replace("devops-agents-", ""), $"{name}.dll") }.FirstOrDefault(File.Exists);
         if (path is null) return null;
         return path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? ["dotnet", Path.GetFullPath(path)] : [path];
     }
