@@ -24,12 +24,12 @@ public class InstallerTests
         var s = JsonNode.Parse(File.ReadAllText(file))!;
         Assert.Equal("opus", s["model"]!.GetValue<string>());
         var pre = s["hooks"]!["PreToolUse"]!.AsArray();
-        Assert.Equal(6, pre.Count);
+        Assert.Equal(8, pre.Count);
         Assert.Contains(pre, p => p!["matcher"]!.GetValue<string>() == "Bash|PowerShell|Read" &&
             p["hooks"]![0]!["command"]!.GetValue<string>() == "dotnet \"C:/Program Files/da/devops-agents-hook.dll\" deny-pat --root C:/develop/GIT/DevOps.Agents");
         Assert.Single(Directory.GetFiles(claude, "settings.json.bak-*"));
         i.InstallHooks(["dotnet", "c:/program files/da/devops-agents-hook.dll"], "c:/develop/git/devops.agents");
-        Assert.Equal(6, JsonNode.Parse(File.ReadAllText(file))!["hooks"]!["PreToolUse"]!.AsArray().Count);
+        Assert.Equal(8, JsonNode.Parse(File.ReadAllText(file))!["hooks"]!["PreToolUse"]!.AsArray().Count);
         Assert.Contains("tutte le voci erano gia presenti", o.ToString());
     }
 

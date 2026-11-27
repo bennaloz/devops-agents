@@ -401,9 +401,9 @@ public class DecisionEngineTests
     }
 
     [Fact]
-    public void Ready_to_merge_con_la_PR_completata_va_in_ready_to_release_con_conflitti_torna_a_dev()
+    public void Ready_to_merge_con_la_PR_completata_va_in_ready_to_deploy_test_con_conflitti_torna_a_dev()
     {
-        Assert.Equal(K.ReadyToRelease, ((MoveCard)Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.None, PrStatuses.Completed)).Actions[0]).State);
+        Assert.Equal(K.ReadyToDeployTest, ((MoveCard)Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.None, PrStatuses.Completed)).Actions[0]).State);
         Assert.Equal(["RiportaIndietro", "LanciaSessione"], Kinds(Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.Conflicts))));
         Assert.Empty(Decide(Fx.Card(K.ReadyToMerge).Pr(Validations.Running)).Actions);
         Fx.Hold(Decide(Fx.Card(K.ReadyToMerge)));

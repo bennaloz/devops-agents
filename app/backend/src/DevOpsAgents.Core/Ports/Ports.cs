@@ -49,7 +49,9 @@ public interface ICodeHost
     /// <summary>D52: i rami su origin che cominciano con il prefisso (feature/f10 trova feature/f10 e feature/f10-titolo).</summary>
     Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping area, string prefix, CancellationToken ct = default);
     /// <summary>Una PR per numero: stato (active, completed, abandoned) e ramo sorgente; null se non c'e.</summary>
-    Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default);
+    Task<PullRequestRef?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default);
+    /// <summary>D61: vero se <paramref name="commit"/> e contenuto in <paramref name="inCommit"/> (e un suo antenato, o e lui).</summary>
+    Task<bool> ContainsCommitAsync(AreaMapping area, string commit, string inCommit, CancellationToken ct = default);
     /// <summary>true se la PR deve essere collegata alla card con un link (GitHub); Azure Repos la collega da se.</summary>
     bool NeedsCardLink { get; }
 }
@@ -67,6 +69,8 @@ public interface ICiService
     Task<PipelineRun> GetRunAsync(AreaMapping area, int runId, CancellationToken ct = default);
     /// <summary>D52: gli errori di codice di una build (test falliti, errori di compilazione) dai log dei passi falliti; null se non ce ne sono.</summary>
     Task<string?> GetBuildErrorsAsync(AreaMapping area, int buildId, CancellationToken ct = default);
+    /// <summary>D61: l'ultimo run riuscito della pipeline di deploy dell'area sul ramo (il deploy di develop in Test); null se non ce n'e.</summary>
+    Task<DeployedRun?> GetLastSucceededDeployAsync(AreaMapping area, string branch, CancellationToken ct = default);
 }
 
 /// <summary>D52: una Bug da creare sotto una Feature. InitialState: la chiave di stato in cui deve nascere (null = resta nello stato iniziale, Draft).</summary>

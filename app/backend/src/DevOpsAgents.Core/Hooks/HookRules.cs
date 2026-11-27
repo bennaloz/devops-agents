@@ -4,15 +4,22 @@ using System.Text.RegularExpressions;
 
 namespace DevOpsAgents.Core.Hooks;
 
-/// <summary>L'esito di un hook: Deny blocca la chiamata (exit 2) e Message torna al modello; altrimenti passa (exit 0), con un eventuale avviso.</summary>
-public sealed record HookVerdict(bool Deny, string? Message = null)
+/// <summary>
+/// L'esito di un hook: Deny blocca la chiamata (exit 2) e Message (stderr) torna al modello; altrimenti passa (exit 0), con un eventuale avviso.
+/// Output va su stdout: il JSON che Claude Code legge (systemMessage, l'avviso per l'utente di suggest-compact).
+/// </summary>
+public sealed record HookVerdict(bool Deny, string? Message = null, string? Output = null)
 {
     public static readonly HookVerdict Pass = new(false);
     public int ExitCode => Deny ? 2 : 0;
 }
 
-/// <summary>Quello che gli hook leggono oltre all'input: il ruolo della sessione (ATTREZZI_RUOLO) e i file di config del repo.</summary>
-public sealed record HookContext(string? Role, Func<string, string?> ReadConfig, string ConfigDir = "config");
+/// <summary>
+/// Quello che gli hook leggono oltre all'input: il ruolo della sessione (ATTREZZI_RUOLO) e i file di config del repo. Per suggest-compact:
+/// Env (le variabili COMPACT_*), ReadTail (la coda del transcript, null se non c'e) e il gradino gia avvisato per sessione (ReadStep, WriteStep).
+/// </summary>
+public sealed record HookContext(string? Role, Func<string, string?> ReadConfig, string ConfigDir = "config",
+    Func<string, string?>? Env = null, Func<string, string?>? ReadTail = null, Func<string, int?>? ReadStep = null, Action<string, int>? WriteStep = null);
 
 /// <summary>
 /// Gli hook PreToolUse di Claude Code (hooks/*.ps1), con le stesse regole e gli stessi messaggi: presidi contro l'errore, non recinzioni.
@@ -21,7 +28,7 @@ public sealed record HookContext(string? Role, Func<string, string?> ReadConfig,
 /// </summary>
 public static class HookRules
 {
-    public static readonly string[] Names = ["deny-commit-outside-worktree", "deny-secrets-in-repo", "deny-pat", "deny-identita", "deny-host-collaudo"];
+    public static readonly string[] Names = ["deny-commit-outside-worktree", "deny-secrets-in-repo", "deny-pat", "deny-identita", "deny-host-collaudo", "deny-no-verify", "suggest-compact"];
 
     /// <summary>Gli strumenti su cui si aggancia ciascun hook (il matcher di settings.json, come setup/Install-Attrezzi.ps1).</summary>
     public static readonly IReadOnlyDictionary<string, string> Matchers = new Dictionary<string, string>
@@ -31,6 +38,8 @@ public static class HookRules
         ["deny-pat"] = "Bash|PowerShell|Read",
         ["deny-identita"] = "Bash|PowerShell",
         ["deny-host-collaudo"] = "Bash|PowerShell|WebFetch",
+        ["deny-no-verify"] = "Bash|PowerShell",
+        ["suggest-compact"] = "Edit|Write",
     };
 
     private const RegexOptions I = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
@@ -53,6 +62,8 @@ public static class HookRules
             "deny-pat" => Pat(S(input, "command"), S(input, "file_path")),
             "deny-identita" => Identity(S(input, "command")),
             "deny-host-collaudo" => TesterHosts(string.Join("\n", new[] { S(input, "command"), S(input, "url") }.Where(x => x.Length > 0)), ctx),
+            "deny-no-verify" => NoVerify(S(input, "command")),
+            "suggest-compact" => SuggestCompact(S(payload, "transcript_path"), S(payload, "session_id"), ctx),
             _ => throw new ArgumentException($"hook sconosciuto: '{hook}' ({string.Join(", ", Names)})"),
         };
     }
@@ -245,5 +256,81 @@ public static class HookRules
                     """);
         }
         return HookVerdict.Pass;
+    }
+
+    // ---- deny-no-verify ----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Un comando git che salta gli hook di git (--no-verify, commit -n, core.hooksPath) si rifiuta, in ogni sessione. Prima del controllo si
+    /// tolgono i corpi degli heredoc e delle here-string e il testo fra virgolette: un messaggio di commit che nomina --no-verify non e un aggiramento.
+    /// </summary>
+    public static HookVerdict NoVerify(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command) || !M(command, @"\bgit\b")) return HookVerdict.Pass;
+        var text = Regex.Replace(command, @"(?s)<<-?\s*['""]?(\w+)['""]?.*?\n\s*\1\b", "", I);
+        text = Regex.Replace(text, @"(?s)@'.*?\n'@", "", I);
+        text = Regex.Replace(text, @"(?s)@"".*?\n""@", "", I);
+        var unquoted = Regex.Replace(text, @"(?s)'[^']*'|""[^""]*""", "\"\"", I);
+        string? reason = null;
+        if (M(unquoted, @"--no-verify\b")) reason = "--no-verify";
+        else if (M(text, @"\bcore\.hooksPath\b")) reason = "core.hooksPath";
+        else
+            // commit -n (anche dentro un gruppo di flag corti come -anm), solo nel pezzo di comando fino al prossimo separatore
+            foreach (var piece in Regex.Split(unquoted, @"&&|\|\||[;|\n]"))
+            {
+                var m = Regex.Match(piece, @"\bgit\b.*\bcommit\b(.*)$", I);
+                if (m.Success && M(m.Groups[1].Value, @"(?<=\s)-[a-zA-Z]*n[a-zA-Z]*\b")) { reason = "commit -n"; break; }
+            }
+        if (reason is null) return HookVerdict.Pass;
+        return new(true, $"""
+            Bloccato: il comando salta gli hook di git ({reason}).
+
+            Gli hook di git sono controlli del repo. Se uno fallisce, leggi l'errore e correggi la causa.
+            Se pensi che l'hook sbagli, dillo all'utente: saltarlo lo decide lui, e il comando lo lancia lui.
+            """);
+    }
+
+    // ---- suggest-compact ---------------------------------------------------------------------------------------------
+
+    public const int CompactThresholdDefault = 150000, CompactIntervalDefault = 75000;
+
+    /// <summary>Il contesto della sessione: l'ultimo "usage" del transcript (input + cache letta + cache creata), fuori dalle sidechain; 0 se non c'e.</summary>
+    public static long ContextTokens(string tail)
+    {
+        var lines = tail.Split('\n');
+        for (var i = lines.Length - 1; i >= 0; i--)
+        {
+            var line = lines[i];
+            if (!line.Contains("\"usage\"") || Regex.IsMatch(line, "\"isSidechain\":true")) continue;
+            JsonNode? entry;
+            try { entry = JsonNode.Parse(line); } catch (JsonException) { continue; }   // la prima riga della coda puo essere tagliata
+            if (entry?["message"]?["usage"] is not JsonObject u) continue;
+            long N(string k) => u[k] is JsonValue v && v.TryGetValue<long>(out var n) ? n : 0;
+            return N("input_tokens") + N("cache_read_input_tokens") + N("cache_creation_input_tokens");
+        }
+        return 0;
+    }
+
+    /// <summary>Il gradino raggiunto: null sotto la soglia, 0 alla soglia, 1 a soglia+intervallo, ...</summary>
+    public static long? CompactStep(long tokens, int threshold, int interval) => tokens < threshold ? null : (tokens - threshold) / interval;
+
+    /// <summary>
+    /// Quando il contesto supera la soglia avvisa l'utente che e un buon momento per /compact: una volta per gradino, per sessione. Non blocca
+    /// mai. COMPACT_SOGLIA_TOKEN e COMPACT_INTERVALLO_TOKEN cambiano soglia e intervallo.
+    /// </summary>
+    public static HookVerdict SuggestCompact(string transcriptPath, string sessionId, HookContext ctx)
+    {
+        if (string.IsNullOrWhiteSpace(transcriptPath) || ctx.ReadTail?.Invoke(transcriptPath) is not { } tail) return HookVerdict.Pass;
+        if (string.IsNullOrWhiteSpace(sessionId)) sessionId = Path.GetFileNameWithoutExtension(transcriptPath);
+        static int Positive(string? s, int d) => int.TryParse(s, out var n) && n > 0 ? n : d;
+        var threshold = Positive(ctx.Env?.Invoke("COMPACT_SOGLIA_TOKEN"), CompactThresholdDefault);
+        var interval = Positive(ctx.Env?.Invoke("COMPACT_INTERVALLO_TOKEN"), CompactIntervalDefault);
+        var tokens = ContextTokens(tail);
+        if (CompactStep(tokens, threshold, interval) is not { } step) return HookVerdict.Pass;
+        var key = Regex.Replace(sessionId, @"[^\w-]", "_");
+        if (step <= (ctx.ReadStep?.Invoke(key) ?? -1)) return HookVerdict.Pass;
+        ctx.WriteStep?.Invoke(key, (int)step);
+        var message = $"Contesto a {Math.Round(tokens / 1000.0)}k token: se hai chiuso una fase, e' un buon momento per /compact.";
+        return new(false, Output: new JsonObject { ["systemMessage"] = message }.ToJsonString());
     }
 }

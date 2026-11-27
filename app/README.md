@@ -136,15 +136,17 @@ facoltativa `"memoria": { "repo", "progettoAdo", "sorgente", "repoGithub" }` di 
 
 ## Gli hook
 
-I cinque hook PreToolUse di `hooks/*.ps1` sono anche in .NET (`Core/Hooks/HookRules.cs`, eseguibile `devops-agents-hook`), con le
-stesse regole e gli stessi messaggi:
+I sette hook PreToolUse di `hooks/*.ps1` sono anche in .NET (`Core/Hooks/HookRules.cs`, eseguibile `devops-agents-hook`), con le
+stesse regole e gli stessi messaggi. `deny-no-verify` rifiuta in ogni sessione un comando git che salta gli hook di git (`--no-verify`,
+`commit -n`, `core.hooksPath`); `suggest-compact` non blocca mai: quando il contesto della sessione supera una soglia (150k token, poi ogni
+75k; `COMPACT_SOGLIA_TOKEN` e `COMPACT_INTERVALLO_TOKEN`) avvisa l'utente che e un buon momento per `/compact`, una volta per gradino.
 
 ```bash
 echo '{"tool_input":{"command":"cat ~/.claude/pat.txt"}}' | ATTREZZI_RUOLO=dev devops-agents-hook deny-pat
 ```
 
 Exit 2 blocca e il messaggio su stderr torna al modello; in circa un decimo di secondo. Lo smistatore .NET li passa a ogni sessione con
-`--settings`, cosi valgono per i ruoli anche dove non sono installati. I test girano sugli stessi 119 casi di `hooks/Test-Hooks.ps1`,
+`--settings`, cosi valgono per i ruoli anche dove non sono installati. I test girano sugli stessi 129 casi di `hooks/Test-Hooks.ps1`,
 esportati in `tests/DevOpsAgents.Core.Tests/Hooks/casi-hook.json`: un caso nuovo si aggiunge a `Test-Hooks.ps1` e si riesporta.
 
 ## L'aggiornamento della suite (D53)
@@ -223,10 +225,11 @@ script al posto di claude).
 
 | Parte | Stato |
 | --- | --- |
-| Flusso di una card isolata: New, Needs clarification, Ready, In development (task, rossa, conflitti, bivio, rilancia), In review, Deploying to test, Automated test, Human test, Ready to merge, Ready to release | portato, con test |
+| Flusso di una card isolata: New, Needs clarification, Ready, In development (task, rossa, conflitti, bivio, rilancia), In review, Deploying to test, Automated test, Human test, Ready to merge, Ready to deploy (test), Ready to release | portato, con test |
 | Limiti: sessioni attive, card per repo, card in Test per componente, giri di revisione e collaudo, rosse di fila; predecessori; on-hold e ripresa della sessione; quota (pausa e riserva) | portato |
 | Board Azure DevOps, Azure Repos, Azure Pipelines, GitHub (PR, controlli, merge, rilanci, link sulla card) | portato |
 | Worktree, sessioni claude -p con brief, strumenti, advisor e token in lettura; silenzio; esito dalla riga ESITO | portato, semplificato |
+| Ready to deploy (test) fra il merge e Ready to release (D61): il commit di merge della PR, l'ultimo deploy riuscito di `develop` in Test e se lo contiene (Azure Repos e GitHub), la card della funzionalita che segue la chiusura, la voce `deploy-test` del supervisore, la colonna e la voce da fare dell'ufficio | portato, con test |
 | Pausa e priorita delle Feature, pausa di sistema, soglia sulla finestra di 5 ore, Feature obbligatoria in New (D60) | portato, con test; dashboard con ordine, pausa/riprendi e pausa del sistema |
 | Collaudo nell'ambiente Docker della card (D59): creazione da compose nel worktree, slot e porte, limite `ambientiCollaudo`, URL al collaudatore, ambiente buttato all'uscita dal Test e orfani; credenziali di prova `COLLAUDO_*` al collaudatore | portato, con test (docker finto) |
 | Cosa fare negli on-hold (D57): gesto del ruolo o testo predefinito nel commento, nello stato e nella dashboard; descrizione della PR salvata prima della PR (D58) e titolo dal ramo | portato, con test |
@@ -241,5 +244,5 @@ script al posto di claude).
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | portate come schede della dashboard: Pipeline (run da approvare, in coda, in corso, falliti con il motivo, agenti dei pool; `GET /api/pipelines`), Apprendimento (per ruolo e settimana, lezioni che hanno evitato un blocco; `GET /api/learning`), Suite (stato dell'aggiornamento e "aggiorna adesso"), Ufficio (il gioco di `src/ufficio` con il modello portato in `Core/View/Office.cs`, `/ufficio.html` e `/ufficio.json`). In demo le pipeline sono finte. Non portate: le pagine delle singole sessioni e dei brief della vista |
 | `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. `card.ps1 crea` e il comando `devops-agents crea` |
 | Scrittura della memoria dei ruoli (`memoria.ps1`, D46) | portata (`GitMemoryWriter`), con git vero nei test: lettura, scrivi, rivedi, togli, conflitto, base dopo la fusione, tetto, lucchetto condiviso con il PowerShell |
-| Hook di Claude Code (`hooks/*.ps1`) | portati (`devops-agents-hook`), sugli stessi 119 casi di `Test-Hooks.ps1`, passati alle sessioni con `--settings` |
+| Hook di Claude Code (`hooks/*.ps1`) | portati (`devops-agents-hook`), sugli stessi 129 casi di `Test-Hooks.ps1`, passati alle sessioni con `--settings`; anche `deny-no-verify` e `suggest-compact` |
 | Riga di comando, servizio Windows e systemd, container | portato: `devops-agents` (CLI), `UseWindowsService`/`UseSystemd`, `app/Dockerfile` e `app/docker-compose.yml` |

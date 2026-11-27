@@ -74,7 +74,13 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     public Task<int> CreateBugAsync(NewBug bug, CancellationToken ct = default) { Bugs.Add(bug); Writes.Add($"bug {bug.Title}"); return Task.FromResult(500 + Bugs.Count); }
     public List<string> Branches { get; } = [];
     public Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping a, string prefix, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(Branches.Where(b => b.StartsWith(prefix)).ToList());
-    public Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping a, int id, CancellationToken ct = default) => Task.FromResult<(string, string)?>((PrStatuses.Completed, "feature/f10-x"));
+    public string? LinkedMergeCommit { get; set; }
+    public Task<PullRequestRef?> GetPullRequestByIdAsync(AreaMapping a, int id, CancellationToken ct = default) => Task.FromResult<PullRequestRef?>(new(PrStatuses.Completed, "feature/f10-x", LinkedMergeCommit));
+    /// <summary>D61: i commit contenuti nel deploy di develop (commit -> deploy), e le richieste fatte.</summary>
+    public HashSet<(string Commit, string In)> Contained { get; } = [];
+    public Task<bool> ContainsCommitAsync(AreaMapping a, string commit, string inCommit, CancellationToken ct = default) => Task.FromResult(commit == inCommit || Contained.Contains((commit, inCommit)));
+    public DeployedRun? DevelopDeploy { get; set; }
+    public Task<DeployedRun?> GetLastSucceededDeployAsync(AreaMapping a, string branch, CancellationToken ct = default) => Task.FromResult(branch == "develop" ? DevelopDeploy : null);
     public string? BuildErrors { get; set; }
     public Task<string?> GetBuildErrorsAsync(AreaMapping a, int buildId, CancellationToken ct = default) => Task.FromResult(BuildErrors);
     public Task<string> PublishFeatureBranchAsync(AreaMapping a, FeatureInfo f, bool bug, CancellationToken ct = default)

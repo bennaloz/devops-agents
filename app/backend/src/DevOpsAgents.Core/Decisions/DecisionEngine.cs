@@ -203,7 +203,7 @@ public sealed class DecisionEngine
             if (inTest && SiblingsNotMerged(a) is { Count: > 0 } open)
                 return [new MoveBack(K.Ready, $"La sorella {string.Join(", ", open.Select(x => $"#{x.Id}"))} non e ancora unita nel ramo della funzionalita: il ramo cambierebbe sotto il collaudo, la card di chiusura torna in Ready to develop e aspetta")];
             // in Ready to release senza stato locale il ramo non c'e piu: lo dice la PR collegata alla card
-            if (a.Key == K.ReadyToRelease && a.Local.Branch is null) return [new SetClosingBranch(null, FromLinkedPr: true)];
+            if (a.Key is K.ReadyToDeployTest or K.ReadyToRelease && a.Local.Branch is null) return [new SetClosingBranch(null, FromLinkedPr: true)];
             // senza ramo salvato la chiusura lo prende dalla funzionalita; non ha un worktree da creare
             if ((inTest || a.Key == K.Ready) && a.Local.Branch is null && !(a.Key == K.Ready && StartBlock(a) is not null))
                 return a.Feature!.Branch is { } br ? [new SetClosingBranch(br)]
@@ -223,6 +223,7 @@ public sealed class DecisionEngine
         K.AutomatedTest => AutomatedTest(a),
         K.HumanTest => HumanTest(a),
         K.ReadyToMerge => ReadyToMerge(a),
+        K.ReadyToDeployTest => ReadyToDeployTest(a),
         K.ReadyToRelease => ReadyToRelease(a),
         K.InFeatureBranch => InFeatureBranch(a),
         _ => [], // bozza, inRilascio, chiusa, rimossa: niente da fare
@@ -482,9 +483,10 @@ public sealed class DecisionEngine
         var pr = a.S.Pr;
         if (pr?.Status == PrStatuses.Completed)
         {
-            if (a.IsClosing) return [new MoveCard(K.ReadyToRelease), .. FeatureResolved(a)];
+            // D61: unita in develop vuol dire Ready to deploy (test); in Ready to release la porta il deploy di develop in Test che la contiene
+            if (a.IsClosing) return [new MoveCard(K.ReadyToDeployTest), .. FeatureResolved(a)];
             // D52: la PR di una card della funzionalita e entrata nel ramo della funzionalita, non in develop
-            return [new MoveCard(a.IsFeatureCard ? K.InFeatureBranch : K.ReadyToRelease)];
+            return [new MoveCard(a.IsFeatureCard ? K.InFeatureBranch : K.ReadyToDeployTest)];
         }
         if (pr?.Status == PrStatuses.Active)
         {
@@ -526,13 +528,37 @@ public sealed class DecisionEngine
         return a.OpenTasks.Count > 0 ? TaskAdded(a) : [];
     }
 
+    /// <summary>
+    /// D61: Ready to deploy (test): la PR e unita in develop e la card aspetta un deploy di develop in Test che contenga il suo commit di merge
+    /// (lo lancia una persona; lo smistatore lo legge e basta). Intanto vale tutto quello che vale in Ready to release. Senza pipeline di
+    /// deploy non c'e un deploy da aspettare: dritta in Ready to release. Una card della funzionalita segue la card di chiusura.
+    /// </summary>
+    private IEnumerable<AgentAction> ReadyToDeployTest(Env a)
+    {
+        if (a.IsFeatureCard)
+        {
+            var follow = new List<AgentAction>();
+            if (a.Local.Folder is not null) follow.Add(new RemoveWorktree());
+            if (a.Ctx.Names.KeyOf(a.Feature?.ClosingState) is K.ReadyToRelease or K.Releasing or K.Closed) follow.Add(new MoveCard(K.ReadyToRelease));
+            return follow;
+        }
+        var actions = ReadyToRelease(a).ToList();
+        // un task aggiunto prima del merge riporta la card indietro: non e il momento di avanzare
+        if (actions.Any(x => x is not (RemoveWorktree or UpdateFeature))) return actions;
+        if (a.S.Area?.DeployPipeline is null || a.S.DevelopDeploy is { Contained: true }) actions.Add(new MoveCard(K.ReadyToRelease));
+        return actions;
+    }
+
     /// <summary>D52: la card e nel ramo della funzionalita; quando la card di chiusura e rilasciata, la segue in Ready to release.</summary>
     private static IEnumerable<AgentAction> InFeatureBranch(Env a)
     {
         if (StartBlock(a) is not null) return [];
         var actions = new List<AgentAction>();
         if (a.Local.Folder is not null) actions.Add(new RemoveWorktree());
-        if (a.Ctx.Names.KeyOf(a.Feature?.ClosingState) is K.ReadyToRelease or K.Releasing or K.Closed) actions.Add(new MoveCard(K.ReadyToRelease));
+        // D61: la card segue la chiusura: in Ready to deploy (test) finche la chiusura aspetta il deploy di develop, poi in Ready to release
+        var closing = a.Ctx.Names.KeyOf(a.Feature?.ClosingState);
+        if (closing == K.ReadyToDeployTest) actions.Add(new MoveCard(K.ReadyToDeployTest));
+        else if (closing is K.ReadyToRelease or K.Releasing or K.Closed) actions.Add(new MoveCard(K.ReadyToRelease));
         if (a.OpenTasks.Count > 0 && a.Local.Folder is not null)
         {
             var key = $"taskInFeature@{a.EntryRev}";
@@ -551,7 +577,7 @@ public sealed class DecisionEngine
         return [new UpdateFeature(f.Id, "featureRisolta", CloseLater: true)];
     }
 
-    private static bool SiblingMerged(StateNames names, Sibling s) => names.KeyOf(s.State) is K.InFeatureBranch or K.ReadyToRelease or K.Releasing or K.Closed;
+    private static bool SiblingMerged(StateNames names, Sibling s) => names.KeyOf(s.State) is K.InFeatureBranch or K.ReadyToDeployTest or K.ReadyToRelease or K.Releasing or K.Closed;
 
     private static List<Sibling> SiblingsNotMerged(Env a) => (a.Feature?.Siblings ?? []).Where(s => !SiblingMerged(a.Ctx.Names, s)).ToList();
 
@@ -701,7 +727,7 @@ public sealed class DecisionEngine
             var text = string.Join("\n\n", all.Where(IsPersonComment).Select(c => $"{c.Author}: {c.Text}"));
             proposals.Add(new LaunchMentor(["collaudatore", "reviewer"], "persona", "provaUmana", text, $"provaUmana@{a.EntryRev}"));
         }
-        if (string.Equals(a.S.Card.WorkItemType, "Bug", StringComparison.OrdinalIgnoreCase) && a.S.Pr?.Id is { } prId && actions.Any(x => x is MoveCard { State: K.ReadyToRelease }))
+        if (string.Equals(a.S.Card.WorkItemType, "Bug", StringComparison.OrdinalIgnoreCase) && a.S.Pr?.Id is { } prId && actions.Any(x => x is MoveCard { State: K.ReadyToDeployTest or K.ReadyToRelease }))
             proposals.Add(new LaunchMentor(["dev", "collaudatore", "reviewer"], "bug", "bug", $"{a.S.Card.Title}\n\nPR {prId}", $"bug@{prId}"));
         return proposals.Where(p => !a.Local.MentorsDone.Contains(p.Key));
     }
@@ -842,7 +868,8 @@ public sealed class DecisionEngine
         K.Releasing or K.Closed => true,
         // In feature branch vale come unita solo per una sorella della stessa Feature: solo lei parte dal ramo che la contiene
         K.InFeatureBranch => featureId is not null && p.ParentId == featureId,
-        K.ReadyToRelease => p.PrId is not null && string.IsNullOrWhiteSpace(p.Folder),
+        // D61: in Ready to deploy (test) il lavoro e gia in develop come in Ready to release
+        K.ReadyToDeployTest or K.ReadyToRelease => p.PrId is not null && string.IsNullOrWhiteSpace(p.Folder),
         _ => false,
     };
 

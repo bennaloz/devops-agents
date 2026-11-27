@@ -40,7 +40,7 @@ public class HookProcessTests
     {
         var json = ClaudeSessionRunner.HookSettings(["dotnet", "/opt/devops agents/hook/devops-agents-hook.dll"], "C:\\develop\\GIT\\DevOps.Agents");
         var pre = JsonNode.Parse(json)!["hooks"]!["PreToolUse"]!.AsArray();
-        Assert.Equal(5, pre.Count);
+        Assert.Equal(7, pre.Count);
         var pat = pre.Single(x => x!["matcher"]!.GetValue<string>() == "Bash|PowerShell|Read")!;
         Assert.Equal("dotnet \"/opt/devops agents/hook/devops-agents-hook.dll\" deny-pat --root C:/develop/GIT/DevOps.Agents", pat["hooks"]![0]!["command"]!.GetValue<string>());
         var a = ClaudeSessionRunner.Arguments(new("opus", "", "b", ["Read"]), "b", "m", "S1", false, null, json);

@@ -16,7 +16,7 @@ internal sealed class CardDesk : ICardEditor, ICodeHost, ICodeHostResolver, IPul
     public Dictionary<int, WorkItemInfo> Items { get; } = new();
     public Dictionary<int, List<Card>> Children { get; } = new();
     public int? LinkedPr { get; set; }
-    public (string Status, string Branch)? Pr { get; set; }
+    public PullRequestRef? Pr { get; set; }
     public string PrDescription { get; set; } = "[Card 7](https://board/7)\n\nvecchia";
     public List<string> Branches { get; } = [];
     public List<string> DeployParams { get; } = ["deployApi", "deployWeb"];
@@ -54,7 +54,8 @@ internal sealed class CardDesk : ICardEditor, ICodeHost, ICodeHostResolver, IPul
     // ICodeHost (solo quello che usano gli strumenti)
     public ICodeHost For(AreaMapping area) => this;
     public bool NeedsCardLink => false;
-    public Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default) => Task.FromResult(Pr);
+    public Task<PullRequestRef?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default) => Task.FromResult(Pr);
+    public Task<bool> ContainsCommitAsync(AreaMapping area, string commit, string inCommit, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<int> RequeueValidationsAsync(AreaMapping area, string branch, string destination, bool expiredOnly, CancellationToken ct = default) { Writes.Add($"rilancia {branch}"); return Task.FromResult(1); }
     public Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping area, string prefix, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<string>>(Branches.Where(b => b.StartsWith(prefix, StringComparison.Ordinal)).ToList());
@@ -278,7 +279,7 @@ public class CardToolsTests
     {
         var (t, d, _) = Make("dev");
         Assert.Contains("non ha una PR attiva", (await Assert.ThrowsAsync<CardToolException>(() => t.SetPrTitleAsync("nuovo"))).Message);
-        d.LinkedPr = 33; d.Pr = ("active", "feature/7-x");
+        d.LinkedPr = 33; d.Pr = new("active", "feature/7-x");
         Assert.Equal("Titolo della PR 33 cambiato in 'feat: nuovo'. Validazioni rilanciate: 1.", await t.SetPrTitleAsync(" feat: nuovo "));
         Assert.Equal(["titoloPr 33 feat: nuovo", "rilancia feature/7-x"], d.Writes);
         Assert.Contains("solo dev e responsabile", (await Assert.ThrowsAsync<CardToolException>(() => Make("reviewer").Tools.SetPrTitleAsync("x"))).Message);
@@ -291,7 +292,7 @@ public class CardToolsTests
         Assert.StartsWith("La card 7 non ha ancora una PR: descrizione salvata sulla card (5 caratteri)", await t.SetPrDescriptionAsync(" testo "));
         Assert.Equal($"commento 7 [dev] {CardTools.PrDescriptionMark}\n\ntesto\n\n{Sig("dev")}", Assert.Single(d.Writes));
         d.Writes.Clear();
-        d.LinkedPr = 33; d.Pr = ("active", "feature/7-x");
+        d.LinkedPr = 33; d.Pr = new("active", "feature/7-x");
         Assert.StartsWith("Descrizione della PR 33 scritta", await t.SetPrDescriptionAsync("nuova"));
         Assert.Equal("descrizionePr 33 [Card 7](https://board/7)\n\nnuova", Assert.Single(d.Writes));
         Assert.Contains("Accorciala", (await Assert.ThrowsAsync<CardToolException>(() => t.SetPrDescriptionAsync(new string('x', CardTools.PrTextLimit)))).Message);

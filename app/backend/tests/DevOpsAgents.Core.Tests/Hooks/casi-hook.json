@@ -6,10 +6,10 @@
     "role": null,
     "hostCollaudo": null,
     "input": {
+      "cwd": "C:/develop/GIT/Acme.AI",
       "tool_input": {
         "command": "git commit -m x"
-      },
-      "cwd": "C:/develop/GIT/Acme.AI"
+      }
     }
   },
   {
@@ -19,10 +19,10 @@
     "role": null,
     "hostCollaudo": null,
     "input": {
+      "cwd": "C:/develop/GIT/_wt/Acme.AI/slug",
       "tool_input": {
         "command": "git commit -m x"
-      },
-      "cwd": "C:/develop/GIT/_wt/Acme.AI/slug"
+      }
     }
   },
   {
@@ -32,10 +32,10 @@
     "role": null,
     "hostCollaudo": null,
     "input": {
+      "cwd": "C:/develop/GIT",
       "tool_input": {
         "command": "git -C \"C:/develop/GIT/_wt/Acme.AI/slug\" commit -m x"
-      },
-      "cwd": "C:/develop/GIT"
+      }
     }
   },
   {
@@ -45,10 +45,10 @@
     "role": null,
     "hostCollaudo": null,
     "input": {
+      "cwd": "C:/develop/GIT",
       "tool_input": {
         "command": "cd /c/develop/GIT/_wt/Acme.AI/slug && git commit -m x"
-      },
-      "cwd": "C:/develop/GIT"
+      }
     }
   },
   {
@@ -58,10 +58,10 @@
     "role": null,
     "hostCollaudo": null,
     "input": {
+      "cwd": "C:/develop/GIT/Acme.AI",
       "tool_input": {
         "command": "git log --oneline"
-      },
-      "cwd": "C:/develop/GIT/Acme.AI"
+      }
     }
   },
   {
@@ -72,8 +72,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/appsettings.Test.json",
-        "content": "{ \"ConnectionStrings\": { \"Db\": \"Server=a;Password=Zuppa2026!\" } }"
+        "content": "{ \"ConnectionStrings\": { \"Db\": \"Server=a;Password=Zuppa2026!\" } }",
+        "file_path": "C:/x/appsettings.Test.json"
       }
     }
   },
@@ -85,8 +85,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/deploy.ps1",
-        "content": "$env:Keycloak__ClientSecret = \"8f3a9c21-bb10-4e77\""
+        "content": "$env:Keycloak__ClientSecret = \"8f3a9c21-bb10-4e77\"",
+        "file_path": "C:/x/deploy.ps1"
       }
     }
   },
@@ -98,8 +98,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/appsettings.Test.template.json",
-        "content": "{ \"Password\": \"{{DB_PASSWORD}}\" }"
+        "content": "{ \"Password\": \"{{DB_PASSWORD}}\" }",
+        "file_path": "C:/x/appsettings.Test.template.json"
       }
     }
   },
@@ -111,8 +111,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/appsettings.json",
-        "content": "{ \"Password\": \"changeme\" }"
+        "content": "{ \"Password\": \"changeme\" }",
+        "file_path": "C:/x/appsettings.json"
       }
     }
   },
@@ -124,8 +124,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Service.cs",
-        "content": "var password = cfg[\"Secret\"];"
+        "content": "var password = cfg[\"Secret\"];",
+        "file_path": "C:/x/Service.cs"
       }
     }
   },
@@ -137,8 +137,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/appsettings.json",
-        "content": "{ \"Serilog\": { \"MinimumLevel\": \"Information\" } }"
+        "content": "{ \"Serilog\": { \"MinimumLevel\": \"Information\" } }",
+        "file_path": "C:/x/appsettings.json"
       }
     }
   },
@@ -961,8 +961,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Lettura.ps1",
-        "content": "$Token = Get-Content -LiteralPath $percorso -Raw"
+        "content": "$Token = Get-Content -LiteralPath $percorso -Raw",
+        "file_path": "C:/x/Lettura.ps1"
       }
     }
   },
@@ -974,8 +974,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Conti.psm1",
-        "content": "[pscustomobject]@{ TotalTokens = $totale.Somma }"
+        "content": "[pscustomobject]@{ TotalTokens = $totale.Somma }",
+        "file_path": "C:/x/Conti.psm1"
       }
     }
   },
@@ -987,8 +987,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Registro.ps1",
-        "content": "$tokenIn = $Esito.TokenIn"
+        "content": "$tokenIn = $Esito.TokenIn",
+        "file_path": "C:/x/Registro.ps1"
       }
     }
   },
@@ -1000,8 +1000,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Auth.ps1",
-        "content": "$h = @{ Token = Get-TokenCorrente }"
+        "content": "$h = @{ Token = Get-TokenCorrente }",
+        "file_path": "C:/x/Auth.ps1"
       }
     }
   },
@@ -1013,8 +1013,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Conti.ps1",
-        "content": "TokenOut = [int64]$x.Uscita"
+        "content": "TokenOut = [int64]$x.Uscita",
+        "file_path": "C:/x/Conti.ps1"
       }
     }
   },
@@ -1026,8 +1026,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Auth.ps1",
-        "content": "$token = (Get-Content $f).Trim()"
+        "content": "$token = (Get-Content $f).Trim()",
+        "file_path": "C:/x/Auth.ps1"
       }
     }
   },
@@ -1039,8 +1039,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Auth.ps1",
-        "content": "$token = GetTokenCorrente($utente)"
+        "content": "$token = GetTokenCorrente($utente)",
+        "file_path": "C:/x/Auth.ps1"
       }
     }
   },
@@ -1052,8 +1052,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/deploy.sh",
-        "content": "token=$ALTRA_VARIABILE"
+        "content": "token=$ALTRA_VARIABILE",
+        "file_path": "C:/x/deploy.sh"
       }
     }
   },
@@ -1065,9 +1065,9 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "old_string": "x",
+        "file_path": "C:/x/Auth.ps1",
         "new_string": "    $Token = Get-Content ~/.claude/file.txt -Raw",
-        "file_path": "C:/x/Auth.ps1"
+        "old_string": "x"
       }
     }
   },
@@ -1079,8 +1079,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Auth.ps1",
-        "content": "$Token = 'ghp_a1b2c3d4e5f6g7'"
+        "content": "$Token = 'ghp_a1b2c3d4e5f6g7'",
+        "file_path": "C:/x/Auth.ps1"
       }
     }
   },
@@ -1092,8 +1092,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Auth.ps1",
-        "content": "$Token = \"ghp_a1b2c3d4e5f6g7\""
+        "content": "$Token = \"ghp_a1b2c3d4e5f6g7\"",
+        "file_path": "C:/x/Auth.ps1"
       }
     }
   },
@@ -1105,8 +1105,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Auth.ps1",
-        "content": "$Token = \"Get-Content\""
+        "content": "$Token = \"Get-Content\"",
+        "file_path": "C:/x/Auth.ps1"
       }
     }
   },
@@ -1118,8 +1118,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Conf.psm1",
-        "content": "@{ ApiKey = 'abcdef123456' }"
+        "content": "@{ ApiKey = 'abcdef123456' }",
+        "file_path": "C:/x/Conf.psm1"
       }
     }
   },
@@ -1131,8 +1131,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Db.ps1",
-        "content": "$conn = \"Server=a;Database=b;Password=Zuppa2026!\""
+        "content": "$conn = \"Server=a;Database=b;Password=Zuppa2026!\"",
+        "file_path": "C:/x/Db.ps1"
       }
     }
   },
@@ -1144,8 +1144,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Scrivi.ps1",
-        "content": "@'\nUser=x\nPassword=Zuppa2026!\n'@ | Set-Content c.ini"
+        "content": "@'\nUser=x\nPassword=Zuppa2026!\n'@ | Set-Content c.ini",
+        "file_path": "C:/x/Scrivi.ps1"
       }
     }
   },
@@ -1157,8 +1157,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/deploy.sh",
-        "content": "export API_TOKEN=abcdef123456"
+        "content": "export API_TOKEN=abcdef123456",
+        "file_path": "C:/x/deploy.sh"
       }
     }
   },
@@ -1170,8 +1170,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/pipeline.yml",
-        "content": "token: ghp_abcdef123456"
+        "content": "token: ghp_abcdef123456",
+        "file_path": "C:/x/pipeline.yml"
       }
     }
   },
@@ -1183,8 +1183,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/appsettings.json",
-        "content": "{ \"token\": \"abcdef123456\" }"
+        "content": "{ \"token\": \"abcdef123456\" }",
+        "file_path": "C:/x/appsettings.json"
       }
     }
   },
@@ -1196,8 +1196,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/conn.ini",
-        "content": "password=Zuppa2026!"
+        "content": "password=Zuppa2026!",
+        "file_path": "C:/x/conn.ini"
       }
     }
   },
@@ -1209,8 +1209,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/appsettings.json",
-        "content": "{ \"Password\": \"$uperSegreta99\" }"
+        "content": "{ \"Password\": \"$uperSegreta99\" }",
+        "file_path": "C:/x/appsettings.json"
       }
     }
   },
@@ -1222,9 +1222,9 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "old_string": "x",
+        "file_path": "C:/x/Auth.ps1",
         "new_string": "$env:Keycloak__ClientSecret = \"8f3a9c21-bb10-4e77\"",
-        "file_path": "C:/x/Auth.ps1"
+        "old_string": "x"
       }
     }
   },
@@ -1236,8 +1236,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/collaudo.json",
-        "content": "{ \"tokenUrl\": \"https://srv-test:8443/realms/X/protocol/openid-connect/token\" }"
+        "content": "{ \"tokenUrl\": \"https://srv-test:8443/realms/X/protocol/openid-connect/token\" }",
+        "file_path": "C:/x/collaudo.json"
       }
     }
   },
@@ -1249,8 +1249,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/collaudo.json",
-        "content": "{ \"tokenUrl\": \"https://utente:Zuppa2026!@srv-test/token\" }"
+        "content": "{ \"tokenUrl\": \"https://utente:Zuppa2026!@srv-test/token\" }",
+        "file_path": "C:/x/collaudo.json"
       }
     }
   },
@@ -1262,8 +1262,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/collaudo.json",
-        "content": "{ \"url\": \"https://srv-test/api?token=ghp_a1b2c3d4e5f6\" }"
+        "content": "{ \"url\": \"https://srv-test/api?token=ghp_a1b2c3d4e5f6\" }",
+        "file_path": "C:/x/collaudo.json"
       }
     }
   },
@@ -1275,8 +1275,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/deploy.sh",
-        "content": "API_TOKEN=${API_TOKEN:-ghp_a1b2c3d4e5f6g7h8}"
+        "content": "API_TOKEN=${API_TOKEN:-ghp_a1b2c3d4e5f6g7h8}",
+        "file_path": "C:/x/deploy.sh"
       }
     }
   },
@@ -1288,8 +1288,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Db.ps1",
-        "content": "$c = 'Server=a;Password=$uperSegreta99'"
+        "content": "$c = 'Server=a;Password=$uperSegreta99'",
+        "file_path": "C:/x/Db.ps1"
       }
     }
   },
@@ -1301,8 +1301,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Db.ps1",
-        "content": "$c = 'Server=a;Password=Estate(2026)x'"
+        "content": "$c = 'Server=a;Password=Estate(2026)x'",
+        "file_path": "C:/x/Db.ps1"
       }
     }
   },
@@ -1314,8 +1314,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Db.ps1",
-        "content": "$c = 'Server=a;Password=Open-Sesame2026'"
+        "content": "$c = 'Server=a;Password=Open-Sesame2026'",
+        "file_path": "C:/x/Db.ps1"
       }
     }
   },
@@ -1327,8 +1327,8 @@
     "hostCollaudo": null,
     "input": {
       "tool_input": {
-        "file_path": "C:/x/Auth.ps1",
-        "content": "$token = $env:X ?? 'ghp_a1b2c3d4e5f6g7h8'"
+        "content": "$token = $env:X ?? 'ghp_a1b2c3d4e5f6g7h8'",
+        "file_path": "C:/x/Auth.ps1"
       }
     }
   },
@@ -1552,6 +1552,136 @@
         "command": "Invoke-RestMethod -Uri https://sso.acme.com/realms/x"
       },
       "tool_name": "PowerShell"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 2,
+    "what": "commit --no-verify (Bash)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit --no-verify -m x"
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 2,
+    "what": "push --no-verify dopo un cd (PowerShell)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "Set-Location C:\\x; git push --no-verify origin feat/x"
+      },
+      "tool_name": "PowerShell"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 2,
+    "what": "commit -n",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit -n -m x"
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 2,
+    "what": "commit -anm (n dentro un gruppo di flag)",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit -anm \"x\""
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 2,
+    "what": "core.hooksPath da riga di comando",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git -c core.hooksPath=/dev/null commit -m x"
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 0,
+    "what": "commit normale",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git add -A && git commit -m \"fix: x\""
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 0,
+    "what": "messaggio di commit che nomina --no-verify",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit -m \"feat: hook che blocca --no-verify e commit -n\""
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 0,
+    "what": "heredoc che nomina --no-verify",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit -F - <<'EOF'\nfeat: blocca --no-verify\n\ncore.hooksPath e commit -n\nEOF"
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 0,
+    "what": "git log -n 5",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git log -n 5 --oneline"
+      },
+      "tool_name": "Bash"
+    }
+  },
+  {
+    "hook": "deny-no-verify",
+    "expected": 0,
+    "what": "commit seguito da un altro comando con -n",
+    "role": null,
+    "hostCollaudo": null,
+    "input": {
+      "tool_input": {
+        "command": "git commit -m x && head -n 3 file.txt"
+      },
+      "tool_name": "Bash"
     }
   }
 ]

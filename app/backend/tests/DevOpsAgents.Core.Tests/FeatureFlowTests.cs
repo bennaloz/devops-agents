@@ -217,10 +217,11 @@ public class ClosingCardTests
     }
 
     [Fact]
-    public void A_PR_completata_Ready_to_release_e_la_Feature_Resolved_da_chiudere_con_la_card()
+    public void A_PR_completata_Ready_to_deploy_test_e_la_Feature_Resolved_da_chiudere_con_la_card()
     {
         var d = D(Closing(K.ReadyToMerge).Pr(Validations.None, PrStatuses.Completed));
         Assert.Equal(["SpostaCard", "AggiornaFeature"], Kinds(d));
+        Assert.Equal(K.ReadyToDeployTest, ((MoveCard)d.Actions[0]).State);
         var u = (UpdateFeature)d.Actions[1];
         Assert.Equal(("featureRisolta", true), (u.State, u.CloseLater));
         var closed = Fx.Feature(closing: true, feature: Fx.Feature10 with { State = "Closed" }, siblings: Merged);

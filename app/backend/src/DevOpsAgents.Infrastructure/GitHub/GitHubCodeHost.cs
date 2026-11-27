@@ -87,7 +87,7 @@ public sealed class GitHubCodeHost(HttpClient http, Func<string> token, AdoClien
         if (open is null)
         {
             var merged = includeCompleted ? list.FirstOrDefault(p => StatusOf(p) == PrStatuses.Completed) : null;
-            return merged is null ? null : new PullRequestInfo(merged.Int("number")!.Value, PrStatuses.Completed, Validations.None, null, null, merged.Str("head", "sha"));
+            return merged is null ? null : new PullRequestInfo(merged.Int("number")!.Value, PrStatuses.Completed, Validations.None, null, null, merged.Str("head", "sha"), merged.Str("merge_commit_sha"));
         }
         // l'elenco non porta mergeable: si rilegge la PR. null = GitHub lo sta ancora calcolando
         var pr = (await SendAsync(HttpMethod.Get, $"/repos/{repo}/pulls/{open.Int("number")}", ct: ct))!;
@@ -153,10 +153,18 @@ public sealed class GitHubCodeHost(HttpClient http, Func<string> token, AdoClien
         (await SendAsync(HttpMethod.Get, $"/repos/{Repo(area)}/git/matching-refs/heads/{prefix}", ct: ct)).Items()
             .Select(r => (r.Str("ref") ?? "").Replace("refs/heads/", "")).Where(n => n.Length > 0).ToList();
 
-    public async Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default)
+    public async Task<PullRequestRef?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default)
     {
         var pr = await SendAsync(HttpMethod.Get, $"/repos/{Repo(area)}/pulls/{prId}", ct: ct);
-        return pr is null ? null : (StatusOf(pr), pr.Str("head", "ref") ?? "");
+        return pr is null ? null : new(StatusOf(pr), pr.Str("head", "ref") ?? "", StatusOf(pr) == PrStatuses.Completed ? pr.Str("merge_commit_sha") : null);
+    }
+
+    /// <summary>Come Test-GhCommitContenuto: il confronto di GitHub fra i due commit dice ahead o identical.</summary>
+    public async Task<bool> ContainsCommitAsync(AreaMapping area, string commit, string inCommit, CancellationToken ct = default)
+    {
+        if (string.Equals(commit, inCommit, StringComparison.OrdinalIgnoreCase)) return true;
+        var r = await SendAsync(HttpMethod.Get, $"/repos/{Repo(area)}/compare/{commit}...{inCommit}", ct: ct);
+        return r.Str("status") is "ahead" or "identical";
     }
 
     public async Task<string> GetDescriptionAsync(AreaMapping area, int prId, CancellationToken ct = default) =>

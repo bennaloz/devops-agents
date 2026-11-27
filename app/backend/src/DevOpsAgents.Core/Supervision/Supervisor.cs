@@ -164,6 +164,7 @@ public static class Supervisor
                 foreach (var p in preds) (waitingOn.TryGetValue(p, out var l) ? l : waitingOn[p] = []).Add(c.Id);
 
         var releases = new List<CardReport>();
+        var developDeploys = new List<CardReport>();
         var closingInDraft = new HashSet<int>();
         foreach (var c in round.Cards)
         {
@@ -196,6 +197,10 @@ public static class Supervisor
                 case K.ReadyToRelease when c.Reason is null:
                     releases.Add(c);
                     continue;
+                // D61: le card unite che aspettano un deploy di develop in Test: una voce sola, il gesto e uno per tutte
+                case K.ReadyToDeployTest when c.Reason is null && c.WaitsDevelopDeploy:
+                    developDeploys.Add(c);
+                    continue;
                 case K.HumanTest when c.Reason is null:
                     yield return new Problem($"card-{c.Id}-prova", $"Card #{c.Id} ({title}): aspetta la tua prova in Test", "prova la card in Test e scrivi l'esito in un commento sulla card", c.Url);
                     continue;
@@ -208,6 +213,21 @@ public static class Supervisor
                 yield return new Problem($"ferma-{c.Id}", $"La card #{c.Id} ({title}) e ferma da {(int)hours} ore in {c.State} e nessuna regola dice perche.", "apri la card e guarda perche non si muove", c.Url);
         }
         if (releases.Count > 0 && Releases(releases, cfg, state, o) is { } r) yield return r;
+        if (developDeploys.Count > 0) yield return DevelopDeploys(developDeploys);
+    }
+
+    /// <summary>
+    /// D61: le card unite in develop che aspettano un deploy di develop in Test, come una voce sola (deploy-test): il deploy lo lancia una persona,
+    /// uno per tutte. Una riga per card; la voce torna quando ne arriva una nuova, non si ricorda ogni giorno.
+    /// </summary>
+    public static Problem DevelopDeploys(IReadOnlyList<CardReport> cards)
+    {
+        var ordered = cards.OrderBy(c => c.Id).ToList();
+        var text = ordered.Count == 1
+            ? $"La card #{ordered[0].Id} e unita in develop e aspetta un deploy di develop in Test."
+            : $"{ordered.Count} card unite in develop aspettano un deploy di develop in Test: {string.Join(", ", ordered.Select(c => $"#{c.Id}"))}.";
+        return new Problem("deploy-test", text, "lancia il deploy di develop in Test: lo smistatore porta le card in Ready to release quando e riuscito", ordered[0].Url,
+            Lines: ordered.Select(c => $"#{c.Id} {Short(c.Title, 70)}").ToList(), Elements: ordered.Select(c => c.Id.ToString()).ToList(), Remind: false);
     }
 
     /// <summary>I rilasci in attesa, una voce sola con una riga per area; un'area oltre la soglia (card o giorni) va in cima. Non e un urgente.</summary>

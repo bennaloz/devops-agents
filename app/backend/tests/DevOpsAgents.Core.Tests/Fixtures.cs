@@ -89,6 +89,9 @@ internal sealed class CardBuilder(string stateKey)
     /// <summary>D52: la funzionalita della card (Feature 10, card di chiusura 90).</summary>
     public CardBuilder InFeature(FeatureContext f) { _feature = f; _parent = f.Feature.Id; return this; }
     public CardBuilder BuildErrors(string text) { _buildErrors = text; return this; }
+    private DevelopDeploy? _developDeploy;
+    /// <summary>D61: l'ultimo deploy di develop in Test riuscito, e se contiene il commit di merge della card.</summary>
+    public CardBuilder DevelopDeploy(bool contained) { _developDeploy = new DevelopDeploy(contained, 80, "https://run/80"); return this; }
     public CardBuilder OldComment(string author, string text) { _all.Add(new Comment(100 + _all.Count, author, text, Fx.T0)); return this; }
     public CardBuilder NoAgentsTag() { _tags.Remove(Fx.Names.AgentsTag); return this; }
     public CardBuilder OnHold(string? per = null) { _tags.Add(Fx.Names.OnHoldTag); Local.WaitingFor = per; return this; }
@@ -125,6 +128,6 @@ internal sealed class CardBuilder(string stateKey)
         var history = new List<StateChange>(_history);
         if (_from is not null) history.Add(new StateChange(10, Fx.N(_from), Fx.N(stateKey), Fx.T0));
         var card = new Card(42, 12, "Importare le stime", Fx.N(stateKey), _tags, _area?.Area, ParentId: _parent);
-        return new Snapshot(card, Local, _area, _comments, history, _tasks, _preds, _pr, _run, _deploy, _feature, _all.Concat(_comments).ToList(), _buildErrors);
+        return new Snapshot(card, Local, _area, _comments, history, _tasks, _preds, _pr, _run, _deploy, _feature, _all.Concat(_comments).ToList(), _buildErrors, _developDeploy);
     }
 }

@@ -249,6 +249,6 @@ public partial class Program
         DevOpsAgents.Core.Configuration.StateKeys.New, DevOpsAgents.Core.Configuration.StateKeys.NeedsClarification, DevOpsAgents.Core.Configuration.StateKeys.Ready,
         DevOpsAgents.Core.Configuration.StateKeys.InDevelopment, DevOpsAgents.Core.Configuration.StateKeys.InReview, DevOpsAgents.Core.Configuration.StateKeys.DeployingToTest,
         DevOpsAgents.Core.Configuration.StateKeys.AutomatedTest, DevOpsAgents.Core.Configuration.StateKeys.HumanTest, DevOpsAgents.Core.Configuration.StateKeys.ReadyToMerge,
-        DevOpsAgents.Core.Configuration.StateKeys.InFeatureBranch, DevOpsAgents.Core.Configuration.StateKeys.ReadyToRelease,
+        DevOpsAgents.Core.Configuration.StateKeys.InFeatureBranch, DevOpsAgents.Core.Configuration.StateKeys.ReadyToDeployTest, DevOpsAgents.Core.Configuration.StateKeys.ReadyToRelease,
     ];
 }

@@ -129,7 +129,7 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
         {
             if (!_prs.TryGetValue(branch, out var pr)) return Task.FromResult<PullRequestInfo?>(null);
             _prs[branch] = pr with { Reads = pr.Reads + 1 };
-            if (pr.Status == PrStatuses.Completed) return Task.FromResult<PullRequestInfo?>(completed ? new PullRequestInfo(pr.Id, PrStatuses.Completed, Validations.None) : null);
+            if (pr.Status == PrStatuses.Completed) return Task.FromResult<PullRequestInfo?>(completed ? new PullRequestInfo(pr.Id, PrStatuses.Completed, Validations.None, MergeCommit: $"MERGE{pr.Id}") : null);
             var v = pr.Reads >= 1 ? Validations.Green : Validations.Running;
             return Task.FromResult<PullRequestInfo?>(new PullRequestInfo(pr.Id, PrStatuses.Active, v, 900 + pr.Id, "#build", "HEAD"));
         }
@@ -147,11 +147,13 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
     public string PullRequestUrl(AreaMapping a, int id) => $"#pr-{id}";
     private readonly List<string> _branches = [];
     public Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping a, string prefix, CancellationToken ct = default) { lock (_lock) return Task.FromResult<IReadOnlyList<string>>(_branches.Where(b => b.StartsWith(prefix)).ToList()); }
-    public Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping a, int id, CancellationToken ct = default)
+    public Task<PullRequestRef?> GetPullRequestByIdAsync(AreaMapping a, int id, CancellationToken ct = default)
     {
-        if (id == 9105) return Task.FromResult<(string, string)?>((PrStatuses.Completed, "feature/105-stato"));
-        lock (_lock) return Task.FromResult<(string, string)?>(_prs.Where(p => p.Value.Id == id).Select(p => ((string, string)?)(p.Value.Status, p.Key)).FirstOrDefault());
+        if (id == 9105) return Task.FromResult<PullRequestRef?>(new(PrStatuses.Completed, "feature/105-stato", "MERGE105"));
+        lock (_lock) return Task.FromResult(_prs.Where(p => p.Value.Id == id).Select(p => new PullRequestRef(p.Value.Status, p.Key, p.Value.Status == PrStatuses.Completed ? $"MERGE{p.Value.Id}" : null)).FirstOrDefault());
     }
+    // nella demo il deploy di develop contiene tutto quello che e stato unito
+    public Task<bool> ContainsCommitAsync(AreaMapping a, string commit, string inCommit, CancellationToken ct = default) => Task.FromResult(true);
     public Task<string?> GetBuildErrorsAsync(AreaMapping a, int buildId, CancellationToken ct = default) => Task.FromResult<string?>(null);
     public Task<string> PublishFeatureBranchAsync(AreaMapping a, FeatureInfo f, bool bug, CancellationToken ct = default)
     {
@@ -162,6 +164,7 @@ public sealed class DemoWorld : IBoard, ICodeHost, ICodeHostResolver, ICiService
     // ---- ICiService ----
     public Task<int> QueueTestDeployAsync(AreaMapping a, string b, IReadOnlyList<string> on, IReadOnlyList<string> off, CancellationToken ct = default) { lock (_lock) return Task.FromResult(_nextId++); }
     public Task<PipelineRun> GetRunAsync(AreaMapping a, int id, CancellationToken ct = default) => Task.FromResult(new PipelineRun("completed", "succeeded", "#run"));
+    public Task<DeployedRun?> GetLastSucceededDeployAsync(AreaMapping a, string branch, CancellationToken ct = default) => Task.FromResult<DeployedRun?>(new(800, "DEVELOP", "#run-develop"));
 
     // ---- IWorkspace ----
     public Task<(string Branch, string Folder)> CreateWorktreeAsync(AreaMapping a, Card c, string? b, CancellationToken ct = default) =>

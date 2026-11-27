@@ -25,7 +25,8 @@ public static class Office
     [
         ("nuova", "Nuove", "NEW"), ("daChiarire", "Da chiarire", "CHIAR"), ("pronto", "Pronte da sviluppare", "PRONT"), ("inSviluppo", "In sviluppo", "DEV"),
         ("inRevisione", "In revisione", "REV"), ("inDeployTest", "Deploy in Test", "DEPL"), ("inCollaudo", "Collaudo automatico", "COLL"),
-        ("inProvaUmana", "Prova in Test", "TEST"), ("daUnire", "Da unire", "MERGE"), ("daRilasciare", "Da rilasciare", "REL"),
+        ("inProvaUmana", "Prova in Test", "TEST"), ("daUnire", "Da unire", "MERGE"), ("daDeployTest", "Da deployare in Test", "DTEST"),
+        ("daRilasciare", "Da rilasciare", "REL"),
     ];
 
     public static string Direction(string from, string to)
@@ -109,6 +110,7 @@ public static class Office
             var launch = c.Actions.Select(a => Regex.Match(a, @"^LanciaSessione (\w+)")).FirstOrDefault(m => m.Success);
             if (launch is not null) queue.Add(new OfficeRow(c.Id, launch.Groups[1].Value, c.Title, c.Url, c.StateKey));
             if (c.Reason?.Type == "onHold") todo.Add(new OfficeTodo(c.Id, c.Title, c.Url, "sblocca", c.WhatToDo is { Count: > 0 } w ? string.Join(" ", w) : "la card e in on-hold", true));
+            else if (c.WaitsDevelopDeploy && c.Reason is null) todo.Add(new OfficeTodo(c.Id, c.Title, c.Url, "deployTest", "unita in develop: aspetta un deploy di develop in Test che la contenga", false));
             else if (c.StateKey == "daRilasciare") todo.Add(new OfficeTodo(c.Id, c.Title, c.Url, "rilascia", "la card aspetta il rilascio in produzione", false));
         }
         return (running, queue, todo);

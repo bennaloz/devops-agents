@@ -37,7 +37,8 @@ internal sealed class FakeMemoryPrs : ICodeHost, IPullRequestEditor
     public Task<int> RequeueValidationsAsync(AreaMapping area, string branch, string destination, bool expiredOnly, CancellationToken ct = default) => throw new NotSupportedException();
     public string PullRequestUrl(AreaMapping area, int prId) => "";
     public Task<IReadOnlyList<string>> ListBranchesAsync(AreaMapping area, string prefix, CancellationToken ct = default) => throw new NotSupportedException();
-    public Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<PullRequestRef?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<bool> ContainsCommitAsync(AreaMapping area, string commit, string inCommit, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
 public class GitMemoryWriterTests

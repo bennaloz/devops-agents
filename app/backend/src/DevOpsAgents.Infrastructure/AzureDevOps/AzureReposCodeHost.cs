@@ -23,7 +23,9 @@ public sealed class AzureReposCodeHost(AdoClient ado) : ICodeHost, IPullRequestE
         if (pr is null)
         {
             var done = includeCompleted ? list.FirstOrDefault(p => p.Str("status") == PrStatuses.Completed) : null;
-            return done is null ? null : new PullRequestInfo(done.Int("pullRequestId")!.Value, PrStatuses.Completed, Validations.None, null, null, done.Str("lastMergeSourceCommit", "commitId"));
+            return done is null ? null : new PullRequestInfo(done.Int("pullRequestId")!.Value, PrStatuses.Completed, Validations.None, null, null, done.Str("lastMergeSourceCommit", "commitId"),
+                // D61: il commit di merge in develop serve a riconoscere il deploy di develop che contiene la card
+                done.Str("lastMergeCommit", "commitId"));
         }
 
         var projectId = pr.Str("repository", "project", "id");
@@ -115,10 +117,18 @@ public sealed class AzureReposCodeHost(AdoClient ado) : ICodeHost, IPullRequestE
         (await ado.GetAsync($"{RepoUrl(area)}/refs?filter={E($"heads/{prefix}")}&api-version=7.1", ct)).Items("value")
             .Select(r => (r.Str("name") ?? "").Replace("refs/heads/", "")).Where(n => n.Length > 0).ToList();
 
-    public async Task<(string Status, string Branch)?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default)
+    public async Task<PullRequestRef?> GetPullRequestByIdAsync(AreaMapping area, int prId, CancellationToken ct = default)
     {
         var pr = await ado.GetAsync($"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", ct);
-        return pr is null ? null : (pr.Str("status") ?? "", (pr.Str("sourceRefName") ?? "").Replace("refs/heads/", ""));
+        return pr is null ? null : new(pr.Str("status") ?? "", (pr.Str("sourceRefName") ?? "").Replace("refs/heads/", ""), pr.Str("lastMergeCommit", "commitId"));
+    }
+
+    /// <summary>Come Test-AdoCommitContenuto: l'antenato comune dei due commit e il commit stesso.</summary>
+    public async Task<bool> ContainsCommitAsync(AreaMapping area, string commit, string inCommit, CancellationToken ct = default)
+    {
+        if (string.Equals(commit, inCommit, StringComparison.OrdinalIgnoreCase)) return true;
+        var r = await ado.GetAsync($"{RepoUrl(area)}/diffs/commits?baseVersion={E(commit)}&baseVersionType=commit&targetVersion={E(inCommit)}&targetVersionType=commit&$top=1&api-version=7.1", ct);
+        return string.Equals(r.Str("commonCommit"), commit, StringComparison.OrdinalIgnoreCase);
     }
     public async Task<string> GetDescriptionAsync(AreaMapping area, int prId, CancellationToken ct = default) =>
         (await ado.GetAsync($"{RepoUrl(area)}/pullrequests/{prId}?api-version=7.1", ct)).Str("description") ?? "";
@@ -185,6 +195,17 @@ public sealed class AzurePipelinesCi(AdoClient ado) : ICiService
             if (output.Count >= 400) break;
         }
         return code ? string.Join("\n", output.Take(400)) : null;
+    }
+
+    /// <summary>Come Get-AdoUltimoRunRiuscito: il run completato e riuscito piu recente della pipeline di deploy sul ramo.</summary>
+    public async Task<DeployedRun?> GetLastSucceededDeployAsync(AreaMapping area, string branch, CancellationToken ct = default)
+    {
+        if (area.DeployPipeline is not { } pipeline) return null;
+        var r = await ado.GetAsync($"/{E(area.AdoProject)}/_apis/build/builds?definitions={pipeline}&branchName={E($"refs/heads/{branch}")}" +
+            "&statusFilter=completed&resultFilter=succeeded&queryOrder=finishTimeDescending&$top=1&api-version=7.1", ct);
+        var b = r.Items("value").FirstOrDefault();
+        if (b?.Int("id") is not { } id) return null;
+        return new DeployedRun(id, b.Str("sourceVersion"), $"{ado.Organization}/{E(area.AdoProject)}/_build/results?buildId={id}");
     }
 
     public async Task<PipelineRun> GetRunAsync(AreaMapping area, int runId, CancellationToken ct = default)

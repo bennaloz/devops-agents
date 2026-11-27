@@ -2,7 +2,7 @@ using System.Text;
 using DevOpsAgents.Core.Hooks;
 
 // Gli hook PreToolUse di Claude Code (hooks/*.ps1 in .NET): Claude Code manda l'input JSON su stdin.
-//   devops-agents-hook <deny-commit-outside-worktree|deny-secrets-in-repo|deny-pat|deny-identita|deny-host-collaudo> [--root <repo degli attrezzi>]
+//   devops-agents-hook <deny-commit-outside-worktree|deny-secrets-in-repo|deny-pat|deny-identita|deny-host-collaudo|deny-no-verify|suggest-compact> [--root <repo degli attrezzi>]
 // Exit 2 = chiamata bloccata, lo stderr torna al modello. Exit 0 = passa. Il ruolo viene da ATTREZZI_RUOLO, che lo smistatore mette
 // nell'ambiente di claude e il comando del modello non tocca. Un errore dell'hook stesso non blocca il lavoro: lo dice e passa.
 
@@ -26,14 +26,37 @@ try
         var p = Path.Combine(config, name);
         return File.Exists(p) ? File.ReadAllText(p) : name == "mappa.json" ? throw new FileNotFoundException($"{p} non trovato") : null;
     }
-    var v = HookRules.Run(args[0], payload, new HookContext(Environment.GetEnvironmentVariable("ATTREZZI_RUOLO"), Read, config.Replace('\\', '/')));
+    var temp = Path.GetTempPath();
+    string StateFile(string key) => Path.Combine(temp, $"claude-compact-{key}.txt");
+    var ctx = new HookContext(Environment.GetEnvironmentVariable("ATTREZZI_RUOLO"), Read, config.Replace('\\', '/'),
+        Env: Environment.GetEnvironmentVariable, ReadTail: ReadTail,
+        ReadStep: key => File.Exists(StateFile(key)) && int.TryParse(File.ReadAllText(StateFile(key)).Trim(), out var n) ? n : null,
+        WriteStep: (key, step) =>
+        {
+            File.WriteAllText(StateFile(key), step.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // i file delle sessioni vecchie si tolgono dopo 14 giorni
+            foreach (var f in new DirectoryInfo(temp).EnumerateFiles("claude-compact-*.txt").Where(f => f.LastWriteTime < DateTime.Now.AddDays(-14)))
+                try { f.Delete(); } catch (IOException) { }
+        });
+    var v = HookRules.Run(args[0], payload, ctx);
     if (v.Message is { } m) Console.Error.WriteLine(m);
+    if (v.Output is { } o) Console.Out.WriteLine(o);
     return v.ExitCode;
 }
 catch (Exception e)
 {
     Console.Error.WriteLine($"hook {args[0]}: errore, controllo saltato - {e.Message}");
     return 0;
+}
+
+// Solo la coda del transcript: arriva a decine di MB.
+static string? ReadTail(string path)
+{
+    if (!File.Exists(path)) return null;
+    using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+    s.Seek(Math.Max(0, s.Length - 512 * 1024), SeekOrigin.Begin);
+    using var r = new StreamReader(s, Encoding.UTF8);
+    return r.ReadToEnd();
 }
 
 static string? FindRoot(string start)

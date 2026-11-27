@@ -21,7 +21,9 @@ public sealed record DispatcherOptions
 public sealed record CardReport(int Id, string Title, string State, string? StateKey, string? Area, string? AssignedTo, string? Url,
     IReadOnlyList<string> Actions, BlockReason? Reason, string? RunningRole, string? Error, int? FeatureId = null,
     /// <summary>D57: per una card in on-hold, i passi in ordine per sbloccarla.</summary>
-    IReadOnlyList<string>? WhatToDo = null);
+    IReadOnlyList<string>? WhatToDo = null,
+    /// <summary>D61: la card e unita in develop e aspetta un deploy di develop in Test (lo lancia una persona).</summary>
+    bool WaitsDevelopDeploy = false);
 
 /// <summary>Una Feature come la vede la dashboard: in ordine di priorita, con la pausa.</summary>
 public sealed record FeatureReport(int Id, string Title, string State, double? Rank, bool Paused, string? Area);
@@ -189,7 +191,10 @@ public sealed class Dispatcher(
                 if (decision.Reason is { } r) Log($"card {card.Id}: ferma ({r.Type}{(r.Detail is null ? "" : $": {r.Detail}")})");
                 var todo = decision.Reason?.Type == "onHold" || decision.Actions.Any(a => a is PutOnHold)
                     ? local.OnHoldIndications is { } ind ? WhatToDo.Lines(ind, local.WaitingFor) : null : null;
-                reports.Add(Report(card, described, decision.Reason, running, null) with { WhatToDo = todo });
+                // D61: una card della funzionalita in Ready to deploy (test) segue la chiusura, non aspetta un deploy suo
+                var waitsDeploy = snapshot.Card.State is var st && names.KeyOf(st) == K.ReadyToDeployTest && area.DeployPipeline is not null
+                    && snapshot.Feature is not { Error: null, IsClosing: false };
+                reports.Add(Report(card, described, decision.Reason, running, null) with { WhatToDo = todo, WaitsDevelopDeploy = waitsDeploy });
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {
@@ -407,7 +412,10 @@ public sealed class Dispatcher(
         var preds = key is K.New or K.Ready ? await board.GetPredecessorsAsync(card.Id, ct) : [];
         PullRequestInfo? pr = null;
         if (local.Branch is not null && key is not null && K.WithBranch.Contains(key))
-            pr = await code.For(area).GetPullRequestAsync(area, local.Branch, local.Destination ?? "develop", key is K.ReadyToMerge or K.ReadyToRelease, ct);
+            pr = await code.For(area).GetPullRequestAsync(area, local.Branch, local.Destination ?? "develop", key is K.ReadyToMerge or K.InFeatureBranch or K.ReadyToDeployTest or K.ReadyToRelease, ct);
+        // D61: il commit di merge in develop si ricorda quando la PR completata si vede (dopo RemoveWorktree la PR non si cerca piu)
+        if (key == K.ReadyToDeployTest && pr is { Status: PrStatuses.Completed, MergeCommit: { Length: > 0 } merge }) local.MergeCommit = merge;
+        var developDeploy = await DevelopDeployAsync(card.Id, key, area, local, ct);
         // D59: l'ambiente di collaudo si legge come un run: in creazione, creato, non creato
         var run = local.TestProject is not null && local.TestStartedAt is { } envStart && testEnvironments is not null
             ? await testEnvironments.GetStatusAsync(card.Id, envStart, ct)
@@ -416,7 +424,26 @@ public sealed class Dispatcher(
         var fresh = comments.Where(c => c.Id > local.LastCommentId).ToList();
         var feature = await FeatureContextAsync(card, area, ct);
         var errors = feature is { IsClosing: true, Error: null } ? await ClosingBuildErrorsAsync(key, area, local, pr, run, ct) : null;
-        return new Snapshot(card, local, area, fresh, history, tasks, preds, pr, run, deploy, feature, comments, errors);
+        return new Snapshot(card, local, area, fresh, history, tasks, preds, pr, run, deploy, feature, comments, errors, developDeploy);
+    }
+
+    /// <summary>
+    /// D61: per una card in Ready to deploy (test) con il suo commit di merge, l'ultimo deploy di develop in Test riuscito e se lo contiene. Solo
+    /// lettura: il deploy lo lancia una persona. Null se la card non aspetta un deploy o se la lettura fallisce (la card aspetta il giro dopo).
+    /// </summary>
+    private async Task<DevelopDeploy?> DevelopDeployAsync(int cardId, string? key, AreaMapping area, CardLocalState local, CancellationToken ct)
+    {
+        if (key != K.ReadyToDeployTest || area.DeployPipeline is null || local.MergeCommit is not { Length: > 0 } merge) return null;
+        try
+        {
+            if (await ci.GetLastSucceededDeployAsync(area, "develop", ct) is not { Commit: { Length: > 0 } deployed } run) return new DevelopDeploy(false, null, null);
+            return new DevelopDeploy(await code.For(area).ContainsCommitAsync(area, merge, deployed, ct), run.Id, run.Url);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            logger.LogWarning("card {Card}: il deploy di develop in Test non si e letto, riprovo al giro dopo: {Error}", cardId, e.Message);
+            return null;
+        }
     }
 
     /// <summary>
@@ -558,6 +585,7 @@ public sealed class Dispatcher(
                         throw new InvalidOperationException($"La card di chiusura {card.Id} e in Ready to release ma non ha una PR completata nota: non so quale ramo guardare");
                     local.Branch = linked.Branch;
                     local.PrId = linkedId;
+                    if (linked.MergeCommit is { Length: > 0 } m) local.MergeCommit = m;
                 }
                 else local.Branch = cb.Branch;
                 local.Destination = "develop";
@@ -767,7 +795,7 @@ public sealed class Dispatcher(
     }
 
     /// <summary>
-    /// Presa in carico (spec, sezione 19): il worktree dal ramo della card su origin. Senza ramo pubblicato: in Ready to release e In feature
+    /// Presa in carico (spec, sezione 19): il worktree dal ramo della card su origin. Senza ramo pubblicato: in Ready to deploy (test), Ready to release e In feature
     /// branch la card ricorda la sua PR; In development si riparte da develop (o dal ramo della funzionalita); altrove non c'e lavoro da riprendere.
     /// </summary>
     private async Task AdoptAsync(AdoptCard ad, Card card, AreaMapping area, CardLocalState local, CancellationToken ct)
@@ -779,12 +807,14 @@ public sealed class Dispatcher(
         string note;
         if (found is null)
         {
-            if (key is K.ReadyToRelease or K.InFeatureBranch)
+            if (key is K.ReadyToDeployTest or K.ReadyToRelease or K.InFeatureBranch)
             {
                 // dopo il merge il ramo e cancellato: la card ricorda la sua PR
-                if (await board.GetLinkedPullRequestIdAsync(card.Id, ct) is not { } prId || await code.For(area).GetPullRequestByIdAsync(area, prId, ct) is not { Status: PrStatuses.Completed })
+                if (await board.GetLinkedPullRequestIdAsync(card.Id, ct) is not { } prId || await code.For(area).GetPullRequestByIdAsync(area, prId, ct) is not { Status: PrStatuses.Completed } linked)
                     throw new InvalidOperationException($"Su origin non c'e nessun ramo della card {card.Id} e nessuna PR collegata completata: non so cosa rilasciare");
                 local.PrId = prId;
+                // D61: in Ready to deploy (test) serve il commit di merge per riconoscere il deploy di develop che la contiene
+                if (key == K.ReadyToDeployTest && linked.MergeCommit is { Length: > 0 } m) local.MergeCommit = m;
                 if (ad.FeatureCard && ad.Base is not null) local.Destination = ad.Base;
                 logger.LogInformation("card {Card}: presa in carico gia unita (PR {Pr} completata), niente da fare", card.Id, prId);
                 return;

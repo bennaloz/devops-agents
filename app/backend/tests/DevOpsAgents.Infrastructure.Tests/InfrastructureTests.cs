@@ -887,3 +887,61 @@ public class MemoryTests
         Directory.Delete(tmp, true);
     }
 }
+
+/// <summary>D61: il commit di merge della PR, l'ultimo deploy di develop riuscito e se contiene il merge, su Azure DevOps e su GitHub.</summary>
+public class DevelopDeployInfrastructureTests
+{
+    [Fact]
+    public async Task Azure_Repos_la_PR_completata_porta_il_commit_di_merge()
+    {
+        var h = new FakeHttp((_, _) => FakeHttp.Ok("""{ "value": [ { "pullRequestId": 5, "status": "completed", "lastMergeSourceCommit": { "commitId": "H" }, "lastMergeCommit": { "commitId": "M5" } } ] }"""));
+        var pr = await new AzureReposCodeHost(Tx.Ado(h)).GetPullRequestAsync(Tx.AzureArea, "feature/42-x", "develop", includeCompleted: true);
+        Assert.Equal(("H", "M5"), (pr!.HeadCommit, pr.MergeCommit));
+        var byId = new FakeHttp((_, _) => FakeHttp.Ok("""{ "status": "completed", "sourceRefName": "refs/heads/feature/42-x", "lastMergeCommit": { "commitId": "M5" } }"""));
+        Assert.Equal(new PullRequestRef("completed", "feature/42-x", "M5"), await new AzureReposCodeHost(Tx.Ado(byId)).GetPullRequestByIdAsync(Tx.AzureArea, 5));
+    }
+
+    [Fact]
+    public async Task Azure_Repos_il_commit_e_contenuto_se_l_antenato_comune_e_lui()
+    {
+        var h = new FakeHttp((_, _) => FakeHttp.Ok("""{ "commonCommit": "m1" }"""));
+        var host = new AzureReposCodeHost(Tx.Ado(h));
+        Assert.True(await host.ContainsCommitAsync(Tx.AzureArea, "m1", "d9"));
+        Assert.Contains("/Acme.AI/_apis/git/repositories/Acme.AI/diffs/commits?baseVersion=m1&baseVersionType=commit&targetVersion=d9", h.Calls.Single().Url);
+        Assert.False(await new AzureReposCodeHost(Tx.Ado(new FakeHttp((_, _) => FakeHttp.Ok("""{ "commonCommit": "x0" }""")))).ContainsCommitAsync(Tx.AzureArea, "m1", "d9"));
+        // lo stesso commit non chiede niente
+        Assert.True(await host.ContainsCommitAsync(Tx.AzureArea, "d9", "d9"));
+        Assert.Single(h.Calls);
+    }
+
+    [Fact]
+    public async Task L_ultimo_deploy_riuscito_di_develop_con_il_commit_deployato()
+    {
+        var h = new FakeHttp((_, _) => FakeHttp.Ok("""{ "value": [ { "id": 77, "sourceVersion": "abc" } ] }"""));
+        var run = await new AzurePipelinesCi(Tx.Ado(h)).GetLastSucceededDeployAsync(Tx.AzureArea, "develop");
+        Assert.Equal(new DeployedRun(77, "abc", "https://acme.visualstudio.com/Acme.AI/_build/results?buildId=77"), run);
+        var url = h.Calls.Single().Url;
+        Assert.Contains("definitions=115", url);
+        Assert.Contains("branchName=refs%2Fheads%2Fdevelop", url);
+        Assert.Contains("statusFilter=completed&resultFilter=succeeded&queryOrder=finishTimeDescending", url);
+        Assert.Null(await new AzurePipelinesCi(Tx.Ado(new FakeHttp((_, _) => FakeHttp.Ok("""{ "value": [] }""")))).GetLastSucceededDeployAsync(Tx.AzureArea, "develop"));
+        Assert.Null(await new AzurePipelinesCi(Tx.Ado(h)).GetLastSucceededDeployAsync(Tx.AzureArea with { DeployPipeline = null }, "develop"));
+    }
+
+    [Fact]
+    public async Task GitHub_merge_commit_della_PR_unita_e_confronto_fra_i_commit()
+    {
+        var merged = Tx.GhPr(9, "closed", merged: "2026-11-20T10:00:00Z").Replace("\"title\"", "\"merge_commit_sha\": \"M9\", \"title\"");
+        var list = new FakeHttp((_, _) => FakeHttp.Ok($"[{merged}]"));
+        Assert.Equal("M9", (await Tx.Gh(list).GetPullRequestAsync(Tx.GitHubArea, "feature/42-x", "develop", true))!.MergeCommit);
+        var one = new FakeHttp((_, _) => FakeHttp.Ok(merged));
+        Assert.Equal("M9", (await Tx.Gh(one).GetPullRequestByIdAsync(Tx.GitHubArea, 9))!.MergeCommit);
+
+        foreach (var (status, expected) in new[] { ("ahead", true), ("identical", true), ("behind", false), ("diverged", false) })
+        {
+            var h = new FakeHttp((_, _) => FakeHttp.Ok($$"""{ "status": "{{status}}" }"""));
+            Assert.Equal(expected, await Tx.Gh(h).ContainsCommitAsync(Tx.GitHubArea, "m1", "d9"));
+            Assert.Equal("https://api.github.com/repos/acme/web/compare/m1...d9", h.Calls.Single().Url);
+        }
+    }
+}

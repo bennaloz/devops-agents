@@ -16,6 +16,8 @@ public static class StateKeys
     public const string HumanTest = "inProvaUmana";
     public const string ReadyToMerge = "daUnire";
     public const string InFeatureBranch = "inFeature";
+    /// <summary>D61: la PR e unita in develop e la card aspetta un deploy di develop in Test che la contenga.</summary>
+    public const string ReadyToDeployTest = "daDeployTest";
     public const string ReadyToRelease = "daRilasciare";
     public const string Releasing = "inRilascio";
     public const string Closed = "chiusa";
@@ -23,7 +25,7 @@ public static class StateKeys
 
     public static readonly string[] InTest = [DeployingToTest, AutomatedTest, HumanTest];
     /// <summary>Gli stati in cui la card ha un ramo e (di solito) un worktree.</summary>
-    public static readonly string[] WithBranch = [InDevelopment, InReview, DeployingToTest, AutomatedTest, HumanTest, ReadyToMerge, InFeatureBranch, ReadyToRelease];
+    public static readonly string[] WithBranch = [InDevelopment, InReview, DeployingToTest, AutomatedTest, HumanTest, ReadyToMerge, InFeatureBranch, ReadyToDeployTest, ReadyToRelease];
 }
 
 /// <summary>config/stati.json letto: chiave -> nome sulla board, in tutte e due le direzioni.</summary>

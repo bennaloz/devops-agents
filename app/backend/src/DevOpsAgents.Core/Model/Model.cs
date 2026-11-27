@@ -38,8 +38,18 @@ public sealed record Predecessor(int Id, string State, int? ParentId = null, int
 /// <summary>
 /// La PR della card, uguale per Azure Repos e GitHub. Status: active, completed, abandoned.
 /// Validation: verde, rossa, inCorso, scaduta, conflitti, assente.
+/// MergeCommit (D61): per una PR completata, il commit di merge nella destinazione.
 /// </summary>
-public sealed record PullRequestInfo(int Id, string Status, string Validation, int? BuildId = null, string? LogUrl = null, string? HeadCommit = null);
+public sealed record PullRequestInfo(int Id, string Status, string Validation, int? BuildId = null, string? LogUrl = null, string? HeadCommit = null, string? MergeCommit = null);
+
+/// <summary>Una PR letta per numero: stato, ramo sorgente e, se completata, il commit di merge (D61).</summary>
+public sealed record PullRequestRef(string Status, string Branch, string? MergeCommit = null);
+
+/// <summary>D61: l'ultimo deploy riuscito di un ramo: id, commit deployato, link.</summary>
+public sealed record DeployedRun(int Id, string? Commit, string? Url);
+
+/// <summary>D61: il deploy di develop in Test per una card in Ready to deploy (test): se contiene il commit di merge della card.</summary>
+public sealed record DevelopDeploy(bool Contained, int? RunId, string? Url);
 
 public static class Validations
 {
@@ -180,6 +190,8 @@ public sealed class CardLocalState
     /// <summary>Gli errori della build letti una volta per build (D52): build e testo.</summary>
     public string? BuildErrorsOf { get; set; }
     public string? BuildErrors { get; set; }
+    /// <summary>D61: il commit di merge in develop, ricordato quando la PR completata si vede (dopo RemoveWorktree la PR non si cerca piu).</summary>
+    public string? MergeCommit { get; set; }
 
     [JsonIgnore] public SessionRecord? LastSession => LastRole is not null && LastSessionByRole.TryGetValue(LastRole, out var s) ? s : null;
 
@@ -238,4 +250,6 @@ public sealed record Snapshot(
     /// <summary>Tutti i commenti, letti e no: le correzioni scritte dal responsabile e le Bug gia create stanno li.</summary>
     IReadOnlyList<Comment>? AllComments = null,
     /// <summary>D52: per la card di chiusura, gli errori di codice della build rossa (validazione o deploy); null se non ce ne sono.</summary>
-    string? BuildErrors = null);
+    string? BuildErrors = null,
+    /// <summary>D61: per una card in Ready to deploy (test), l'ultimo deploy di develop in Test riuscito e se la contiene; null se non lo aspetta.</summary>
+    DevelopDeploy? DevelopDeploy = null);

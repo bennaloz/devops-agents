@@ -55,4 +55,52 @@ public class HookTests
         Assert.Equal(2, v.ExitCode);
         Assert.Contains("non riesco a leggere gli host di Test", v.Message);
     }
+
+    private static string Usage(long input, long read, long created, bool sidechain = false) =>
+        "{\"isSidechain\":" + (sidechain ? "true" : "false") + $",\"message\":{{\"usage\":{{\"input_tokens\":{input},\"cache_read_input_tokens\":{read},\"cache_creation_input_tokens\":{created}}}}}}}";
+
+    [Fact]
+    public void Il_contesto_e_l_ultimo_usage_fuori_dalle_sidechain_e_una_riga_tagliata_non_conta()
+    {
+        var tail = "usage\": tagliata}\n" + Usage(1, 2, 3) + "\n" + Usage(100, 50000, 70000) + "\n" + Usage(9, 9, 9, sidechain: true) + "\n";
+        Assert.Equal(120100, HookRules.ContextTokens(tail));
+        Assert.Equal(0, HookRules.ContextTokens("niente"));
+    }
+
+    [Fact]
+    public void Suggest_compact_avvisa_una_volta_per_gradino_e_non_blocca_mai()
+    {
+        var steps = new Dictionary<string, int>();
+        var tokens = 100000L;
+        HookContext Ctx(Func<string, string?>? env = null) => new(null, _ => null, Env: env ?? (_ => null), ReadTail: _ => Usage(tokens, 0, 0),
+            ReadStep: k => steps.TryGetValue(k, out var s) ? s : null, WriteStep: (k, s) => steps[k] = s);
+        const string payload = """{"transcript_path":"/t/abc.jsonl","session_id":"s:1","tool_input":{"file_path":"x"}}""";
+
+        Assert.Null(HookRules.Run("suggest-compact", payload, Ctx()).Output);
+        tokens = 160000;
+        var v = HookRules.Run("suggest-compact", payload, Ctx());
+        Assert.Equal(0, v.ExitCode);
+        Assert.Equal("Contesto a 160k token: se hai chiuso una fase, e' un buon momento per /compact.", JsonNode.Parse(v.Output!)!["systemMessage"]!.GetValue<string>());
+        Assert.Equal(0, steps["s_1"]);
+        Assert.Null(HookRules.Run("suggest-compact", payload, Ctx()).Output);   // stesso gradino
+        tokens = 220000;
+        Assert.Null(HookRules.Run("suggest-compact", payload, Ctx()).Output);   // 150k + 75k non ancora
+        tokens = 230000;
+        Assert.NotNull(HookRules.Run("suggest-compact", payload, Ctx()).Output);
+        Assert.Equal(1, steps["s_1"]);
+        // la soglia si cambia con l'ambiente; un valore non valido vale il default
+        steps.Clear(); tokens = 60000;
+        Assert.NotNull(HookRules.Run("suggest-compact", payload, Ctx(n => n == "COMPACT_SOGLIA_TOKEN" ? "50000" : null)).Output);
+        steps.Clear();
+        Assert.Null(HookRules.Run("suggest-compact", payload, Ctx(n => n == "COMPACT_SOGLIA_TOKEN" ? "-3" : null)).Output);
+    }
+
+    [Fact]
+    public void Suggest_compact_senza_transcript_passa_in_silenzio()
+    {
+        var v = HookRules.Run("suggest-compact", """{"transcript_path":"/non/c/e"}""", new HookContext(null, _ => null, ReadTail: _ => null));
+        Assert.Equal(0, v.ExitCode);
+        Assert.Null(v.Output);
+        Assert.Null(v.Message);
+    }
 }
