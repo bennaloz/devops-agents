@@ -86,6 +86,7 @@ hanno stati locali separati e farebbero partire due volte le stesse sessioni.
 | `devops-agents feature pausa <id>` / `riprendi <id>` | Pausa di una Feature |
 | `devops-agents feature sposta <id> <dopo>` | Riordino: `<dopo>` e l'id della Feature che la precede, 0 la mette in cima |
 | `devops-agents da-fare` | I problemi aperti del supervisore: cosa aspetta te |
+| `devops-agents crea --tipo <User Story\|Bug\|Feature> --titolo <t> --area <a> --file <md> [--feature <id>] [--dopo <id,...>] [--senza-test] [--prova-umana] [--bug] [--raggruppa]` | `card.ps1 crea`: una card figlia di una Feature (D60), o una Feature con la card di chiusura (D52) o che raggruppa. Il markdown ha le sezioni Descrizione, Criteri di accettazione, Recinto, Riferimenti. Solo con `Mode=live`, mai dentro una sessione di ruolo |
 
 Esce con 3 se il servizio non risponde. Si installa come strumento .NET:
 
@@ -129,7 +130,7 @@ stesso nome del PowerShell (le due versioni non scrivono insieme), base di scrit
 prova, le note di conflitto e il riassunto dell'apprendimento. Il repo della PR e quello degli attrezzi nel progetto della board; la voce
 facoltativa `"memoria": { "repo", "progettoAdo", "sorgente", "repoGithub" }` di `mappa.json` lo sposta (per esempio su GitHub).
 
-Resta in PowerShell solo `card.ps1 crea` (si usa fuori dai ruoli).
+`card.ps1 crea` e `devops-agents crea` (sotto), con gli stessi controlli (`Core/Agents/CardCreator.cs`).
 
 ## Gli hook
 
@@ -224,7 +225,7 @@ script al posto di claude).
 | Supervisore (D51): smistatore fermo o che si interrompe, PAT rifiutato o in scadenza, card in on-hold con il gesto e le card che tiene ferme, prove in Test, domande del responsabile, card ferme da ore senza motivo, card che saltano per errore, rilasci in attesa per area con le soglie, quota; problemi aperti con primo visto e ricordi; urgenti subito, riepilogo ai feriali, rilasci a parte; Telegram con i topic | portato, con test; la dashboard ha il riquadro "Da fare per te". Manca: la diagnosi con un modello e i controlli sulle pipeline |
 | Aggiornamento automatico della suite (D53) | **manca** |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
-| `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. Resta PowerShell `card.ps1 crea` |
+| `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. `card.ps1 crea` e il comando `devops-agents crea` |
 | Scrittura della memoria dei ruoli (`memoria.ps1`, D46) | portata (`GitMemoryWriter`), con git vero nei test: lettura, scrivi, rivedi, togli, conflitto, base dopo la fusione, tetto, lucchetto condiviso con il PowerShell |
 | Hook di Claude Code (`hooks/*.ps1`) | portati (`devops-agents-hook`), sugli stessi 119 casi di `Test-Hooks.ps1`, passati alle sessioni con `--settings` |
 | Riga di comando, servizio Windows e systemd, container | portato: `devops-agents` (CLI), `UseWindowsService`/`UseSystemd`, `app/Dockerfile` e `app/docker-compose.yml` |

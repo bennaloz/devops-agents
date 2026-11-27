@@ -81,6 +81,8 @@ public sealed record Limits
     public int TestEnvironments { get; init; } = 3;
     /// <summary>D46: quante lezioni al massimo in un file di memoria (tettoMemoria).</summary>
     public int MemoryCap { get; init; } = 25;
+    /// <summary>D52: l'interruttore delle funzionalita (funzionalitaAttive): spento, nessuna Feature si crea e nessuna card si lega a una Feature.</summary>
+    public bool FeaturesEnabled { get; init; } = true;
 }
 
 /// <summary>Un ruolo di config/ruoli.json: modello, sforzo, brief e strumenti della sessione claude -p.</summary>

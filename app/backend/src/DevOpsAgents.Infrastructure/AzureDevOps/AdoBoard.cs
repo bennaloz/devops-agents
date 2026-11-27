@@ -7,7 +7,7 @@ using static DevOpsAgents.Infrastructure.AzureDevOps.AdoClient;
 namespace DevOpsAgents.Infrastructure.AzureDevOps;
 
 /// <summary>La board su Azure DevOps Boards: le stesse chiamate di src/Ado.psm1.</summary>
-public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames names) : IBoard, ICardEditor
+public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames names) : IBoard, ICardEditor, ICardCreator
 {
     private const string ChildLink = "System.LinkTypes.Hierarchy-Forward";
     private const string ParentLink = "System.LinkTypes.Hierarchy-Reverse";
@@ -290,6 +290,48 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
     }
 
     public Task SetTaskStateAsync(int taskId, string stateName, CancellationToken ct = default) => SetStateAsync(taskId, stateName, ct);
+
+    // ---- ICardCreator: card.ps1 crea ----------------------------------------------------------------------------------
+
+    /// <summary>Come New-AdoCard: il progetto e il primo segmento dell'area, i campi lunghi in markdown, predecessori e padre nella stessa creazione.</summary>
+    public async Task<(int Id, string State)> CreateWorkItemAsync(NewWorkItem w, CancellationToken ct = default)
+    {
+        if (w.Type == "Feature" && w.Criteria is { Length: > 0 }) throw new InvalidOperationException("il tipo 'Feature' non ha il campo dei criteri di accettazione: i criteri non si possono dare");
+        var project = w.Area.Split('\\')[0];
+        var field = DescriptionField(w.Type);
+        JsonArray ops =
+        [
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.Title", ["value"] = w.Title },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.AreaPath", ["value"] = w.Area },
+            new JsonObject { ["op"] = "add", ["path"] = $"/multilineFieldsFormat/{field}", ["value"] = "Markdown" },
+            new JsonObject { ["op"] = "add", ["path"] = $"/fields/{field}", ["value"] = w.Description },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.AssignedTo", ["value"] = w.AssignedTo },
+        ];
+        if (w.Criteria is { Length: > 0 } c)
+        {
+            ops.Add(new JsonObject { ["op"] = "add", ["path"] = $"/multilineFieldsFormat/{CriteriaField}", ["value"] = "Markdown" });
+            ops.Add(new JsonObject { ["op"] = "add", ["path"] = $"/fields/{CriteriaField}", ["value"] = c });
+        }
+        if (w.Tags.Count > 0) ops.Add(new JsonObject { ["op"] = "add", ["path"] = "/fields/System.Tags", ["value"] = string.Join("; ", w.Tags) });
+        foreach (var p in w.Predecessors)
+            ops.Add(new JsonObject { ["op"] = "add", ["path"] = "/relations/-", ["value"] = new JsonObject { ["rel"] = PredecessorLink, ["url"] = $"{ado.Organization}/_apis/wit/workItems/{p}" } });
+        if (w.ParentId is { } parent)
+            ops.Add(new JsonObject { ["op"] = "add", ["path"] = "/relations/-", ["value"] = new JsonObject { ["rel"] = ParentLink, ["url"] = $"{ado.Organization}/_apis/wit/workItems/{parent}" } });
+        var r = await ado.SendAsync(HttpMethod.Post, $"/{E(project)}/_apis/wit/workitems/${E(w.Type)}?api-version=7.1", ops, "application/json-patch+json", ct);
+        return (r.Int("id")!.Value, r?["fields"].Str("System.State") ?? "");
+    }
+
+    public async Task TagNewAsync(int id, IReadOnlyList<string> tags, string? stateName, CancellationToken ct = default)
+    {
+        var card = ToCard((await ado.GetAsync($"/_apis/wit/workitems/{id}?api-version=7.1", ct))!);
+        JsonArray ops =
+        [
+            new JsonObject { ["op"] = "test", ["path"] = "/rev", ["value"] = card.Rev },
+            new JsonObject { ["op"] = "add", ["path"] = "/fields/System.Tags", ["value"] = string.Join("; ", card.Tags.Concat(tags).Distinct(StringComparer.OrdinalIgnoreCase)) },
+        ];
+        if (stateName is not null) ops.Add(new JsonObject { ["op"] = "add", ["path"] = "/fields/System.State", ["value"] = stateName });
+        await PatchAsync(id, ops, ct);
+    }
 
     public string CardUrl(int cardId) => $"{ado.Organization}/{E(boardProject)}/_workitems/edit/{cardId}";
 }

@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 // devops-agents: la riga di comando per le persone. Parla con il servizio (API su localhost) e non tocca ne la board ne i repo da sola.
-// Gli agenti continuano a usare card.ps1, che conosce hook e brief.
+// Gli agenti usano gli strumenti del server MCP (o card.ps1 con lo smistatore PowerShell), non questa riga di comando.
 
 var url = Environment.GetEnvironmentVariable("DEVOPS_AGENTS_URL") ?? "http://localhost:18800";
 var http = new HttpClient { BaseAddress = new Uri(url), Timeout = TimeSpan.FromMinutes(5) };
@@ -23,6 +23,9 @@ public static class Cli
           feature pausa <id>            mette in pausa una Feature (e riprendi <id>)
           feature sposta <id> <dopo>    la mette subito dopo la Feature <dopo> (0 = in cima)
           da-fare                       cosa aspetta una persona, secondo il supervisore
+          crea --tipo <User Story|Bug|Feature> --titolo <testo> --area <area> --file <markdown>
+               [--feature <id>] [--dopo <id>[,<id>...]] [--senza-test] [--prova-umana] [--bug] [--raggruppa]
+                                        crea una card figlia di una Feature, o una Feature (card.ps1 crea)
 
         Il servizio si raggiunge su DEVOPS_AGENTS_URL (default http://localhost:18800).
         """;
@@ -85,6 +88,8 @@ public static class Cli
                     }
                     return 0;
                 }
+                case ["crea", .. var rest]:
+                    return await CreateAsync(rest, http, output);
                 default:
                     output.WriteLine(Usage);
                     return args.Length == 0 || args is ["--help" or "-h" or "aiuto"] ? 0 : 1;
@@ -95,6 +100,39 @@ public static class Cli
             output.WriteLine($"il servizio non risponde su {http.BaseAddress}: {e.Message}");
             return 3;
         }
+    }
+
+    /// <summary>
+    /// card.ps1 crea: il markdown con le sezioni Descrizione, Criteri di accettazione, Recinto, Riferimenti. Ogni card sta in una Feature (D60);
+    /// -Tipo Feature crea la funzionalita con la card di chiusura (D52), con --raggruppa solo la Feature. Mai dentro una sessione di ruolo.
+    /// </summary>
+    private static async Task<int> CreateAsync(string[] a, HttpClient http, TextWriter output)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ATTREZZI_RUOLO")))
+        {
+            output.WriteLine("card: 'crea' non e permesso dentro una sessione di ruolo");
+            return 1;
+        }
+        string? Value(string name) => Array.IndexOf(a, name) is var i and >= 0 && i + 1 < a.Length ? a[i + 1] : null;
+        bool Flag(string name) => a.Contains(name);
+        var missing = new[] { "--tipo", "--titolo", "--area", "--file" }.Where(n => Value(n) is null).ToList();
+        if (missing.Count > 0) { output.WriteLine($"card: manca {string.Join(", ", missing)}"); return 1; }
+        var file = Value("--file")!;
+        if (!File.Exists(file)) { output.WriteLine($"card: File non trovato: '{file}'"); return 1; }
+        var after = Value("--dopo")?.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToArray();
+        var body = new JsonObject
+        {
+            ["type"] = Value("--tipo"), ["title"] = Value("--titolo"), ["area"] = Value("--area"), ["text"] = await File.ReadAllTextAsync(file),
+            ["after"] = after is null ? null : new JsonArray(after.Select(x => (JsonNode)x).ToArray()),
+            ["noTest"] = Flag("--senza-test"), ["humanTest"] = Flag("--prova-umana"), ["bug"] = Flag("--bug"), ["group"] = Flag("--raggruppa"),
+            ["feature"] = Value("--feature") is { } f ? int.Parse(f) : null,
+        };
+        var res = await http.PostAsync("/api/cards", new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json"));
+        var text = await res.Content.ReadAsStringAsync();
+        var json = text.TrimStart().StartsWith('{') ? JsonNode.Parse(text) : null;
+        if (!res.IsSuccessStatusCode) { output.WriteLine($"card: {json?["error"]?.ToString() ?? $"{(int)res.StatusCode} {res.ReasonPhrase}"}"); return 1; }
+        output.WriteLine(json?["message"]?.ToString());
+        return 0;
     }
 
     private static async Task PostOk(HttpClient http, string path)

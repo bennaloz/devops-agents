@@ -92,7 +92,7 @@ public sealed record SuiteConfig(
             memory = new AreaMapping("memoria", mm["repo"]?.GetValue<string>() ?? "DevOps.Agents", root, mm["progettoAdo"]?.GetValue<string>() ?? board!, "memoria", null, null,
                 gh ? SourceControl.GitHub : SourceControl.AzureRepos, mm["repoGithub"]?.GetValue<string>());
         }
-        return new SuiteConfig(root, org, board!, new StateNames(stati), limits with { MemoryCap = I("tettoMemoria", 25) }, roles, areas, memory);
+        return new SuiteConfig(root, org, board!, new StateNames(stati), limits with { MemoryCap = I("tettoMemoria", 25), FeaturesEnabled = l["funzionalitaAttive"]?.GetValue<bool>() ?? false }, roles, areas, memory);
     }
 
     /// <summary>config/supervisore.json: soglie e orari del supervisore (D51).</summary>

@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using DevOpsAgents.Core.Configuration;
 using DevOpsAgents.Infrastructure.AzureDevOps;
 using DevOpsAgents.Infrastructure.Configuration;
+using DevOpsAgents.Core.Ports;
 using Xunit;
 
 namespace DevOpsAgents.Infrastructure.Tests;
@@ -80,5 +81,26 @@ public class CardEditorTests
         var gh = new FakeHttp((r, _) => (HttpStatusCode.OK, Yaml));
         Assert.Equal(["deployApi"], await new AzurePipelinesDeployParameters(Tx.Ado(ado), Tx.Gh(gh)).GetAsync(Tx.GitHubArea, "develop"));
         Assert.Equal("https://api.github.com/repos/acme/web/contents/ci/deploy.yml?ref=develop", gh.Calls[0].Url);
+    }
+}
+
+public class CardCreatorAdoTests
+{
+    [Fact]
+    public async Task La_card_nasce_con_campi_in_markdown_predecessori_e_padre_e_i_tag_arrivano_con_il_test_sulla_revisione()
+    {
+        var h = new FakeHttp((r, _) => FakeHttp.Ok("""{ "id": 901, "rev": 1, "fields": { "System.State": "Draft", "System.Title": "T", "System.Tags": "vecchio" } }"""));
+        var b = new AdoBoard(Tx.Ado(h), "DevOps.Agents", SuiteConfig.Load(Tx.Root).Names);
+        var (id, state) = await b.CreateWorkItemAsync(new("Bug", "T", "Acme.AI\\Stime", "desc", "crit", [], "t@example.invalid", [5], 10));
+        Assert.Equal((901, "Draft"), (id, state));
+        Assert.Contains("/Acme.AI/_apis/wit/workitems/$Bug?", h.Calls[0].Url);
+        var body = h.Calls[0].Body;
+        Assert.Contains("Microsoft.VSTS.TCM.ReproSteps", body);
+        Assert.Contains("Dependency-Reverse", body);
+        Assert.Contains("Hierarchy-Reverse", body);
+        await b.TagNewAsync(901, ["agents"], null);
+        Assert.Contains("\"op\":\"test\",\"path\":\"/rev\",\"value\":1", h.Calls[^1].Body);
+        Assert.Contains("vecchio; agents", h.Calls[^1].Body);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => b.CreateWorkItemAsync(new("Feature", "F", "A\\B", "d", "c", [], "t", [], null)));
     }
 }

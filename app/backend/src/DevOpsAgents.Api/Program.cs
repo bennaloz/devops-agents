@@ -1,3 +1,4 @@
+using DevOpsAgents.Core.Agents;
 using System.Text.Json.Serialization;
 using DevOpsAgents.Api;
 using DevOpsAgents.Api.Demo;
@@ -41,7 +42,10 @@ if (options.Mode == "live")
     builder.Services.AddSingleton(tokens);
     builder.Services.AddHttpClient();
     builder.Services.AddSingleton(sp => new AdoClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("ado"), suite.Organization, () => tokens.AzureDevOps));
-    builder.Services.AddSingleton<IBoard>(sp => new AdoBoard(sp.GetRequiredService<AdoClient>(), suite.BoardProject, suite.Names));
+    builder.Services.AddSingleton(sp => new AdoBoard(sp.GetRequiredService<AdoClient>(), suite.BoardProject, suite.Names));
+    builder.Services.AddSingleton<IBoard>(sp => sp.GetRequiredService<AdoBoard>());
+    builder.Services.AddSingleton<ICardEditor>(sp => sp.GetRequiredService<AdoBoard>());
+    builder.Services.AddSingleton<ICardCreator>(sp => sp.GetRequiredService<AdoBoard>());
     builder.Services.AddSingleton(sp => new AzureReposCodeHost(sp.GetRequiredService<AdoClient>()));
     builder.Services.AddSingleton(sp => new GitHubCodeHost(sp.GetRequiredService<IHttpClientFactory>().CreateClient("github"), () => tokens.GitHub, sp.GetRequiredService<AdoClient>()));
     builder.Services.AddSingleton<ICodeHostResolver, CodeHostResolver>();
@@ -141,6 +145,20 @@ api.MapPost("/system/pause", async (HttpRequest req, PriorityService p, Dispatch
     return Results.Ok(new { systemPaused = active });
 });
 // D51: cosa aspetta una persona, secondo il supervisore (i problemi aperti), e un suo giro a richiesta (di prova: non manda niente)
+// card.ps1 crea: una card figlia di una Feature, o una Feature (con la card di chiusura, o -Raggruppa). Solo dal vivo: la board e quella vera.
+api.MapPost("/cards", async (HttpRequest req, IServiceProvider sp, SuiteConfig s, CreateRequest body, CancellationToken ct) =>
+{
+    if (!Allowed(req)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (sp.GetService<ICardCreator>() is not { } creator || sp.GetService<ICardEditor>() is not { } editor)
+        return Results.Conflict(new { error = "in modalita demo non si creano card: serve Mode=live" });
+    try
+    {
+        var created = await new CardCreator(creator, editor, s.Names, s.Areas, s.Limits.FeaturesEnabled).CreateAsync(body, ct: ct);
+        return Results.Ok(created);
+    }
+    catch (CardToolException e) { return Results.BadRequest(new { error = e.Message }); }
+});
+
 api.MapGet("/supervisor", (SupervisorService s) => new
 {
     problems = s.State.Problems.Values.OrderByDescending(p => p.Problem.Urgent).ThenBy(p => p.FirstSeen)

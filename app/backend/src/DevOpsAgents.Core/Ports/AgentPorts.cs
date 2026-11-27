@@ -67,3 +67,17 @@ public interface IMemoryWriter
 
 /// <summary>Una lezione del mentore: i quattro campi di memoria.ps1 scrivi.</summary>
 public sealed record LessonFields(string Situation, string WhatToDo, string Why, string Card);
+
+/// <summary>Un work item da creare: la descrizione in markdown (nei passi di riproduzione per una Bug), i criteri (non per una Feature), i link.</summary>
+public sealed record NewWorkItem(string Type, string Title, string Area, string Description, string? Criteria, IReadOnlyList<string> Tags, string AssignedTo,
+    IReadOnlyList<int> Predecessors, int? ParentId);
+
+/// <summary>La creazione di card e Feature (card.ps1 crea): fuori dai ruoli, la usa una persona o la sessione di design.</summary>
+public interface ICardCreator
+{
+    /// <summary>Crea il work item senza toccarne lo stato (lo decide la board): restituisce id e stato in cui e nato.</summary>
+    Task<(int Id, string State)> CreateWorkItemAsync(NewWorkItem item, CancellationToken ct = default);
+    /// <summary>Tag ed eventualmente stato, in una scrittura: il via agli agenti a una card appena nata.</summary>
+    Task TagNewAsync(int id, IReadOnlyList<string> tags, string? stateName, CancellationToken ct = default);
+    Task<Person> GetCurrentUserAsync(CancellationToken ct = default);
+}
