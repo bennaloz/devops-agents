@@ -18,9 +18,11 @@ builder.Host.UseWindowsService(o => o.ServiceName = "DevOps.Agents");
 builder.Host.UseSystemd();
 var options = builder.Configuration.GetSection("DevOpsAgents").Get<ApiOptions>() ?? new ApiOptions();
 var root = options.Root ?? SuiteConfig.FindRoot(builder.Environment.ContentRootPath);
-var suite = SuiteConfig.Load(root);
 var dataDir = options.DataDir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DevOps.Agents.Net");
 Directory.CreateDirectory(dataDir);
+// D53: gli override locali di limiti e supervisore stanno in impostazioni.json della cartella dati (dal vivo), fuori dal repo
+var settingsFile = options.Mode == "live" ? Path.Combine(dataDir, "impostazioni.json") : null;
+var suite = SuiteConfig.Load(root, settingsFile);
 
 // solo da questo PC: la dashboard avvia giri e vede le card
 builder.WebHost.UseUrls(builder.Configuration["Urls"] ?? "http://localhost:18800");
@@ -81,14 +83,27 @@ builder.Services.AddSingleton(sp => new DispatcherService(sp.GetRequiredService<
     options, TimeSpan.FromMinutes(Math.Max(1, suite.Limits.IntervalMinutes)), sp.GetRequiredService<ILogger<DispatcherService>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());
 // D51: il supervisore, con Telegram se ci sono token e chat (~/.claude/telegram-token.txt, <dati>/telegram-chat.txt)
-builder.Services.AddSingleton(SuiteConfig.LoadSupervisor(root));
+builder.Services.AddSingleton(SuiteConfig.LoadSupervisor(root, settingsFile));
 builder.Services.AddSingleton<INotifier>(sp => options.Mode == "live"
     ? TelegramNotifier.FromFiles(new HttpClient(), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"), dataDir)
     : new TelegramNotifier(new HttpClient(), null, null, Path.Combine(storeDir, "telegram-topic.json")));
 builder.Services.AddSingleton(sp => new SupervisorService(sp.GetRequiredService<DispatcherService>(), options, sp.GetRequiredService<DevOpsAgents.Core.Supervision.SupervisorSettings>(),
     suite, sp.GetRequiredService<IQuotaStore>(), sp.GetRequiredService<INotifier>(), sp.GetRequiredService<IClock>(), Path.Combine(storeDir, "supervisore.json"),
-    sp.GetRequiredService<ILogger<SupervisorService>>()));
+    sp.GetRequiredService<ILogger<SupervisorService>>(), sp));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SupervisorService>());
+// D53: l'aggiornamento della copia degli attrezzi, dal vivo e se non e spento (nel container la versione e l'immagine)
+if (options.Mode == "live" && options.AutoUpdate)
+    builder.Services.AddSingleton(sp =>
+    {
+        var sup = sp.GetRequiredService<DevOpsAgents.Core.Supervision.SupervisorSettings>();
+        var disp = sp.GetRequiredService<DispatcherService>();
+        var runner = sp.GetRequiredService<ISessionRunner>();
+        var notifier = sp.GetRequiredService<INotifier>();
+        return new SuiteUpdater(new UpdaterOptions(root, dataDir, sup.UpdateCheckMinutes, sup.UpdateWaitHours, options.UpdateBuild, options.ClaudeExecutable),
+            () => new DevOpsAgents.Core.Update.Occupancy(runner.Running.Count, disp.Running ? 1 : 0),
+            action => disp.RunExclusiveAsync(action),
+            async (topic, html) => !notifier.Configured || await notifier.SendAsync(topic, html, CancellationToken.None));
+    });
 
 var app = builder.Build();
 app.UseCors();
@@ -171,6 +186,16 @@ api.MapPost("/supervisor", async (HttpRequest req, SupervisorService s, Cancella
     var plan = await s.RunOnceAsync(whatIf: true, ct);
     return Results.Ok(new { urgent = plan.Urgent.Count, summary = plan.Summary.Count + plan.Releases.Count });
 });
+// D53: lo stato dell'aggiornamento della suite e "aggiorna adesso" (il giro dopo del supervisore lo esegue)
+api.MapGet("/update", (IServiceProvider sp) => sp.GetService<SuiteUpdater>() is { } u ? Results.Ok(u.Status()) : Results.Ok(new { spento = true }));
+api.MapPost("/update", (HttpRequest req, IServiceProvider sp) =>
+{
+    if (!Allowed(req)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (sp.GetService<SuiteUpdater>() is not { } u) return Results.Conflict(new { error = "l'aggiornamento della suite e spento (AutoUpdate=false, o modalita demo)" });
+    u.Request();
+    return Results.Accepted();
+});
+
 api.MapGet("/config", (SuiteConfig s) => new
 {
     states = StatesInFlow.Select(k => new { key = k, name = s.Names.Get(k) }).Where(x => x.name is not null),

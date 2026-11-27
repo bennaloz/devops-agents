@@ -49,6 +49,7 @@ ENV Urls=http://0.0.0.0:18800 \
     DevOpsAgents__Root=/opt/devops-agents \
     DevOpsAgents__DataDir=/dati \
     DevOpsAgents__WorktreeRoot=/repos/_wt \
+    DevOpsAgents__AutoUpdate=false \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 WORKDIR /opt/devops-agents/server
 EXPOSE 18800

@@ -86,6 +86,8 @@ hanno stati locali separati e farebbero partire due volte le stesse sessioni.
 | `devops-agents feature pausa <id>` / `riprendi <id>` | Pausa di una Feature |
 | `devops-agents feature sposta <id> <dopo>` | Riordino: `<dopo>` e l'id della Feature che la precede, 0 la mette in cima |
 | `devops-agents da-fare` | I problemi aperti del supervisore: cosa aspetta te |
+| `devops-agents aggiornamento` / `aggiorna` | Lo stato dell'aggiornamento della suite (D53) e "aggiorna adesso" |
+| `devops-agents setup [--hook] [--regole] [--pat] [--pat-github]` | `Install-Attrezzi.ps1` in locale: gli hook .NET in `~/.claude/settings.json` (con la copia di salvataggio, senza doppioni), le skill (giunzioni su Windows, link altrove), i due PAT di Azure DevOps creati con az (vecchi revocati, login tolto se l'ha fatto lui) e i token di GitHub. La pianificazione non serve: c'e il servizio |
 | `devops-agents crea --tipo <User Story\|Bug\|Feature> --titolo <t> --area <a> --file <md> [--feature <id>] [--dopo <id,...>] [--senza-test] [--prova-umana] [--bug] [--raggruppa]` | `card.ps1 crea`: una card figlia di una Feature (D60), o una Feature con la card di chiusura (D52) o che raggruppa. Il markdown ha le sezioni Descrizione, Criteri di accettazione, Recinto, Riferimenti. Solo con `Mode=live`, mai dentro una sessione di ruolo |
 
 Esce con 3 se il servizio non risponde. Si installa come strumento .NET:
@@ -144,6 +146,17 @@ echo '{"tool_input":{"command":"cat ~/.claude/pat.txt"}}' | ATTREZZI_RUOLO=dev d
 Exit 2 blocca e il messaggio su stderr torna al modello; in circa un decimo di secondo. Lo smistatore .NET li passa a ogni sessione con
 `--settings`, cosi valgono per i ruoli anche dove non sono installati. I test girano sugli stessi 119 casi di `hooks/Test-Hooks.ps1`,
 esportati in `tests/DevOpsAgents.Core.Tests/Hooks/casi-hook.json`: un caso nuovo si aggiunge a `Test-Hooks.ps1` e si riesporta.
+
+## L'aggiornamento della suite (D53)
+
+Dal vivo, il giro del supervisore aggiorna la copia degli attrezzi come `Aggiornamento.psm1`: un fetch ogni `minutiControlloAggiornamenti`
+(`config/supervisore.json`), il canale di `impostazioni.json` (o il ramo estratto, o main), solo in fast-forward e mai su lavoro non committato,
+con lo smistatore fermo e nessuna sessione aperta. Le modifiche locali a `config/limiti.json` e `config/supervisore.json` si spostano in
+`impostazioni.json` (cartella dati, che ora fa da override anche per la versione .NET). La versione nuova si verifica (la configurazione si
+legge; se cambia `app/`, `UpdateBuild` la compila: di default `dotnet build app/backend -c Release`); se non va si torna a quella di prima e
+quel commit non si riprova finche l'origine non va oltre. Lo stato e in `aggiornamento.json`, gli avvisi nel topic Aggiornamenti di Telegram.
+I binari del servizio non si sostituiscono da soli: se `app/` cambia lo stato dice `riavvioNecessario` e il servizio va ripubblicato e
+riavviato. Nel container l'aggiornamento e spento (`AutoUpdate=false`): la versione e l'immagine.
 
 ## Come servizio
 
@@ -223,7 +236,8 @@ script al posto di claude).
 | Presa in carico da un altro PC (`AdottaCard`): worktree dal ramo pubblicato, PR collegata per le card gia unite, attesa se la sessione dell'altro PC e recente; commenti di avvio e fine sessione compatibili con il PowerShell | portato, con test. Manca: togliere i worktree delle card cedute a un collega |
 | Mentore e memoria dei ruoli (D46): il mentore parte dopo una decisione del responsabile su un blocco o un bivio, dopo i rilievi, dopo un commento o un on-hold tolto da una persona, dopo la prova umana e per una Bug rilasciata, una volta per correzione e fuori dal limite di sessioni; le lezioni stabili e in prova entrano nel brief del ruolo | portato, con test. Le lezioni le scrive il mentore con gli strumenti `memoria_*`. Manca: il registro dell'apprendimento e la sua sezione nella vista |
 | Supervisore (D51): smistatore fermo o che si interrompe, PAT rifiutato o in scadenza, card in on-hold con il gesto e le card che tiene ferme, prove in Test, domande del responsabile, card ferme da ore senza motivo, card che saltano per errore, rilasci in attesa per area con le soglie, quota; problemi aperti con primo visto e ricordi; urgenti subito, riepilogo ai feriali, rilasci a parte; Telegram con i topic | portato, con test; la dashboard ha il riquadro "Da fare per te". Manca: la diagnosi con un modello e i controlli sulle pipeline |
-| Aggiornamento automatico della suite (D53) | **manca** |
+| Aggiornamento automatico della suite (D53) | portato (`SuiteUpdater`, regole in `Core/Update`), con git vero nei test: avanzamento, automatico spento e richiesta, attesa delle sessioni, migrazione delle modifiche locali, verifica fallita e ritorno indietro, requisiti. I binari si ripubblicano a mano (`riavvioNecessario`) |
+| Installazione (`setup/Install-Attrezzi.ps1`) | portata (`devops-agents setup`): hook, skill, PAT di Azure DevOps, token di GitHub; la pianificazione la sostituisce il servizio |
 | Vista: sezione Pipeline, Apprendimento, Ufficio, Suite | **manca**: la dashboard ha kanban, log e giri |
 | `card.ps1` e `memoria.ps1` (gli attrezzi degli agenti sulla board) | portati come server MCP (`devops-agents-mcp`), strumenti filtrati per ruolo, con test e una prova con la CLI di Claude Code. `card.ps1 crea` e il comando `devops-agents crea` |
 | Scrittura della memoria dei ruoli (`memoria.ps1`, D46) | portata (`GitMemoryWriter`), con git vero nei test: lettura, scrivi, rivedi, togli, conflitto, base dopo la fusione, tetto, lucchetto condiviso con il PowerShell |

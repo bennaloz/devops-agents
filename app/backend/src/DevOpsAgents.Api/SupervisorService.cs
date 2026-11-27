@@ -13,7 +13,7 @@ namespace DevOpsAgents.Api;
 /// Non fa niente da solo: deploy, approvazioni, merge e card restano alle persone e allo smistatore.
 /// </summary>
 public sealed class SupervisorService(DispatcherService dispatcher, ApiOptions options, SupervisorSettings settings, SuiteConfig suite, IQuotaStore quota,
-    INotifier notifier, IClock clock, string statePath, ILogger<SupervisorService> logger) : BackgroundService
+    INotifier notifier, IClock clock, string statePath, ILogger<SupervisorService> logger, IServiceProvider? services = null) : BackgroundService
 {
     private readonly SemaphoreSlim _one = new(1, 1);
     public SupervisorState State { get; private set; } = Load(statePath);
@@ -52,6 +52,12 @@ public sealed class SupervisorService(DispatcherService dispatcher, ApiOptions o
             Supervisor.Register(State, plan, sent, now);
             Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
             await File.WriteAllTextAsync(statePath, System.Text.Json.JsonSerializer.Serialize(State, SuiteConfig.Json), ct);
+            // D53: l'aggiornamento della suite, a ogni giro (il fetch solo ogni minutiControlloAggiornamenti): mai fatale per il giro
+            if (services?.GetService(typeof(DevOpsAgents.Infrastructure.Local.SuiteUpdater)) is DevOpsAgents.Infrastructure.Local.SuiteUpdater updater)
+            {
+                try { await updater.RunAsync(now, log: m => logger.LogInformation("{Message}", m), ct: ct); }
+                catch (Exception e) when (e is not OperationCanceledException) { logger.LogError(e, "aggiornamento della suite interrotto"); }
+            }
             return plan;
         }
         finally { _one.Release(); }

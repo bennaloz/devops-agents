@@ -10,4 +10,10 @@
     <ToolCommandName>devops-agents</ToolCommandName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- setup lavora in locale (hook, skill, token), senza il servizio -->
+    <ProjectReference Include="..\DevOpsAgents.Infrastructure\DevOpsAgents.Infrastructure.csproj" />
+    <ProjectReference Include="..\DevOpsAgents.Hooks\DevOpsAgents.Hooks.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -25,13 +25,29 @@ public sealed record SuiteConfig(
     /// </summary>
     public AreaMapping MemoryArea => Memory ?? new AreaMapping("memoria", "DevOps.Agents", Root, BoardProject, "memoria", null, null);
 
-    public static SuiteConfig Load(string root)
+    /// <summary>
+    /// D53: gli override di impostazioni.json (cartella dati) sopra config/limiti.json e config/supervisore.json, chiave per chiave al primo livello:
+    /// la copia degli attrezzi resta pulita e si aggiorna in fast-forward, le scelte locali stanno fuori dal repo.
+    /// </summary>
+    public static JsonNode WithOverrides(JsonNode config, string? settingsPath, string section)
+    {
+        if (settingsPath is null || !File.Exists(settingsPath)) return config;
+        JsonNode? settings;
+        try { settings = JsonNode.Parse(File.ReadAllText(settingsPath)); }
+        catch (JsonException e) { throw new InvalidDataException($"impostazioni.json non e un JSON valido ({settingsPath}): {e.Message}"); }
+        if (settings?[section] is not JsonObject ov) return config;
+        foreach (var (k, v) in ov) config[k] = v?.DeepClone();
+        return config;
+    }
+
+    public static SuiteConfig Load(string root, string? settingsPath = null)
     {
         JsonNode Read(string name)
         {
             var p = Path.Combine(root, "config", $"{name}.json");
             if (!File.Exists(p)) throw new FileNotFoundException($"File di configurazione mancante: {p}", p);
-            return JsonNode.Parse(File.ReadAllText(p)) ?? throw new InvalidDataException($"{p} e vuoto");
+            var node = JsonNode.Parse(File.ReadAllText(p)) ?? throw new InvalidDataException($"{p} e vuoto");
+            return name == "limiti" ? WithOverrides(node, settingsPath, "limiti") : node;
         }
 
         var stati = Read("stati").AsObject().ToDictionary(kv => kv.Key, kv => kv.Value!.GetValue<string>());
@@ -96,11 +112,11 @@ public sealed record SuiteConfig(
     }
 
     /// <summary>config/supervisore.json: soglie e orari del supervisore (D51).</summary>
-    public static DevOpsAgents.Core.Supervision.SupervisorSettings LoadSupervisor(string root)
+    public static DevOpsAgents.Core.Supervision.SupervisorSettings LoadSupervisor(string root, string? settingsPath = null)
     {
         var p = Path.Combine(root, "config", "supervisore.json");
         if (!File.Exists(p)) return new();
-        var o = JsonNode.Parse(File.ReadAllText(p))!;
+        var o = WithOverrides(JsonNode.Parse(File.ReadAllText(p))!, settingsPath, "supervisore");
         int I(string k, int d) => o[k]?.GetValue<int>() ?? d;
         var rel = o["rilasci"];
         var byArea = (rel?["perArea"] as JsonObject)?.ToDictionary(kv => kv.Key, kv => (kv.Value!["card"]?.GetValue<int>() ?? 5, kv.Value!["giorni"]?.GetValue<int>() ?? 7))
@@ -117,6 +133,8 @@ public sealed record SuiteConfig(
             ReleaseCards = rel?["predefinito"]?["card"]?.GetValue<int>() ?? 5,
             ReleaseDays = rel?["predefinito"]?["giorni"]?.GetValue<int>() ?? 7,
             ReleaseByArea = byArea,
+            UpdateCheckMinutes = I("minutiControlloAggiornamenti", 30),
+            UpdateWaitHours = o["oreAttesaAggiornamento"]?.GetValue<double>() ?? 6,
         };
     }
 

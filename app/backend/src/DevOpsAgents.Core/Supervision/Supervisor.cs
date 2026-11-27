@@ -19,6 +19,9 @@ public sealed record SupervisorSettings
     public int ReleaseCards { get; init; } = 5;
     public int ReleaseDays { get; init; } = 7;
     public IReadOnlyDictionary<string, (int Cards, int Days)> ReleaseByArea { get; init; } = new Dictionary<string, (int, int)>();
+    /// <summary>D53: ogni quanti minuti l'aggiornamento della suite fa fetch, e dopo quante ore di attesa delle sessioni lo dice.</summary>
+    public int UpdateCheckMinutes { get; init; } = 30;
+    public double UpdateWaitHours { get; init; } = 6;
 }
 
 /// <summary>

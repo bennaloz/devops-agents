@@ -23,6 +23,10 @@ public static class Cli
           feature pausa <id>            mette in pausa una Feature (e riprendi <id>)
           feature sposta <id> <dopo>    la mette subito dopo la Feature <dopo> (0 = in cima)
           da-fare                       cosa aspetta una persona, secondo il supervisore
+          aggiornamento                 lo stato dell'aggiornamento della suite (D53)
+          aggiorna                      aggiorna la suite adesso (al prossimo giro del supervisore)
+          setup [--hook] [--regole] [--pat] [--pat-github] [--root <repo>] [--claude <cartella>]
+                                        installa hook .NET, skill, PAT di Azure DevOps e token di GitHub (in locale)
           crea --tipo <User Story|Bug|Feature> --titolo <testo> --area <area> --file <markdown>
                [--feature <id>] [--dopo <id>[,<id>...]] [--senza-test] [--prova-umana] [--bug] [--raggruppa]
                                         crea una card figlia di una Feature, o una Feature (card.ps1 crea)
@@ -90,6 +94,22 @@ public static class Cli
                 }
                 case ["crea", .. var rest]:
                     return await CreateAsync(rest, http, output);
+                case ["aggiornamento"]:
+                {
+                    var u = await http.GetFromJsonAsync<JsonObject>("/api/update");
+                    if (u!["spento"] is not null) { output.WriteLine("aggiornamento della suite spento"); return 0; }
+                    var e = u["ultimoEsito"];
+                    output.WriteLine($"canale {u["canale"]}, installata {u["installata"]?["hash"]}, disponibile {u["disponibile"]?["hash"]?.ToString() ?? "niente di nuovo"}, " +
+                        $"esito {e?["esito"]}{(e?["errore"] is { } err ? $" ({err})" : "")}{(u["riavvioNecessario"]?.GetValue<bool>() == true ? ", serve un riavvio del servizio" : "")}");
+                    foreach (var p in u["prInArrivo"]?.AsArray() ?? []) output.WriteLine($"  PR {p!["numero"]}: {p["titolo"]}");
+                    return 0;
+                }
+                case ["aggiorna"]:
+                    await PostOk(http, "/api/update");
+                    output.WriteLine("richiesta fatta: la suite si aggiorna al prossimo giro del supervisore (devops-agents aggiornamento per l'esito)");
+                    return 0;
+                case ["setup", .. var rest]:
+                    return await SetupAsync(rest, output);
                 default:
                     output.WriteLine(Usage);
                     return args.Length == 0 || args is ["--help" or "-h" or "aiuto"] ? 0 : 1;
@@ -133,6 +153,64 @@ public static class Cli
         if (!res.IsSuccessStatusCode) { output.WriteLine($"card: {json?["error"]?.ToString() ?? $"{(int)res.StatusCode} {res.ReasonPhrase}"}"); return 1; }
         output.WriteLine(json?["message"]?.ToString());
         return 0;
+    }
+
+    /// <summary>
+    /// Install-Attrezzi.ps1 in .NET, in locale: --hook (gli hook .NET in ~/.claude/settings.json), --regole (le skill), --pat (i due PAT di Azure
+    /// DevOps con az), --pat-github (i token di GitHub, chiesti senza mostrarli). La pianificazione non c'e piu: il servizio la sostituisce.
+    /// </summary>
+    private static async Task<int> SetupAsync(string[] a, TextWriter output)
+    {
+        string? Value(string name) => Array.IndexOf(a, name) is var i and >= 0 && i + 1 < a.Length ? a[i + 1] : null;
+        var steps = new[] { "--hook", "--regole", "--pat", "--pat-github" }.Where(a.Contains).ToList();
+        if (steps.Count == 0) { output.WriteLine("setup: indica cosa installare: --hook, --regole, --pat, --pat-github"); return 1; }
+        var root = Value("--root") ?? DevOpsAgents.Infrastructure.Configuration.SuiteConfig.FindRoot(Directory.GetCurrentDirectory());
+        var claude = Value("--claude") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+        var installer = new DevOpsAgents.Infrastructure.Setup.Installer(claude, output);
+        try
+        {
+            if (steps.Contains("--regole")) installer.InstallSkills(root);
+            if (steps.Contains("--hook"))
+            {
+                var dll = Path.Combine(AppContext.BaseDirectory, "devops-agents-hook.dll");
+                var hook = Value("--hook-cmd") is { } h ? h.Split(' ') : File.Exists(dll) ? ["dotnet", dll] : ["devops-agents-hook"];
+                installer.InstallHooks(hook, root);
+            }
+            if (steps.Contains("--pat-github"))
+            {
+                var w = Environment.GetEnvironmentVariable("DEVOPS_AGENTS_GITHUB_TOKEN") ?? ReadSecret("Incolla il token di GitHub per lo smistatore (scrittura, non si vede): ");
+                var r = Environment.GetEnvironmentVariable("DEVOPS_AGENTS_GITHUB_TOKEN_READ") ?? ReadSecret("Incolla il token di GitHub per le sessioni (sola lettura, non si vede): ");
+                installer.SaveGitHubTokens(w, r);
+            }
+            // --pat per ultimo: apre il browser per il login di az, e un login interrotto non deve bloccare il resto
+            if (steps.Contains("--pat"))
+            {
+                var suite = DevOpsAgents.Infrastructure.Configuration.SuiteConfig.Load(root);
+                await installer.InstallPatAsync(Path.Combine(root, "config", "pat.json"), suite.Organization, new HttpClient());
+            }
+            return 0;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            output.WriteLine($"setup: {e.Message}");
+            return 1;
+        }
+    }
+
+    private static string ReadSecret(string prompt)
+    {
+        Console.Write(prompt);
+        var sb = new System.Text.StringBuilder();
+        if (Console.IsInputRedirected) return Console.ReadLine() ?? "";
+        while (true)
+        {
+            var k = Console.ReadKey(intercept: true);
+            if (k.Key == ConsoleKey.Enter) break;
+            if (k.Key == ConsoleKey.Backspace) { if (sb.Length > 0) sb.Length--; continue; }
+            sb.Append(k.KeyChar);
+        }
+        Console.WriteLine();
+        return sb.ToString();
     }
 
     private static async Task PostOk(HttpClient http, string path)

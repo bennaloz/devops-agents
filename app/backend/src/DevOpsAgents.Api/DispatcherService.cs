@@ -24,6 +24,12 @@ public sealed record ApiOptions
 
     /// <summary>Gli hook .NET (devops-agents-hook): vuoto, accanto all'API; "off": solo gli hook installati in ~/.claude/settings.json.</summary>
     public string? HookCommand { get; init; }
+    /// <summary>
+    /// D53: l'aggiornamento automatico della copia degli attrezzi (fetch, fast-forward, verifica) dal giro del supervisore. Spento di default nel
+    /// container, dove la versione e l'immagine. UpdateBuild: il comando che verifica che una versione nuova di app/ compili.
+    /// </summary>
+    public bool AutoUpdate { get; init; } = true;
+    public string? UpdateBuild { get; init; } = "dotnet build app/backend -c Release --nologo";
 
     /// <summary>Il comando del server MCP, o null se spento o non trovato.</summary>
     public IReadOnlyList<string>? McpCommand(string baseDir) => Resolve(McpServer, "devops-agents-mcp", baseDir);
@@ -74,6 +80,14 @@ public sealed class DispatcherService(Dispatcher dispatcher, IHubContext<LiveHub
             while (_errors.Count > 20) _errors.TryDequeue(out _);
             throw;
         }
+        finally { _one.Release(); }
+    }
+
+    /// <summary>D53: un'operazione con lo smistatore fermo (l'aggiornamento della suite): aspetta il giro in corso e nessun giro parte finche dura.</summary>
+    public async Task<T> RunExclusiveAsync<T>(Func<Task<T>> action, CancellationToken ct = default)
+    {
+        await _one.WaitAsync(ct);
+        try { return await action(); }
         finally { _one.Release(); }
     }
 
