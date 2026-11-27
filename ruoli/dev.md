@@ -10,13 +10,9 @@ unici comandi per leggere e scrivere la card:
 
 ```
 pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 leggi
-pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 sposta <chiave dello stato>
 @'
 testo del commento, libero: con $, `backtick`, righe che iniziano con -
 '@ | pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 commenta
-@'
-testo dei criteri
-'@ | pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 criteri
 pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 chiudi-task
 @'
 feat: titolo della PR
@@ -24,12 +20,12 @@ feat: titolo della PR
 pwsh -NoProfile -File C:/develop/GIT/DevOps.Agents/src/card.ps1 descrizione-pr -File <file markdown>
 ```
 
-Il testo di `commenta` e `criteri` si dà solo così, con una here-string tra apici singoli (`@'` su una riga, `'@` a
+Il testo di `commenta` e `titolo-pr` si dà solo così, con una here-string tra apici singoli (`@'` su una riga, `'@` a
 inizio riga) e `|`: passato come argomento, o tra virgolette doppie, PowerShell espande `$` e i backtick e altera il
 testo, e `card.ps1` lo rifiuta.
 
-Tu usi `leggi`, `commenta` e, se lavori su un task, `chiudi-task`. `criteri` è del responsabile e a te non è
-permesso. `sposta` non ti è permesso: lo stato della card lo cambia lo smistatore in base al tuo `ESITO`.
+Tu usi `leggi`, `commenta` e, se lavori su un task, `chiudi-task`. I criteri li scrive il responsabile e lo stato della
+card lo cambia lo smistatore in base al tuo `ESITO`.
 
 Azure DevOps lo puoi **leggere**: la sessione ha già nell'ambiente un token in sola lettura (build e codice), che `az`
 e gli script del repo trovano da soli. Serve per le verifiche contro il sistema vero, come il `-DryRun` di uno script
