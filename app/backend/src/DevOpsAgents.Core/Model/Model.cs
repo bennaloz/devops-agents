@@ -169,6 +169,10 @@ public sealed class CardLocalState
     public string? ReturnCommit { get; set; }
     /// <summary>D52: la Feature da chiudere quando la card di chiusura sara chiusa.</summary>
     public int? FeatureToClose { get; set; }
+    /// <summary>D52: lo stato (ne attivo ne Closed) della card di chiusura gia detto nel log, per non ripeterlo a ogni giro.</summary>
+    public string? FeatureToCloseWarned { get; set; }
+    /// <summary>La card e passata a un collega ma il worktree non si e potuto togliere: si riprova se la card torna.</summary>
+    public bool Ceded { get; set; }
     /// <summary>D52: la CI rossa della card di chiusura gia data al responsabile (build), quante di fila, e se va rilanciata dopo un on-hold.</summary>
     public string? CiRedHandled { get; set; }
     public int CiRedInARow { get; set; }

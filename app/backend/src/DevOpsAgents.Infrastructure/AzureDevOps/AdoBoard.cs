@@ -333,5 +333,13 @@ public sealed class AdoBoard(AdoClient ado, string boardProject, StateNames name
         await PatchAsync(id, ops, ct);
     }
 
+    public async Task<Card?> GetCardStateAsync(int cardId, CancellationToken ct = default)
+    {
+        try { return ToCard((await ado.GetAsync($"/_apis/wit/workitems/{cardId}?$expand=relations&api-version=7.1", ct))!); }
+        catch (HttpRequestException e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound) { return null; }
+    }
+
+    public async Task<string?> GetFeatureStateAsync(int featureId, CancellationToken ct = default) => (await GetCardStateAsync(featureId, ct))?.State;
+
     public string CardUrl(int cardId) => $"{ado.Organization}/{E(boardProject)}/_workitems/edit/{cardId}";
 }

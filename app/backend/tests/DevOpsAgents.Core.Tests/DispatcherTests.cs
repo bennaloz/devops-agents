@@ -44,6 +44,7 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
     {
         Writes.Add($"stato {id} {state}");
         var i = Cards.FindIndex(c => c.Id == id);
+        if (i < 0) { FeatureStates[id] = state; return Task.CompletedTask; }
         var old = Cards[i];
         Cards[i] = old with { State = state, Rev = old.Rev + 1 };
         History[id].Add(new StateChange(old.Rev + 1, old.State, state, Now));
@@ -109,7 +110,20 @@ internal sealed class World : IBoard, ICodeHost, ICodeHostResolver, ICiService, 
         Writes.Add(b is null ? $"worktree {c.Id}" : $"worktree {c.Id} da {b}");
         return Task.FromResult(($"feature/{c.Id}-card", $"/wt/{c.Id}"));
     }
-    public Task RemoveWorktreeAsync(AreaMapping a, string f, CancellationToken ct = default) { Writes.Add($"rimuovi {f}"); return Task.CompletedTask; }
+    public Task RemoveWorktreeAsync(AreaMapping a, string f, CancellationToken ct = default)
+    {
+        if (DirtyFolders.Contains(f)) throw new InvalidOperationException($"Il worktree {f} ha modifiche non pubblicate: lo lascio");
+        Writes.Add($"rimuovi {f}");
+        return Task.CompletedTask;
+    }
+    public HashSet<string> ExistingFolders { get; } = [];
+    public HashSet<string> DirtyFolders { get; } = [];
+    public bool Exists(string folder) => ExistingFolders.Contains(folder) || Directory.Exists(folder);
+    /// <summary>Le card fuori dalle attive (Closed, Removed) e lo stato delle Feature, per la chiusura della Feature (D52).</summary>
+    public Dictionary<int, Card> Others { get; } = new();
+    public Dictionary<int, string> FeatureStates { get; } = new();
+    public Task<Card?> GetCardStateAsync(int id, CancellationToken ct = default) => Task.FromResult(Others.GetValueOrDefault(id) ?? Cards.FirstOrDefault(c => c.Id == id));
+    public Task<string?> GetFeatureStateAsync(int id, CancellationToken ct = default) => Task.FromResult(FeatureStates.TryGetValue(id, out var st) ? st : null);
 
     // ISessionRunner
     public List<SessionRequest> Started { get; } = [];

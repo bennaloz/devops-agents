@@ -73,6 +73,10 @@ public sealed class Dispatcher(
         var state = await store.LoadAsync(ct);
         var active = (await board.GetActiveCardsAsync(ct)).ToDictionary(c => c.Id);
         if (!whatIf) await CloseFinishedSessionsAsync(state, active, Log, ct);
+        _me = await board.GetCurrentUserAsync(ct);
+        // passo 2b: le card che erano mie e ora sono di un collega; passo 2c (D52): le Feature la cui card di chiusura e Closed
+        if (_options.OnlyMine) await ReleaseCededAsync(state, active, _me, whatIf, Log, ct);
+        await CloseConcludedFeaturesAsync(state, active, whatIf, Log, ct);
 
         // D60: le Feature aperte, per la pausa e per l'ordine. Se non si leggono il giro si ferma: senza, una Feature in pausa ripartirebbe.
         var features = await board.GetOpenFeaturesAsync(areas.Select(a => a.Area).ToList(), ct);
@@ -83,7 +87,6 @@ public sealed class Dispatcher(
         var overrides = quotaStore is null ? null : await quotaStore.LoadOverridesAsync(ct);
         var featureReports = FeaturePriority.Order(features).Select(f => new FeatureReport(f.Id, f.Title, f.State, f.Rank, f.HasTag(names.PausedTag), f.Area)).ToList();
 
-        _me = await board.GetCurrentUserAsync(ct);
         var me = _options.OnlyMine ? _me : null;
         // D60: un posto libero (sessioni, repo, Test) va alla card della Feature piu in alto
         var cards = FeaturePriority.OrderCards(active.Values
@@ -124,6 +127,23 @@ public sealed class Dispatcher(
             var running = local.RunningSession is not null ? local.LastRole : null;
             try
             {
+                // tornata mia dopo una cessione la cui pulizia era fallita: il worktree vecchio non vale piu, la si riprende dal ramo remoto
+                if (local.Ceded && area is not null)
+                {
+                    if (whatIf) { Log($"card {card.Id}: tornata assegnata a me dopo una cessione: toglierei il worktree vecchio"); continue; }
+                    try
+                    {
+                        await ForgetAsync(card.Id, area, local, ct);
+                        state.Remove(card.Id);
+                        Log($"card {card.Id}: tornata assegnata a me: tolto il worktree vecchio, al prossimo giro la riprendo dal ramo remoto");
+                    }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        await PutOnHoldAsync(card, local, $"La card e tornata assegnata a me, ma il worktree lasciato quando era passata a un altro non si puo togliere: {e.Message}", null, null, ct);
+                    }
+                    reports.Add(Report(card, [], null, null, null));
+                    continue;
+                }
                 if (area is null)
                 {
                     reports.Add(Report(card, [], new BlockReason("areaNonMappata", Detail: card.Area), running, null));
@@ -172,6 +192,88 @@ public sealed class Dispatcher(
         if (!whatIf) await RemoveOrphanEnvironmentsAsync(state, cards, Log, ct);
         if (!whatIf) await store.SaveAsync(state, ct);
         return new RoundReport(started, clock.Now, whatIf, reports, log, false, featureReports, quota);
+    }
+
+    /// <summary>
+    /// Passo 2b: le card mie nello stato e ora assegnate a un altro. Il worktree (e prima l'ambiente di collaudo) si toglie solo se pulito, poi si
+    /// dimentica la card: se torna mia si riprende dal ramo remoto. Sulla card non si scrive niente: non e piu mia. Senza assegnatario e ferma,
+    /// non ceduta. Una pulizia che non riesce si segna (Ceded) e si riprova se la card torna.
+    /// </summary>
+    private async Task ReleaseCededAsync(Dictionary<int, CardLocalState> state, IReadOnlyDictionary<int, Card> active, Person me, bool whatIf, Action<string> log, CancellationToken ct)
+    {
+        foreach (var (id, local) in state.ToList())
+        {
+            if (!active.TryGetValue(id, out var card) || card.AssignedTo is null || card.AssignedTo.Id == me.Id) continue;
+            if (local.RunningSession is not null || local.Ceded) continue;
+            var who = card.AssignedTo.Name;
+            if (whatIf) { log($"card {id}: ora e assegnata a {who}: toglierei il worktree e lo stato locale"); continue; }
+            try
+            {
+                if (FindArea(card) is not { } area) throw new InvalidOperationException($"l'area '{card.Area}' non e nella mappa");
+                await ForgetAsync(id, area, local, ct);
+                foreach (var m in local.MentorRuns)
+                    log($"card {id}: ora e assegnata a {who}: il mentore {m} e ancora aperto e lo lascio andare, i suoi consumi non arriveranno sulla card");
+                state.Remove(id);
+                log($"card {id}: ora e assegnata a {who}: tolti worktree e stato locale");
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                local.Ceded = true;
+                log($"card {id}: ora e assegnata a {who}, ma il worktree resta: {e.Message}");
+            }
+        }
+    }
+
+    /// <summary>L'ambiente di collaudo (sulla mia macchina) e il worktree della card: prima l'ambiente, e se non si butta il worktree resta.</summary>
+    private async Task ForgetAsync(int id, AreaMapping area, CardLocalState local, CancellationToken ct)
+    {
+        if ((local.TestSlot is not null || local.TestProject is not null) && testEnvironments is not null
+            && !await testEnvironments.RemoveAsync(local.TestProject ?? $"card-{id}", local.Folder, ct))
+            throw new InvalidOperationException("l'ambiente di collaudo non si butta (docker non risponde o ha dato un errore)");
+        if (local.Folder is { } folder && workspace.Exists(folder)) await workspace.RemoveWorktreeAsync(area, folder, ct);
+    }
+
+    /// <summary>
+    /// Passo 2c (D52): la card di chiusura unita (Feature Resolved) ricorda la Feature da chiudere; quando non e piu fra le attive si rilegge: Closed,
+    /// la Feature passa Closed (se non e gia Closed o Removed); Removed, non si chiude piu niente; in un altro stato lo si dice una volta. Un
+    /// errore non ferma il giro: si riprova al prossimo.
+    /// </summary>
+    private async Task CloseConcludedFeaturesAsync(Dictionary<int, CardLocalState> state, IReadOnlyDictionary<int, Card> active, bool whatIf, Action<string> log, CancellationToken ct)
+    {
+        foreach (var (id, local) in state.ToList())
+        {
+            if (local.FeatureToClose is not { } featureId || active.ContainsKey(id)) continue;
+            try
+            {
+                var c = await board.GetCardStateAsync(id, ct);
+                var key = c is null ? null : names.KeyOf(c.State);
+                if (key is not (K.Closed or K.Removed))
+                {
+                    if (c is not null && local.FeatureToCloseWarned != c.State)
+                    {
+                        if (!whatIf) local.FeatureToCloseWarned = c.State;
+                        log($"card {id}: e {c.State}, non Closed ne attiva: la Feature {featureId} resta com'e finche la card non e Closed");
+                    }
+                    continue;
+                }
+                if (whatIf) { log($"card {id}: e {c!.State}: {(key == K.Closed ? $"chiuderei la Feature {featureId}" : $"smetterei di aspettare la chiusura della Feature {featureId}")}"); continue; }
+                if (key == K.Closed)
+                {
+                    var fs = await board.GetFeatureStateAsync(featureId, ct);
+                    if (string.Equals(fs, names.Get("featureRimossa"), StringComparison.OrdinalIgnoreCase) || string.Equals(fs, names.Get("featureChiusa"), StringComparison.OrdinalIgnoreCase))
+                        log($"card {id}: Closed, la Feature {featureId} e gia {fs}: non la tocco");
+                    else
+                    {
+                        await board.SetStateAsync(featureId, names["featureChiusa"], ct);
+                        log($"card {id}: Closed, la Feature {featureId} e ora {names["featureChiusa"]}");
+                    }
+                }
+                else log($"card {id}: Removed, la Feature {featureId} non si chiude piu da qui");
+                local.FeatureToClose = null;
+                local.FeatureToCloseWarned = null;
+            }
+            catch (Exception e) when (e is not OperationCanceledException) { log($"card {id}: la Feature {featureId} non si e potuta chiudere, riprovo al giro dopo: {e.Message}"); }
+        }
     }
 
     private CardReport Report(Card c, IReadOnlyList<string> actions, BlockReason? reason, string? running, string? error) =>

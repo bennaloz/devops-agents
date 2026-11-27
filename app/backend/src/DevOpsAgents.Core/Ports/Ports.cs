@@ -29,6 +29,10 @@ public interface IBoard
     /// <summary>D60: l'ordine del backlog (Microsoft.VSTS.Common.StackRank).</summary>
     Task SetRankAsync(int workItemId, double rank, CancellationToken ct = default);
     string CardUrl(int cardId);
+    /// <summary>D52: una card per id, anche fuori dalle attive (Closed, Removed); null se non c'e. Serve a chiudere la Feature dopo la card di chiusura.</summary>
+    Task<Card?> GetCardStateAsync(int cardId, CancellationToken ct = default) => Task.FromResult<Card?>(null);
+    /// <summary>D52: lo stato di una Feature (anche Closed o Removed); null se non si sa.</summary>
+    Task<string?> GetFeatureStateAsync(int featureId, CancellationToken ct = default) => Task.FromResult<string?>(null);
 }
 
 /// <summary>Dove sta il codice di un'area: Azure Repos o GitHub. Stessi oggetti per le due sorgenti.</summary>
