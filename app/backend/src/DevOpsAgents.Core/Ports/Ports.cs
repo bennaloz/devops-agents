@@ -92,7 +92,20 @@ public interface IWorkspace
 /// dallo smistatore; morta: il processo non c'e piu).
 /// </summary>
 public sealed record SessionResult(string? Outcome, string? Text, bool HitTokenLimit = false, DateTimeOffset? LimitResetsAt = null, QuotaInfo? Quota = null,
-    bool Failed = false, string? NoResultCause = null);
+    bool Failed = false, string? NoResultCause = null, IReadOnlyList<string>? Lessons = null);
+
+/// <summary>
+/// D46: una riga del registro dell'apprendimento: un blocco o un bivio, un on-hold, una correzione (il mentore istruisce un ruolo), una lezione
+/// applicata (riga LEZIONE: del ruolo), con l'esito della sessione in cui nasce.
+/// </summary>
+public sealed record LearningEntry(int Card, string? Repo, string Kind, string? Role, string? Reason = null, string? Lesson = null, string? Outcome = null);
+
+/// <summary>Il registro dell'apprendimento (registro-apprendimento.jsonl): solo aggiunta, lo scrivono lo smistatore e il mentore.</summary>
+public interface ILearningLog
+{
+    void Add(LearningEntry entry, DateTimeOffset when);
+    IReadOnlyList<System.Text.Json.Nodes.JsonNode?> Read();
+}
 
 /// <summary>Le sessioni dei ruoli (claude -p): avvio e controllo. Non decide niente.</summary>
 public interface ISessionRunner

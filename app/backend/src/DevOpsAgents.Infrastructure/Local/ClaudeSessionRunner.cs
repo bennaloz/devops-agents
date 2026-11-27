@@ -40,6 +40,7 @@ public sealed record ClaudeRunnerOptions
 public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, ClaudeRunnerOptions options, IMemorySource? memory = null) : ISessionRunner
 {
     private static readonly Regex Esito = new(@"(?m)^[\s`*]*ESITO=([^\s`*]+)[\s`*]*$", RegexOptions.Compiled);
+    private static readonly Regex Lezione = new(@"(?m)^[\s`*]*LEZIONE:\s*([A-Za-z]+-\d+)(?:\s*\(in prova\))?[\s`*]*$", RegexOptions.Compiled);
     private readonly ConcurrentDictionary<string, Process> _processes = new();
     // chi copia l'uscita del processo nel file: si aspetta prima di leggere l'esito, o l'ultima riga puo mancare
     private readonly ConcurrentDictionary<string, Task> _pumps = new();
@@ -214,7 +215,9 @@ public sealed class ClaudeSessionRunner(SuiteConfig config, TokenStore tokens, C
         var subtypeKo = final?["subtype"] is JsonValue st && st.TryGetValue<string>(out var sub) && sub != "success";
         var denied = final?["permission_denials"] is JsonArray d && d.Count > 0;
         var failed = (isError || subtypeKo || (denied && outcome is null)) && reset is null;
-        return new SessionResult(outcome, text, reset is not null, reset, quota, failed);
+        // D46: le lezioni che il ruolo dice di aver seguito, una riga LEZIONE: <id> ciascuna (con l'etichetta in prova copiata dal titolo)
+        var lessons = Lezione.Matches(text).Select(x => x.Groups[1].Value).Distinct().ToList();
+        return new SessionResult(outcome, text, reset is not null, reset, quota, failed, Lessons: lessons);
     }
 
     private static double? Utilization(JsonNode? w) => w?["utilization"] is JsonValue v && v.TryGetValue<double>(out var d) ? d : null;

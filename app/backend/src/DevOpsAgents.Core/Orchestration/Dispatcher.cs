@@ -49,8 +49,17 @@ public sealed class Dispatcher(
     DispatcherOptions? options = null,
     ISettingsStore? settingsStore = null,
     IQuotaStore? quotaStore = null,
-    ITestEnvironments? testEnvironments = null)
+    ITestEnvironments? testEnvironments = null,
+    ILearningLog? learning = null)
 {
+    /// <summary>D46: una riga nel registro dell'apprendimento. Il registro e un di piu: se non si scrive il giro prosegue.</summary>
+    private void Learn(int card, string? repo, string kind, string? role, string? reason = null, string? lesson = null, string? outcome = null)
+    {
+        if (learning is null) return;
+        try { learning.Add(new LearningEntry(card, repo, kind, role, reason, lesson, outcome), clock.Now); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { logger.LogWarning("card {Card}: riga '{Kind}' non scritta nel registro dell'apprendimento: {Error}", card, kind, e.Message); }
+    }
+
     private readonly DispatcherOptions _options = options ?? new DispatcherOptions();
     private const string DeployMark = "Parametri del deploy in Test:";
     /// <summary>Il tetto della descrizione di una PR su Azure DevOps (4000) meno la firma che aggiunge il provider.</summary>
@@ -338,6 +347,10 @@ public sealed class Dispatcher(
             }
 
             if (s is not null) { s.End = clock.Now; s.Outcome = result.Failed || result.HitTokenLimit ? null : result.Outcome; s.Text = result.Text; }
+            // D46: un blocco o un bivio e il segno che al ruolo mancava qualcosa; le lezioni seguite portano l'esito della sessione
+            var repo = card is null ? null : FindArea(card)?.Repo;
+            if (!result.Failed && result.Outcome is "bloccato" or "bivio") Learn(id, repo, "blocco", role, $"{result.Outcome}: {result.Text}");
+            foreach (var lesson in result.Lessons ?? []) Learn(id, repo, "lezioneApplicata", role, "", lesson, result.Outcome);
             if (result.HitTokenLimit)
             {
                 local.WaitingFor = "quota";
@@ -380,6 +393,7 @@ public sealed class Dispatcher(
         local.OnHoldIndications = indications;
         local.HoldCause = cause;
         local.ResumedBySystem = false;
+        Learn(card.Id, FindArea(card)?.Repo, "onHold", local.LastRole, reason);
     }
 
     // ---- istantanea --------------------------------------------------------------------------------------------------
@@ -742,6 +756,7 @@ public sealed class Dispatcher(
             var id = await sessions.StartAsync(new SessionRequest("mentore", card.Id, area, folder, message, null, false, null, null), ct);
             local.MentorRuns.Add(id);
             local.MentorsDone.Add(m.Key);
+            foreach (var role in m.Roles) Learn(card.Id, area.Repo, "correzione", role, $"{m.Trigger}: corretto da {m.Corrector}");
             logger.LogInformation("card {Card}: lanciato il mentore {Id} ({Trigger}, per {Roles})", card.Id, id, m.Trigger, string.Join(", ", m.Roles));
         }
         catch (Exception e) when (e is not OperationCanceledException)

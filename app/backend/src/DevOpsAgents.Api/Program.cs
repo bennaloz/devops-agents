@@ -78,7 +78,9 @@ builder.Services.AddSingleton(sp => new Dispatcher(
     sp.GetRequiredService<IBoard>(), sp.GetRequiredService<ICodeHostResolver>(), sp.GetRequiredService<ICiService>(), sp.GetRequiredService<IWorkspace>(),
     sp.GetRequiredService<ISessionRunner>(), sp.GetRequiredService<IStateStore>(), sp.GetRequiredService<DecisionEngine>(), suite.Names, suite.Limits,
     suite.Areas, sp.GetRequiredService<IClock>(), sp.GetRequiredService<ILogger<Dispatcher>>(), new DispatcherOptions { OnlyMine = options.OnlyMine, SuiteRoot = root, MentorFolders = Path.Combine(dataDir, "mentori") },
-    sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IQuotaStore>(), sp.GetService<ITestEnvironments>()));
+    sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IQuotaStore>(), sp.GetService<ITestEnvironments>(), sp.GetRequiredService<ILearningLog>()));
+// D46: il registro dell'apprendimento (la demo nella sua sottocartella)
+builder.Services.AddSingleton<ILearningLog>(new JsonlLearningLog(options.Mode == "live" ? dataDir : Path.Combine(dataDir, "demo")));
 builder.Services.AddSingleton(sp => new DispatcherService(sp.GetRequiredService<Dispatcher>(), sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<LiveHub>>(),
     options, TimeSpan.FromMinutes(Math.Max(1, suite.Limits.IntervalMinutes)), sp.GetRequiredService<ILogger<DispatcherService>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());

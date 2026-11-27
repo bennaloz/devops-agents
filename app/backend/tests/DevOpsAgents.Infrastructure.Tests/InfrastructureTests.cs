@@ -419,6 +419,28 @@ public class LocalTests
     }
 
     [Fact]
+    public void Le_lezioni_seguite_sono_le_righe_LEZIONE_anche_con_l_etichetta_in_prova()
+    {
+        var log = Path.GetTempFileName();
+        File.WriteAllLines(log, ["""{"type":"result","result":"fatto\nLEZIONE: dev-003\n**LEZIONE: dev-007 (in prova)**\nLEZIONE: dev-003\nnon LEZIONE: dev-9\nESITO=finito"}"""]);
+        var r = ClaudeSessionRunner.ParseResult(log);
+        Assert.Equal(["dev-003", "dev-007"], r.Lessons!);
+    }
+
+    [Fact]
+    public void Il_registro_dell_apprendimento_e_una_riga_JSON_per_evento_con_le_chiavi_del_PowerShell()
+    {
+        var dir = Directory.CreateTempSubdirectory("dati").FullName;
+        var l = new JsonlLearningLog(dir);
+        l.Add(new LearningEntry(42, "Acme.AI", "lezioneApplicata", "dev", "", "dev-003", "finito"), new DateTimeOffset(2026, 11, 26, 9, 0, 0, TimeSpan.Zero));
+        File.AppendAllText(l.Path, "rotta\n");
+        var rows = l.Read();
+        var row = Assert.Single(rows)!;
+        Assert.Equal(("2026-11-26T09:00:00.0000000Z", 42, "lezioneApplicata", "dev-003", "finito"),
+            (row["data"]!.GetValue<string>(), row["card"]!.GetValue<int>(), row["tipo"]!.GetValue<string>(), row["lezione"]!.GetValue<string>(), row["esito"]!.GetValue<string>()));
+    }
+
+    [Fact]
     public void L_esito_e_l_ultima_riga_ESITO_dell_evento_result_anche_tra_backtick()
     {
         var log = Path.GetTempFileName();

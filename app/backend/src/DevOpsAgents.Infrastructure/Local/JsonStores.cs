@@ -90,3 +90,41 @@ public sealed class JsonQuotaStore(string dataDir) : IQuotaStore
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// D46: registro-apprendimento.jsonl nella cartella dati, una riga JSON per evento con le chiavi della versione PowerShell (data, card, repo,
+/// tipo, ruolo, motivo, lezione, esito). Solo aggiunta: lo scrivono processi diversi. Una riga che non si legge si salta.
+/// </summary>
+public sealed class JsonlLearningLog(string dataDir) : ILearningLog
+{
+    public string Path => System.IO.Path.Combine(dataDir, "registro-apprendimento.jsonl");
+    private static readonly object Gate = new();
+
+    public void Add(LearningEntry e, DateTimeOffset when)
+    {
+        var line = new JsonObject
+        {
+            ["data"] = when.UtcDateTime.ToString("o"), ["card"] = e.Card, ["repo"] = e.Repo, ["tipo"] = e.Kind, ["ruolo"] = e.Role,
+            ["motivo"] = e.Reason, ["lezione"] = e.Lesson, ["esito"] = e.Outcome,
+        }.ToJsonString();
+        lock (Gate)
+        {
+            Directory.CreateDirectory(dataDir);
+            File.AppendAllText(Path, line + "\n", new System.Text.UTF8Encoding(false));
+        }
+    }
+
+    public IReadOnlyList<JsonNode?> Read()
+    {
+        if (!File.Exists(Path)) return [];
+        using var fs = new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var sr = new StreamReader(fs, System.Text.Encoding.UTF8);
+        var rows = new List<JsonNode?>();
+        foreach (var l in sr.ReadToEnd().Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(l)) continue;
+            try { rows.Add(JsonNode.Parse(l)); } catch (System.Text.Json.JsonException) { }
+        }
+        return rows;
+    }
+}
