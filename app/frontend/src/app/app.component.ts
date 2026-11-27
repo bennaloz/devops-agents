@@ -1,7 +1,9 @@
 import { DatePipe } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { ApiService } from './api.service';
-import { CardReport, describeReason } from './models';
+import { CardReport, RunInfo, describeReason, describeUpdate } from './models';
+
+export type Tab = 'board' | 'pipeline' | 'apprendimento' | 'suite' | 'ufficio';
 
 interface Column {
   key: string;
@@ -22,6 +24,47 @@ export class AppComponent implements OnInit {
   readonly selected = signal<number | null>(null);
   readonly showLog = signal(true);
   readonly describeReason = describeReason;
+  readonly describeUpdate = describeUpdate;
+  readonly tabs: { key: Tab; name: string }[] = [
+    { key: 'board', name: 'Board' }, { key: 'pipeline', name: 'Pipeline' }, { key: 'apprendimento', name: 'Apprendimento' },
+    { key: 'suite', name: 'Suite' }, { key: 'ufficio', name: 'Ufficio' },
+  ];
+  readonly tab = signal<Tab>('board');
+
+  /** Apre una scheda e ne rilegge il dato (le schede diverse dalla board si leggono solo quando servono). */
+  async open(t: Tab): Promise<void> {
+    this.tab.set(t);
+    if (t === 'pipeline') await this.api.loadPipelines();
+    if (t === 'apprendimento') await this.api.loadLearning();
+    if (t === 'suite') await this.api.loadUpdate();
+  }
+
+  /** I run da mostrare per primi: in attesa di approvazione, poi in coda, poi in corso. */
+  readonly liveRuns = computed<RunInfo[]>(() => {
+    const p = this.api.pipelines();
+    if (!p?.read) return [];
+    const order = { inAttesa: 0, inCoda: 1, inCorso: 2, concluso: 3 } as const;
+    return [...p.orchestrators.filter(r => r.status !== 'concluso'), ...p.active].sort((a, b) => order[a.status] - order[b.status]);
+  });
+
+  reasonOf(id: number): string | undefined {
+    return this.api.pipelines()?.reasons?.[String(id)];
+  }
+
+  /** I totali per ruolo dell'apprendimento, sulle settimane della finestra. */
+  readonly learningTotals = computed(() => {
+    const m = new Map<string, { blocks: number; onHold: number; corrections: number; lessonsApplied: number }>();
+    for (const r of this.api.learning()?.rows ?? []) {
+      const t = m.get(r.role) ?? { blocks: 0, onHold: 0, corrections: 0, lessonsApplied: 0 };
+      t.blocks += r.blocks; t.onHold += r.onHold; t.corrections += r.corrections; t.lessonsApplied += r.lessonsApplied;
+      m.set(r.role, t);
+    }
+    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([role, t]) => ({ role, ...t }));
+  });
+
+  requestUpdate(): Promise<void> {
+    return this.act(() => this.api.requestUpdate());
+  }
 
   /** Una colonna per stato del flusso, nell'ordine del flusso; le card di stati fuori elenco in fondo. */
   readonly columns = computed<Column[]>(() => {

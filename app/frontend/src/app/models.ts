@@ -124,3 +124,50 @@ export function describeReason(r: BlockReason): string {
     default: return r.type;
   }
 }
+
+/** D51: un run di pipeline (supervisore, sezione Pipeline). */
+export interface RunInfo {
+  id: number; project: string; pipeline: string; branch: string; author?: string; status: 'inCoda' | 'inCorso' | 'inAttesa' | 'concluso';
+  stage?: string; start?: string; end?: string; result?: string; definitionId: number; kind: string; url?: string; orchestrator: boolean;
+  components?: string[]; waiting?: string; agent?: string; pool?: string;
+}
+export interface AgentPoolInfo { pool: string; agents: { name: string; online: boolean; enabled: boolean; jobPipeline?: string; jobUrl?: string }[]; }
+export interface PipelineView {
+  read: boolean; error?: string; active: RunInfo[]; orchestrators: RunInfo[]; failed: RunInfo[]; errors: string[];
+  pools: AgentPoolInfo[]; agentsRead: boolean; agentErrors: string[]; reasons: Record<string, string>;
+}
+
+/** D46: il riassunto dell'apprendimento. */
+export interface LearningSummary {
+  window: string; lessons: number;
+  rows: { week: string; monday: string; role: string; blocks: number; onHold: number; corrections: number; lessonsApplied: number }[];
+  avoided: { role: string; lesson: string; cards: number[] }[];
+}
+
+/** D53: lo stato dell'aggiornamento della suite (aggiornamento.json, con le chiavi della versione PowerShell). */
+export interface UpdateStatus {
+  spento?: boolean; canale?: string; automatico?: boolean; riavvioNecessario?: boolean;
+  installata?: { canale: string; hash: string; data?: string }; disponibile?: { canale: string; hash: string; data?: string } | null;
+  ultimoControllo?: string; erroreControllo?: string | null;
+  ultimoEsito?: { esito: string; quando?: string; errore?: string; file?: string[]; elenco?: { nome: string; richiesta: string; trovata?: string }[]; sessioni?: number };
+  prInArrivo?: { numero: number; titolo: string; url?: string }[];
+}
+
+/** La frase dell'esito dell'aggiornamento, come il riquadro Suite della vista. */
+export function describeUpdate(u: UpdateStatus): string {
+  const e = u.ultimoEsito;
+  if (!e) return 'nessun controllo ancora fatto dal supervisore';
+  switch (e.esito) {
+    case 'aggiornato': return u.disponibile ? 'aggiornato, ma c\'e gia una versione piu nuova' : 'aggiornata all\'ultima versione';
+    case 'daAggiornare': return 'c\'e una versione nuova: l\'aggiornamento automatico e spento, aggiorna a mano';
+    case 'inAttesaSessioni': return `versione nuova in attesa: ${e.sessioni ?? 0} sessioni di agenti in corso`;
+    case 'modificheLocali': return `la copia ha modifiche locali che non so spostare: ${(e.file ?? []).join(', ')}`;
+    case 'requisitiMancanti': return `requisiti mancanti: ${(e.elenco ?? []).map(r => `${r.nome} ${r.richiesta} (c'e ${r.trovata ?? 'niente'})`).join(', ')}`;
+    case 'fallitoTornatoIndietro': return `aggiornamento fallito, tornata alla versione di prima: ${e.errore ?? ''}`;
+    case 'copiaAvanti': return 'la copia ha commit che origine non ha: niente da prendere';
+    case 'divergente': return 'la copia e divergente da origine: va sistemata a mano';
+    case 'ramoCanaleDivergente': return 'il ramo locale del canale ha commit che origine non ha: va sistemato a mano';
+    case 'errore': return `errore: ${e.errore ?? ''}`;
+    default: return e.esito;
+  }
+}

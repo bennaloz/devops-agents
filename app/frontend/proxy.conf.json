@@ -1,4 +1,6 @@
 {
   "/api": { "target": "http://localhost:18800", "secure": false },
-  "/hub": { "target": "http://localhost:18800", "secure": false, "ws": true }
+  "/hub": { "target": "http://localhost:18800", "secure": false, "ws": true },
+  "/ufficio.html": { "target": "http://localhost:18800", "secure": false },
+  "/ufficio.json": { "target": "http://localhost:18800", "secure": false }
 }

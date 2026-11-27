@@ -2,7 +2,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
 import { firstValueFrom } from 'rxjs';
-import { FeatureReport, RoundReport, Status, SuiteInfo, SupervisorProblem } from './models';
+import { FeatureReport, LearningSummary, PipelineView, RoundReport, Status, SuiteInfo, SupervisorProblem, UpdateStatus } from './models';
 
 /** Le chiamate all'API e gli aggiornamenti live (SignalR): ogni giro finito arriva da solo. */
 @Injectable({ providedIn: 'root' })
@@ -18,6 +18,9 @@ export class ApiService {
   readonly features = signal<FeatureReport[]>([]);
   readonly problems = signal<SupervisorProblem[]>([]);
   readonly live = signal(false);
+  readonly pipelines = signal<PipelineView | null>(null);
+  readonly learning = signal<LearningSummary | null>(null);
+  readonly update = signal<UpdateStatus | null>(null);
   readonly error = signal<string | null>(null);
 
   async load(): Promise<void> {
@@ -88,6 +91,24 @@ export class ApiService {
     } catch (e: any) {
       this.error.set(e?.error?.error ?? `Il comando non e arrivato: ${e?.message ?? e}`);
     }
+  }
+
+  /** Le sezioni lette a richiesta (scheda aperta): pipeline, apprendimento, aggiornamento della suite. */
+  async loadPipelines(): Promise<void> {
+    try { this.pipelines.set(await firstValueFrom(this.http.get<PipelineView>('/api/pipelines'))); } catch (e: any) { this.error.set(`Pipeline non lette: ${e?.message ?? e}`); }
+  }
+
+  async loadLearning(): Promise<void> {
+    try { this.learning.set(await firstValueFrom(this.http.get<LearningSummary>('/api/learning'))); } catch (e: any) { this.error.set(`Apprendimento non letto: ${e?.message ?? e}`); }
+  }
+
+  async loadUpdate(): Promise<void> {
+    try { this.update.set(await firstValueFrom(this.http.get<UpdateStatus>('/api/update'))); } catch (e: any) { this.error.set(`Stato della suite non letto: ${e?.message ?? e}`); }
+  }
+
+  async requestUpdate(): Promise<void> {
+    await this.post('/api/update', () => {});
+    await this.loadUpdate();
   }
 
   async connect(): Promise<void> {

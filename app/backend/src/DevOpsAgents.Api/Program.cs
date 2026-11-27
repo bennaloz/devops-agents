@@ -62,6 +62,7 @@ if (options.Mode == "live")
 else
 {
     builder.Services.AddSingleton(sp => new DemoWorld(suite.Names, suite.Areas, sp.GetRequiredService<IClock>()));
+    builder.Services.AddSingleton<IPipelineReader, DemoPipelines>();
     builder.Services.AddSingleton<IBoard>(sp => sp.GetRequiredService<DemoWorld>());
     builder.Services.AddSingleton<ICodeHostResolver>(sp => sp.GetRequiredService<DemoWorld>());
     builder.Services.AddSingleton<ICiService>(sp => sp.GetRequiredService<DemoWorld>());
@@ -110,6 +111,22 @@ if (options.Mode == "live" && options.AutoUpdate)
 
 var app = builder.Build();
 app.UseCors();
+// l'ufficio degli agenti (il gioco di src/ufficio): la pagina con il dato dentro, e il dato che rilegge da sola. Sola lettura.
+async Task<System.Text.Json.Nodes.JsonObject> OfficeModelAsync(IServiceProvider sp, CancellationToken ct)
+{
+    var svc = sp.GetRequiredService<DispatcherService>();
+    var state = await sp.GetRequiredService<IStateStore>().LoadAsync(ct);
+    var quota = await sp.GetRequiredService<IQuotaStore>().LoadAsync(ct);
+    var now = sp.GetRequiredService<IClock>().Now;
+    var block = DecisionEngine.QuotaBlock(new DecisionContext(suite.Names, suite.Limits, now, Quota: quota, QuotaOverrides: await sp.GetRequiredService<IQuotaStore>().LoadOverridesAsync(ct)));
+    return DevOpsAgents.Core.View.Office.Model(suite.Roles.Keys.Where(r => r != "supervisore").ToList(), svc.Last, state, now, quota, block, suite.Limits.WeeklyQuotaThreshold,
+        svc.Running, svc.NextRun, svc.Errors.Count > 0 && svc.Errors[^1].When > (svc.Last?.Finished ?? DateTimeOffset.MinValue) ? svc.Errors[^1].Error : null);
+}
+var officeFolder = Path.Combine(root, "src", "ufficio");
+app.MapGet("/ufficio.json", async (IServiceProvider sp, CancellationToken ct) => Results.Text(DevOpsAgents.Core.View.Office.Json(await OfficeModelAsync(sp, ct)), "application/json"));
+app.MapGet("/ufficio.html", async (IServiceProvider sp, CancellationToken ct) => File.Exists(Path.Combine(officeFolder, "ufficio.html"))
+    ? Results.Content(DevOpsAgents.Core.View.Office.Page(officeFolder, await OfficeModelAsync(sp, ct)), "text/html; charset=utf-8")
+    : Results.NotFound("manca src/ufficio nella copia degli attrezzi"));
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -201,6 +218,17 @@ api.MapPost("/update", (HttpRequest req, IServiceProvider sp) =>
 
 // D51: le pipeline lette dall'ultimo giro del supervisore (la sezione Pipeline della dashboard)
 api.MapGet("/pipelines", (SupervisorService s) => s.LastPipelines is { } p ? Results.Ok(p) : Results.Ok(new { read = false, error = "nessuna lettura ancora (modalita demo o primo giro del supervisore)" }));
+
+// D46: l'apprendimento: per ruolo e settimana blocchi, on-hold, correzioni e lezioni applicate, e le lezioni che hanno evitato un blocco
+api.MapGet("/learning", (ILearningLog log, SuiteConfig s, IClock clock) =>
+{
+    var lessons = new List<DevOpsAgents.Core.Memory.LessonEntry>();
+    var folder = Path.Combine(s.Root, "memoria");
+    if (Directory.Exists(folder))
+        foreach (var f in Directory.GetFiles(folder, "*.md", SearchOption.AllDirectories)) lessons.AddRange(DevOpsAgents.Core.Memory.MemoryRules.Read(File.ReadAllText(f)));
+    var summary = DevOpsAgents.Core.Memory.MemoryRules.Summarize(log.Read(), clock.Now, DevOpsAgents.Core.Memory.MemoryRules.KnownOrigins(lessons));
+    return new { summary.Window, summary.Rows, summary.Avoided, Lessons = lessons.Count };
+});
 
 api.MapGet("/config", (SuiteConfig s) => new
 {
