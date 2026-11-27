@@ -10,6 +10,7 @@
   "inProvaUmana": "Human test",
   "daUnire": "Ready to merge",
   "inFeature": "In feature branch",
+  "daDeployTest": "Ready to deploy (test)",
   "daRilasciare": "Ready to release",
   "inRilascio": "Releasing",
   "chiusa": "Closed",

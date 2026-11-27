@@ -394,8 +394,8 @@ Describe 'Get-Azioni: tabella dei casi' {
             @{ N = '28 Ready to merge, PR aperta: si chiede il completamento, la card resta qui'
                Att = @(@{ Tipo = 'CompletaPr'; Rev = 7 })
                Mod = { param($i, $c) $i.Pr = [pscustomobject]@{ Id = 3; Stato = 'active'; Validazione = 'verde'; BuildId = 58; UrlLog = $null } } }
-            @{ N = '28b Ready to merge, PR completata: la card passa in Ready to release'
-               Att = @(@{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' })
+            @{ N = '28b Ready to merge, PR completata: la card passa in Ready to deploy (test) (D61)'
+               Att = @(@{ Tipo = 'SpostaCard'; Stato = 'daDeployTest' })
                Mod = { param($i, $c) $i.Pr = [pscustomobject]@{ Id = 3; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null } } }
             @{ N = '28c Ready to merge, completamento gia chiesto e la PR e ancora aperta: on-hold con il motivo'
                Att = @(@{ Tipo = 'MettiInAttesa'; Per = 'limite' })
@@ -590,6 +590,15 @@ Describe 'Get-AttivitaOperatore: cosa aspetta da una persona una card che nessun
         $i = script:New-Ist 'daRilasciare'; $i.StatoCard.prId = 5
         $r = script:Att $i
         $r.Attivita | Should -Be 'rilascia'; $r.Ferma | Should -BeFalse
+    }
+    It 'D61: Ready to deploy (test): aspetta il deploy di develop, che non ferma nessuno' {
+        $i = script:New-Ist 'daDeployTest'; $i.StatoCard.prId = 5
+        $r = script:Att $i
+        $r.Attivita | Should -Be 'deployTest'; $r.Ferma | Should -BeFalse
+    }
+    It 'D61: Ready to deploy (test) senza deploy in Test (nessuna pipeline): nessuna attivita, passa da sola' {
+        $i = script:New-Ist 'daDeployTest'; $i.StatoCard.prId = 5; $i.Voce = [pscustomobject]@{ repo = 'Acme.AI'; componente = 'stime' }
+        script:Att $i | Should -BeNullOrEmpty
     }
     It 'Ready to release con un task aggiunto: torna a dev, non e un rilascio' {
         $i = script:New-Ist 'daRilasciare'; $i.StatoCard.prId = 5; script:Set-Task $i @{ 61 = 'aperto' }
@@ -2440,9 +2449,9 @@ Describe 'D52: le card della funzionalita' {
             script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'SpostaCard'; Stato = 'inFeature' })
         }
 
-        It 'una card isolata a PR completata va ancora in Ready to release' {
+        It 'una card isolata a PR completata va ancora in develop: Ready to deploy (test) (D61)' {
             $i = script:Con-PrCompletata (script:New-Ist 'daUnire' 'inCollaudo' 'u-titolare')
-            script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' })
+            script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'SpostaCard'; Stato = 'daDeployTest' })
         }
 
         It 'una PR in conflitto con il ramo della funzionalita torna a dev anche mentre la chiusura e in prova' {
@@ -2498,6 +2507,16 @@ Describe 'D52: le card della funzionalita' {
             script:Test-Azioni @($d.Azioni) @(@{ Tipo = 'RimuoviWorktree' })
             $d.Motivo | Should -BeNullOrEmpty
         }
+        It 'D61: con la chiusura in Ready to deploy (test) la card la segue li, non in Ready to release' {
+            $i = script:Con-PrCompletata (script:Set-Funz (script:New-Ist 'inFeature' 'daUnire' 'u-titolare') -StatoChiusura 'daDeployTest')
+            script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'RimuoviWorktree' }, @{ Tipo = 'SpostaCard'; Stato = 'daDeployTest' })
+        }
+        It 'D61: in Ready to deploy (test) segue la chiusura: aspetta finche la chiusura aspetta, poi Ready to release (<S>)' -ForEach @(
+            @{ S = 'daDeployTest'; Att = @() }, @{ S = 'daRilasciare'; Att = @(@{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' }) }, @{ S = 'chiusa'; Att = @(@{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' }) }
+        ) {
+            $i = script:Senza-Locale (script:Con-PrCompletata (script:Set-Funz (script:New-Ist 'daDeployTest' 'inFeature' 'u-titolare') -StatoChiusura $S)); $i.StatoCard.prId = 9
+            script:Test-Azioni @(Get-Azioni -Istantanea $i -Contesto (script:New-Contesto)) $Att
+        }
         It 'con la chiusura in <S> la card passa in Ready to release (dopo aver tolto il worktree, se c e)' -ForEach @(
             @{ S = 'daRilasciare' }, @{ S = 'inRilascio' }, @{ S = 'chiusa' }
         ) {
@@ -2541,10 +2560,10 @@ Describe 'D52: le card della funzionalita' {
             $i.StatoCard.destinazione = $null
             script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'SpostaCard'; Stato = 'inDeployTest' })
         }
-        It 'la stessa card in Ready to merge a PR completata va in Ready to release, non In feature branch' {
+        It 'la stessa card in Ready to merge a PR completata va in Ready to deploy (test), non In feature branch' {
             $i = script:Con-PrCompletata (script:Set-Funz (script:New-Ist 'daUnire' 'inCollaudo' 'u-titolare') -StatoChiusura 'inCollaudo')
             $i.StatoCard.destinazione = $null
-            script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' })
+            script:Test-Azioni (script:Get-Az $i) @(@{ Tipo = 'SpostaCard'; Stato = 'daDeployTest' })
         }
         It 'e non aspetta il collaudo di una funzionalita che non e la sua' {
             $i = script:Con-PrAttiva (script:Set-Funz (script:New-Ist 'daUnire' 'inCollaudo' 'u-titolare') -StatoChiusura 'inCollaudo')
@@ -2962,15 +2981,15 @@ Describe 'D52: la card di chiusura (gruppo 4)' {
             @(script:Solo-Azioni $d).Count | Should -Be 0
             $d.Motivo.Tipo | Should -Be 'conflittiFunzionalita'
         }
-        It 'a PR completata: Ready to release e la Feature Resolved, da chiudere con la card' {
+        It 'a PR completata: Ready to deploy (test) e la Feature Resolved, da chiudere con la card' {
             $i = script:Con-Pr (script:Chiusura-In 'daUnire') 'assente' 'c2' 'completed'
             script:Test-Azioni (script:Get-Az $i) @(
-                @{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' }
+                @{ Tipo = 'SpostaCard'; Stato = 'daDeployTest' }
                 @{ Tipo = 'AggiornaFeature'; FeatureId = 7; Stato = 'featureRisolta'; DaChiudere = $true })
         }
         It 'a PR completata non guarda il commit: il merge e fatto' {
             $i = script:Con-Pr (script:Con-Run (script:Chiusura-In 'daUnire') 'succeeded' 'c1') 'assente' 'c9' 'completed'
-            (script:Get-Az $i)[0].Stato | Should -Be 'daRilasciare'
+            (script:Get-Az $i)[0].Stato | Should -Be 'daDeployTest'
         }
         It 'il ramo e andato avanti dopo il deploy (una sorella nuova): il vincolo del commit ferma il merge anche con tutte le sorelle unite' {
             $i = script:Con-Pr (script:Con-Run (script:Chiusura-In 'daUnire' @{ 51 = 'inFeature'; 53 = 'inFeature' }) 'succeeded' 'c1') 'verde' 'c-nuovo'
@@ -3694,5 +3713,38 @@ Describe 'D59: lo slot e gli URL dell ambiente di collaudo' {
         ConvertTo-ElencoUrlCollaudo ([ordered]@{ WebApp = 'http://h:1'; Api = 'http://h:2' }) | Should -Be "- WebApp: http://h:1`n- Api: http://h:2"
         ConvertTo-ElencoUrlCollaudo ('{ "WebApp": "http://h:1" }' | ConvertFrom-Json) | Should -Be '- WebApp: http://h:1'
         ConvertTo-ElencoUrlCollaudo $null | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'D61: Ready to deploy (test), in Ready to release con il deploy di develop che contiene la card' {
+    BeforeAll {
+        function script:Dt($i) { , @(Get-Azioni -Istantanea $i -Contesto (script:New-Contesto)) }
+        function script:New-Dt([bool]$Contenuto, [bool]$ConDeploy = $true) {
+            $i = script:New-Ist 'daDeployTest' 'daUnire' 'u-titolare'
+            $i.Pr = [pscustomobject]@{ Id = 3; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null }
+            $i.StatoCard.cartella = $null; $i.StatoCard.ramo = $null; $i.StatoCard.prId = 3; $i.StatoCard.commitMerge = 'm1'
+            $i.DeployDevelop = if ($ConDeploy) { [pscustomobject]@{ Contenuto = $Contenuto; RunId = 900; Url = 'https://x/900' } } else { $null }
+            $i
+        }
+    }
+    It 'il deploy di develop riuscito contiene il merge: Ready to release' {
+        script:Test-Azioni (script:Dt (script:New-Dt $true)) @(@{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' })
+    }
+    It 'l ultimo deploy di develop non contiene ancora il merge: aspetta' {
+        script:Test-Azioni (script:Dt (script:New-Dt $false)) @()
+    }
+    It 'nessun deploy letto (Azure DevOps non risponde, o merge non ancora noto): aspetta' {
+        script:Test-Azioni (script:Dt (script:New-Dt $false -ConDeploy $false)) @()
+    }
+    It 'con il worktree ancora presente lo toglie, e se il deploy la contiene avanza nello stesso giro' {
+        $i = script:New-Dt $true; $i.StatoCard.cartella = 'C:/wt/x'; $i.StatoCard.ramo = 'feature/x'
+        script:Test-Azioni (script:Dt $i) @(@{ Tipo = 'RimuoviWorktree' }, @{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' })
+    }
+    It 'un componente senza deploy in Test (niente pipelineDeploy) va dritto in Ready to release' {
+        $i = script:New-Dt $false -ConDeploy $false; $i.Voce = [pscustomobject]@{ repo = 'Acme.AI'; componente = 'stime' }
+        script:Test-Azioni (script:Dt $i) @(@{ Tipo = 'SpostaCard'; Stato = 'daRilasciare' })
+    }
+    It 'un predecessore in Ready to deploy (test) a PR completata e worktree tolto e unito: il lavoro e in develop' {
+        Test-PredecessoreUnito (script:New-Contesto).Stati ([pscustomobject]@{ Stato = 'Ready to deploy (test)'; prId = 7; cartella = $null }) | Should -BeTrue
     }
 }

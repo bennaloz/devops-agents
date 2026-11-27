@@ -441,7 +441,10 @@ function Get-AdoPr {
         $completata = $trovate | Where-Object { $_.status -eq 'completed' } | Select-Object -First 1
         # Le policy di una PR chiusa non servono a nessuno: solo identita e stato.
         if ($completata) {
-            return [pscustomobject]@{ Id = [int]$completata.pullRequestId; Stato = $completata.status; Validazione = 'assente'; BuildId = $null; UrlLog = $null; UltimoCommit = (Get-CommitPr $completata) }
+            # D61: il commit di merge in develop serve a riconoscere il deploy di develop che contiene la card
+            $merge = Get-CampoAdo $completata 'lastMergeCommit'
+            return [pscustomobject]@{ Id = [int]$completata.pullRequestId; Stato = $completata.status; Validazione = 'assente'; BuildId = $null; UrlLog = $null; UltimoCommit = (Get-CommitPr $completata)
+                CommitMerge = $(if ($merge) { [string](Get-CampoAdo $merge 'commitId') } else { $null }) }
         }
     }
     if (-not $pr) { return $null }
@@ -989,6 +992,29 @@ function Get-AdoUltimoRun {
     [pscustomobject]@{ Id = [int]$b.id; Stato = [string](Get-CampoAdo $b 'status'); Esito = [string](Get-CampoAdo $b 'result') }
 }
 
+# D61: l'ultimo run riuscito di una pipeline su un ramo (il deploy di develop in Test): id, commit deployato, fine, link; null se non ce n'e.
+function Get-AdoUltimoRunRiuscito {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Progetto, [Parameter(Mandatory)][int]$DefinizioneId, [Parameter(Mandatory)][string]$Ramo)
+    $url = "$script:Org/$([uri]::EscapeDataString($Progetto))/_apis/build/builds?definitions=$DefinizioneId&branchName=$([uri]::EscapeDataString("refs/heads/$Ramo"))" +
+        '&statusFilter=completed&resultFilter=succeeded&queryOrder=finishTimeDescending&$top=1&api-version=7.1'
+    $b = @((Invoke-Ado -Metodo Get -Url $url).value) | Select-Object -First 1
+    if (-not $b) { return $null }
+    [pscustomobject]@{ Id = [int]$b.id; Commit = [string](Get-CampoAdo $b 'sourceVersion'); Fine = (ConvertTo-DataUtc (Get-CampoAdo $b 'finishTime')); Url = (Get-AdoUrlBuild -Progetto $Progetto -Id ([int]$b.id)) }
+}
+
+# D61: vero se il commit Commit e contenuto in In (e un suo antenato, o e lui): l'antenato comune dei due e Commit stesso.
+function Test-AdoCommitContenuto {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Progetto, [Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][string]$Commit, [Parameter(Mandatory)][string]$In)
+    if ($Commit -ieq $In) { return $true }
+    $src = Get-SorgenteRepo -Progetto $Progetto -Repo $Repo
+    if ($src.Tipo -eq 'github') { return Test-GhCommitContenuto $src.RepoGh $Commit $In }
+    $url = (Get-AdoRepoUrl $Progetto $Repo) + "/diffs/commits?baseVersion=$Commit&baseVersionType=commit&targetVersion=$In&targetVersionType=commit" + '&$top=1&api-version=7.1'
+    $r = Invoke-Ado -Metodo Get -Url $url
+    [string](Get-CampoAdo $r 'commonCommit') -ieq $Commit
+}
+
 # Accoda un run nuovo della stessa definizione sullo stesso ramo, con la stessa versione di sorgente e gli stessi parametri del
 # run originale (il rilancio di un run fallito per infrastruttura, D51: rifa quello che e fallito, non un'altra cosa). Non e un
 # deploy ne un'approvazione: e la stessa POST del pulsante "Run new". Un ramo che non e un ramo (la validazione di una PR,
@@ -1040,11 +1066,13 @@ function Get-AdoPrCollegata {
         if (-not $dove) { throw "La card $CardId e collegata alla PR $($ultimo.Id) di $($ultimo.RepoGh), che non e un repo di config/mappa.json" }
         $p = Get-GhPrSingola $ultimo.RepoGh $ultimo.Id
         return [pscustomobject]@{ Id = [int]$p.number; Stato = (ConvertTo-StatoPrGh $p); Titolo = [string]$p.title
-            Progetto = $dove.Progetto; Repo = $dove.Repo; Ramo = [string](Get-Campo (Get-Campo $p 'head') 'ref') }
+            Progetto = $dove.Progetto; Repo = $dove.Repo; Ramo = [string](Get-Campo (Get-Campo $p 'head') 'ref')
+            CommitMerge = $(if (Get-Campo $p 'merge_commit_sha') { [string]$p.merge_commit_sha } else { $null }) }
     }
     $pr = Invoke-Ado -Metodo Get -Url "$script:Org/_apis/git/pullrequests/$($ids[-1])?api-version=7.1"
     [pscustomobject]@{ Id = [int]$pr.pullRequestId; Stato = [string]$pr.status; Titolo = [string]$pr.title
-        Progetto = [string]$pr.repository.project.name; Repo = [string]$pr.repository.name; Ramo = ([string]$pr.sourceRefName -replace '^refs/heads/', '') }
+        Progetto = [string]$pr.repository.project.name; Repo = [string]$pr.repository.name; Ramo = ([string]$pr.sourceRefName -replace '^refs/heads/', '')
+        CommitMerge = $(if (Get-CampoAdo $pr 'lastMergeCommit') { [string](Get-CampoAdo (Get-CampoAdo $pr 'lastMergeCommit') 'commitId') } else { $null }) }
 }
 
 function Get-AdoUtenteCorrente {
@@ -1313,6 +1341,6 @@ function Get-AdoBuildPipeline {
     }
 }
 
-Export-ModuleMember -Function Get-SorgenteRepo, Find-RepoDaGitHub, Add-AdoLinkCard, Get-AdoMotivoFallimento, Start-AdoRilancioRun, Get-AdoUltimoRun, Get-AdoAgentiPool, Get-AdoBuildPipeline, Get-AdoLimiteTestoPr, Set-AdoTitoloPr, Get-AdoDescrizionePr, Set-AdoDescrizionePr, Start-AdoRivalutazione, Get-AdoPrCollegata, Get-AdoErroriBuild, Get-AdoCampiConsumi, Get-AdoUrlCard, New-AdoCard, Get-AdoCardAttive, Get-AdoCard, Set-AdoCard, Get-AdoStoriaStato, Get-AdoCommenti,
+Export-ModuleMember -Function Get-AdoUltimoRunRiuscito, Test-AdoCommitContenuto, Get-SorgenteRepo, Find-RepoDaGitHub, Add-AdoLinkCard, Get-AdoMotivoFallimento, Start-AdoRilancioRun, Get-AdoUltimoRun, Get-AdoAgentiPool, Get-AdoBuildPipeline, Get-AdoLimiteTestoPr, Set-AdoTitoloPr, Get-AdoDescrizionePr, Set-AdoDescrizionePr, Start-AdoRivalutazione, Get-AdoPrCollegata, Get-AdoErroriBuild, Get-AdoCampiConsumi, Get-AdoUrlCard, New-AdoCard, Get-AdoCardAttive, Get-AdoCard, Set-AdoCard, Get-AdoStoriaStato, Get-AdoCommenti,
     Add-AdoCommento, Get-AdoPr, Get-AdoPrDelRamo, New-AdoPr, Complete-AdoPr, Start-AdoDeployTest, Get-AdoParametriDeploy, Get-AdoRamoCard, Get-AdoRun, Get-AdoUrlBuild, Get-AdoUrlPr, Get-AdoUtenteCorrente, Get-AdoUrlOrganizzazione,
     New-AdoTask, Get-AdoTaskFigli, Get-AdoCardPredecessori, Set-AdoTaskStato, Get-AdoFeature, Get-AdoFigliFeature, Set-AdoStatoFeature, Get-AdoFeatureAperte, Set-AdoRank

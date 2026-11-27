@@ -589,6 +589,27 @@ Describe 'Ado' {
         }
     }
 
+    Context 'D61: il deploy di develop in Test e il commit di merge' {
+        It 'Get-AdoUltimoRunRiuscito: l ultimo run riuscito sul ramo, con il commit deployato; $null se non ce ne sono' {
+            Mock Invoke-RestMethod -ModuleName Ado { '{ "value": [ { "id": 77, "sourceVersion": "abc", "finishTime": "2026-11-27T08:00:00Z" } ] }' | ConvertFrom-Json }
+            $r = Get-AdoUltimoRunRiuscito -Progetto 'Acme.AI' -DefinizioneId 115 -Ramo 'develop'
+            $r.Id | Should -Be 77; $r.Commit | Should -Be 'abc'; $r.Url | Should -BeLike '*buildId=77*'
+            Should -Invoke Invoke-RestMethod -ModuleName Ado -Times 1 -Exactly -ParameterFilter {
+                $Uri -like '*definitions=115*' -and $Uri -like '*branchName=refs%2Fheads%2Fdevelop*' -and $Uri -like '*resultFilter=succeeded*' -and $Uri -like '*statusFilter=completed*'
+            }
+            Mock Invoke-RestMethod -ModuleName Ado { '{ "value": [] }' | ConvertFrom-Json }
+            Get-AdoUltimoRunRiuscito -Progetto 'P' -DefinizioneId 1 -Ramo 'develop' | Should -BeNullOrEmpty
+        }
+        It 'Test-AdoCommitContenuto: vero se l antenato comune e il commit stesso, falso altrimenti, vero senza chiamate se sono lo stesso commit' {
+            Mock Invoke-RestMethod -ModuleName Ado { '{ "commonCommit": "m1", "aheadCount": 0, "behindCount": 3 }' | ConvertFrom-Json }
+            Test-AdoCommitContenuto -Progetto 'P' -Repo 'R' -Commit 'm1' -In 'd9' | Should -BeTrue
+            Should -Invoke Invoke-RestMethod -ModuleName Ado -Times 1 -Exactly -ParameterFilter { $Uri -like '*diffs/commits?baseVersion=m1*targetVersion=d9*' }
+            Mock Invoke-RestMethod -ModuleName Ado { '{ "commonCommit": "x0" }' | ConvertFrom-Json }
+            Test-AdoCommitContenuto -Progetto 'P' -Repo 'R' -Commit 'm1' -In 'd9' | Should -BeFalse
+            Test-AdoCommitContenuto -Progetto 'P' -Repo 'R' -Commit 'd9' -In 'd9' | Should -BeTrue
+        }
+    }
+
     Context 'Get-AdoAgentiPool: gli errori di lettura' {
         It 'senza -Errori un pool che non risponde non c e (come per la vista); con -Errori lo dice' {
             Mock Invoke-RestMethod -ModuleName Ado { throw 'HTTP 403' }

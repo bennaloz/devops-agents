@@ -203,7 +203,9 @@ Describe 'stati.json: le chiavi di D52' {
         $s = @(Get-StatiConRamo)
         $s | Should -Contain 'inFeature'
         $s.IndexOf('inFeature') | Should -Be ($s.IndexOf('daUnire') + 1)
-        $s.IndexOf('daRilasciare') | Should -Be ($s.IndexOf('inFeature') + 1)
+        # D61: fra In feature branch e Ready to release c'e Ready to deploy (test)
+        $s.IndexOf('daDeployTest') | Should -Be ($s.IndexOf('inFeature') + 1)
+        $s.IndexOf('daRilasciare') | Should -Be ($s.IndexOf('daDeployTest') + 1)
     }
 }
 Describe 'Get-DestinazioneCard' {

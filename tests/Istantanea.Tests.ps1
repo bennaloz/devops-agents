@@ -606,3 +606,36 @@ Describe 'D59: l ambiente di collaudo nel contesto e nell istantanea' {
 }
 
 AfterAll { $env:ATTREZZI_DATI = $script:DatiPrimaIsolamento }
+
+Describe 'Get-IstantaneaCard: il deploy di develop in Test (D61)' {
+    BeforeEach {
+        Mock Get-AdoCommenti { @() }
+        Mock Get-AdoStoriaStato { @() }
+        Mock Get-RevNostre { @() }
+        Mock Get-AdoTaskFigli { @() }
+        Mock Get-AdoPr { [pscustomobject]@{ Id = 3; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null; UltimoCommit = 's1'; CommitMerge = 'm1' } }
+        Mock Get-AdoUltimoRunRiuscito { [pscustomobject]@{ Id = 900; Commit = 'd9'; Url = 'https://x/900' } }
+        Mock Test-AdoCommitContenuto { $true }
+        script:Imposta-Mondo @{} @{}
+        $script:VoceDeploy = [pscustomobject]@{ repo = 'Repo.Prova'; cartella = 'C:\principale'; progettoAdo = 'P'; pipelineDeploy = 115 }
+    }
+    It 'in Ready to deploy (test) ricorda il commit di merge e dice se l ultimo deploy di develop lo contiene' {
+        $sc = @{ ramo = 'feature/20-x'; cartella = 'C:/wt/x' }
+        $i = Get-IstantaneaCard $script:Cfg (script:Nuova-Card 20 'daDeployTest') $script:VoceDeploy $sc @{} (Join-Path $TestDrive 'stato.json') (script:Nuovo-Contesto)
+        $sc['commitMerge'] | Should -Be 'm1'
+        $i.DeployDevelop.Contenuto | Should -BeTrue; $i.DeployDevelop.RunId | Should -Be 900
+        Should -Invoke Get-AdoPr -Times 1 -Exactly -ParameterFilter { $AncheCompletate }
+        Should -Invoke Get-AdoUltimoRunRiuscito -Times 1 -Exactly -ParameterFilter { $DefinizioneId -eq 115 -and $Ramo -eq 'develop' }
+        Should -Invoke Test-AdoCommitContenuto -Times 1 -Exactly -ParameterFilter { $Commit -eq 'm1' -and $In -eq 'd9' }
+    }
+    It 'senza pipelineDeploy, senza commit di merge o in un altro stato non legge nessun deploy' {
+        $null = Get-IstantaneaCard $script:Cfg (script:Nuova-Card 20 'daDeployTest') ([pscustomobject]@{ repo = 'Repo.Prova'; progettoAdo = 'P' }) @{ commitMerge = 'm1' } @{} (Join-Path $TestDrive 'stato.json') (script:Nuovo-Contesto)
+        $null = Get-IstantaneaCard $script:Cfg (script:Nuova-Card 20 'daRilasciare') $script:VoceDeploy @{ commitMerge = 'm1' } @{} (Join-Path $TestDrive 'stato.json') (script:Nuovo-Contesto)
+        Should -Invoke Get-AdoUltimoRunRiuscito -Times 0 -Exactly
+    }
+    It 'Azure DevOps che non risponde: nessun deploy letto, la card aspetta' {
+        Mock Get-AdoUltimoRunRiuscito { throw 'rete giu' }
+        $i = Get-IstantaneaCard $script:Cfg (script:Nuova-Card 20 'daDeployTest') $script:VoceDeploy @{ commitMerge = 'm1' } @{} (Join-Path $TestDrive 'stato.json') (script:Nuovo-Contesto)
+        $i.DeployDevelop | Should -BeNullOrEmpty
+    }
+}

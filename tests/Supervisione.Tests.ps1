@@ -1456,3 +1456,19 @@ Describe 'Get-ConfigSupervisore con le chiavi dell aggiornamento e gli override 
 }
 
 AfterAll { $env:ATTREZZI_DATI = $script:DatiPrimaIsolamento }
+
+Describe 'D61: le card che aspettano il deploy di develop in Test' {
+    It 'una voce sola (deploy-test) per tutte, con una riga per card e gli elementi per riconoscerne una nuova' {
+        $o = New-Oss
+        $o.Card.Righe = @(
+            (New-RigaCard 21 @{ Attivita = 'deployTest'; Ferma = $false; Testo = 'unita in develop: aspetta un deploy di develop in Test che la contenga' }),
+            (New-RigaCard 20 @{ Attivita = 'deployTest'; Ferma = $false; Testo = 'unita in develop: aspetta un deploy di develop in Test che la contenga' }))
+        $p = @(Get-ProblemiCard $o $script:Cfg)
+        (Get-Chiavi $p) | Should -Be @('deploy-test')
+        $p[0].Testo | Should -Match '2 card'; $p[0].Testo | Should -Match '#20, #21'
+        $p[0].Azione | Should -Match 'deploy di develop in Test'
+        @($p[0].Elementi) | Should -Be @('20', '21')
+        $p[0].Urgente | Should -BeFalse; $p[0].Ricorda | Should -BeFalse
+        Get-SezioneDelProblema 'deploy-test' | Should -Be 'card'
+    }
+}

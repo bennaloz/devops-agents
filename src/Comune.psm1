@@ -55,7 +55,7 @@ function Get-StatiInTest { @('inDeployTest', 'inCollaudo', 'inProvaUmana') }
 # Gli stati in cui la card ha un ramo (e un worktree) che avanza verso develop: da In development a Ready to release. In feature
 # branch (D52) e la card della funzionalita con la PR gia unita nel ramo della funzionalita: il worktree c'e ancora finche
 # RimuoviWorktree non lo toglie.
-function Get-StatiConRamo { @('inSviluppo', 'inRevisione') + @(Get-StatiInTest) + @('daUnire', 'inFeature', 'daRilasciare') }
+function Get-StatiConRamo { @('inSviluppo', 'inRevisione') + @(Get-StatiInTest) + @('daUnire', 'inFeature', 'daDeployTest', 'daRilasciare') }
 
 # Il ramo verso cui va la PR della card (D52): quello salvato nello stato della card alla creazione del worktree (il ramo della
 # funzionalita), develop per le card isolate e per lo stato di prima di D52, che non lo ha. E il solo posto da cui ApriPr, la lettura

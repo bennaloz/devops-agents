@@ -547,6 +547,7 @@ function Invoke-Azione($Cfg, $K, $Az) {
                 if ($null -eq $pr -or $pr.Stato -ne 'completed') { throw "La card di chiusura $($card.Id) e in Ready to release ma non ha una PR collegata completata: non so quale ramo guardare" }
                 $ramo = [string]$pr.Ramo
                 $sc['prId'] = [int]$pr.Id
+                if (Get-Campo $pr 'CommitMerge') { $sc['commitMerge'] = [string]$pr.CommitMerge }
             }
             $sc['ramo'] = $ramo
             $sc['destinazione'] = 'develop'
@@ -562,11 +563,13 @@ function Invoke-Azione($Cfg, $K, $Az) {
             $wt = if ($chiaveStato -eq 'inFeature') { $null } else { New-WorktreeDaRemoto -Voce $voce -Card $card }
             if ($null -eq $wt) {
                 # nessun ramo pubblicato della card
-                if ($chiaveStato -in 'daRilasciare', 'inFeature') {
+                if ($chiaveStato -in 'daDeployTest', 'daRilasciare', 'inFeature') {
                     # dopo il merge Azure DevOps cancella il ramo: la card ricorda la sua PR
                     $pr = Get-AdoPrCollegata -CardId $card.Id
                     if ($null -eq $pr -or $pr.Stato -ne 'completed') { throw "Su origin non c'e nessun ramo della card $($card.Id) e nessuna PR collegata completata: non so cosa rilasciare" }
                     $sc['prId'] = [int]$pr.Id
+                    # D61: in Ready to deploy (test) serve il commit di merge per riconoscere il deploy di develop che la contiene
+                    if ($chiaveStato -eq 'daDeployTest' -and (Get-Campo $pr 'CommitMerge')) { $sc['commitMerge'] = [string]$pr.CommitMerge }
                     # In feature branch la destinazione resta: il giro dopo la riconosce come card della funzionalita
                     if ($chiaveStato -eq 'inFeature' -and $conBase -and $Az.Base) { $sc['destinazione'] = [string]$Az.Base }
                     Write-Log 'INFO' "card $($card.Id): presa in carico gia $(if ($chiaveStato -eq 'inFeature') { 'unita nel ramo della funzionalita' } else { 'rilasciata' }) (PR $($pr.Id) completata), niente da fare"

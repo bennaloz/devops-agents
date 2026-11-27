@@ -13,7 +13,7 @@ Ogni voce dice cosa si è deciso, chi e quando, perché, l'alternativa scartata 
 |---|---|---|
 | Il titolare (o l'assegnatario della card) | Le scelte di prodotto. Porta la card da Draft a New, anche la card di chiusura di una funzionalità (D52: la vista gliela mostra quando le sorelle sono tutte In feature branch). Prova in Test le card che lo chiedono. Approva il rilascio in produzione e le modifiche ad Azure DevOps (aree, pipeline, policy). Completa le PR del repo `DevOps.Agents` | Non scrive le card a mano: le prepara la sessione di sviluppo con lui. Non sposta più le card in Deploying to test né completa le PR dei prodotti: lo fa lo smistatore |
 | Sessione di sviluppo (Claude con il titolare) | Analisi con `grill-me`, divisione in card, testo della card, area e mappa quando mancano, giri dello smistatore a mano, lavoro sul repo `DevOps.Agents` | Non scrive codice nei repo dei prodotti: lo fanno gli agenti |
-| Smistatore | Fa avanzare le card del suo utente: lancia le sessioni, apre le PR, legge le validazioni e i log delle build, porta la card in Deploying to test e accoda il deploy (per i componenti con `collaudo`, D59, crea invece l'ambiente Docker della card e lo butta quando la card esce dal Test), completa la PR verso `develop` da Ready to merge, crea e toglie i worktree, avvisa sulla card e su Telegram. Per una funzionalità (D52): crea e pubblica il ramo della funzionalità, completa le PR delle card nel ramo e le porta In feature branch, apre la PR ramo della funzionalità verso `develop` per la card di chiusura, crea le Bug di correzione e `allinea-develop`, aggiorna lo stato della Feature | Non decide niente che non sia scritto in `src/Decisioni.psm1`: senza modelli. Non rilascia in produzione |
+| Smistatore | Fa avanzare le card del suo utente: lancia le sessioni, apre le PR, legge le validazioni e i log delle build, porta la card in Deploying to test e accoda il deploy (per i componenti con `collaudo`, D59, crea invece l'ambiente Docker della card e lo butta quando la card esce dal Test), completa la PR verso `develop` da Ready to merge, porta la card in Ready to release quando un deploy di `develop` in Test la contiene (D61), crea e toglie i worktree, avvisa sulla card e su Telegram. Per una funzionalità (D52): crea e pubblica il ramo della funzionalità, completa le PR delle card nel ramo e le porta In feature branch, apre la PR ramo della funzionalità verso `develop` per la card di chiusura, crea le Bug di correzione e `allinea-develop`, aggiorna lo stato della Feature | Non decide niente che non sia scritto in `src/Decisioni.psm1`: senza modelli. Non rilascia in produzione |
 | `responsabile` | Criteri di accettazione verificabili, task, decisioni che il repo sa giustificare (con `file:riga`), bivi di `dev`, `no-test-deploy` quando nessun criterio si verifica in Test, esito della prova in Test (Ready to merge o di nuovo In development). Per la card di chiusura (D52): i parametri del deploy, `human-test` (`card.ps1 prova-umana`) e la correzione di un collaudo respinto, tecnica o di prodotto (`card.ps1 correzione`) | Non scrive codice e non fa commit. Non decide il prodotto: lo rimanda alla persona |
 | `dev` | Codice e test nel worktree della card, un task alla volta; correzioni dopo validazioni rosse, rilievi e conflitti. In una funzionalità il worktree parte dal ramo della funzionalità e la PR va lì (D52) | Non decide: davanti a una scelta si ferma con un bivio |
 | `reviewer` | Una passata sulla PR intera contro i criteri e le regole di sviluppo. In una funzionalità guarda il diff rispetto al ramo della funzionalità; sulla Bug `allinea-develop` solo la risoluzione del merge (D52) | Non corregge: segnala |
@@ -1349,3 +1349,28 @@ Ogni voce dice cosa si è deciso, chi e quando, perché, l'alternativa scartata 
   `src/Smistatore.ps1`, `src/Istantanea.ps1`, `src/Supervisore.ps1`, `src/Card.psm1`, `src/card.ps1`,
   `src/Impostazioni.psm1`, `src/Vista.ps1`, `src/VistaServer.psm1`, `src/VistaHtml.psm1`, `config/stati.json`,
   `config/limiti.json`.
+
+**D61. Dopo il merge in `develop` la card va in Ready to deploy (test); in Ready to release la porta il deploy di `develop` in Test che la contiene.**
+- Chi e quando: Titolare, 2026-11-27 ("Vorrei un ready to deploy (test) e in futuro ci sarà ready to deploy (prod)").
+- Perché: con D59 in Test va solo `develop`, e una card unita non è ancora in Test finché qualcuno non deploya `develop`.
+  Ready to release diceva «pronta per la produzione» anche per una card che in Test non era mai arrivata.
+- Cosa:
+  - Stato nuovo **Ready to deploy (test)** (chiave `daDeployTest`) fra Ready to merge e Ready to release. Completata la PR
+    verso `develop`, la card arriva lì invece che in Ready to release; lì si toglie il worktree come prima.
+  - Il deploy di `develop` in Test lo lancia ancora Titolare, a mano. Lo smistatore lo legge e basta, senza lanciarne: a ogni giro
+    prende l'ultimo run riuscito su `develop` della pipeline di deploy della voce (`pipelineDeploy`) e, se il commit di merge della
+    card (salvato nello stato come `commitMerge`) ne è un antenato, porta la card in Ready to release.
+  - Un componente senza `pipelineDeploy` non ha un deploy da aspettare: la card passa subito in Ready to release.
+  - Un'area con il codice su GitHub: il commit di merge è il `merge_commit_sha` della PR e il confronto si chiede a GitHub
+    (`compare`: `ahead` o `identical` vuol dire contenuto); la pipeline di deploy resta su Azure Pipelines.
+  - Funzionalità (D52): la card di chiusura fa lo stesso giro; le card In feature branch la seguono, in Ready to deploy (test) finché lei
+    è lì e poi in Ready to release.
+  - Ready to deploy (test) vale come «unita» per i predecessori e per le sorelle, come Ready to release: il lavoro è in `develop`.
+  - Vista e supervisore: attività `deployTest` («Deploy di develop in Test»), che non ferma nessuno; il supervisore ne fa una voce
+    sola (`deploy-test`) con tutte le card che aspettano.
+- Più avanti: Ready to release diventerà «Ready to deploy (prod)». Non ora.
+- Cambia: D26 (la PR completata porta in Ready to deploy (test), non in Ready to release), D52 (le card In feature branch seguono la
+  chiusura anche in Ready to deploy (test)).
+- Dove: `config/stati.json`, `src/Decisioni.psm1` (`Get-AzioniDaDeployTest`), `src/Istantanea.ps1` (`Get-DeployDevelop`),
+  `src/Ado.psm1` (`Get-AdoUltimoRunRiuscito`, `Test-AdoCommitContenuto`), `src/GitHub.psm1` (`Test-GhCommitContenuto`), `src/Supervisione.psm1`, la vista; lo stato nel processo
+  della board di Azure DevOps.

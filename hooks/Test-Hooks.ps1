@@ -271,6 +271,28 @@ $cases = @(
        Input = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Invoke-RestMethod -Uri https://sso.acme.com/realms/x' } } }
     @{ Hook = 'deny-host-collaudo.ps1'; Expected = 0; Env = @{ ATTREZZI_RUOLO = '' }; What = 'stesso host di produzione in una sessione interattiva'
        Input = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Invoke-RestMethod -Uri https://sso.acme.com/realms/x' } } }
+
+    # Gli hook di git non si saltano, in nessuna sessione
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 2; What = 'commit --no-verify (Bash)'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git commit --no-verify -m x' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 2; What = 'push --no-verify dopo un cd (PowerShell)'
+       Input = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Set-Location C:\x; git push --no-verify origin feat/x' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 2; What = 'commit -n'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git commit -n -m x' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 2; What = 'commit -anm (n dentro un gruppo di flag)'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git commit -anm "x"' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 2; What = 'core.hooksPath da riga di comando'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git -c core.hooksPath=/dev/null commit -m x' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 0; What = 'commit normale'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git add -A && git commit -m "fix: x"' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 0; What = 'messaggio di commit che nomina --no-verify'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git commit -m "feat: hook che blocca --no-verify e commit -n"' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 0; What = 'heredoc che nomina --no-verify'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = "git commit -F - <<'EOF'`nfeat: blocca --no-verify`n`ncore.hooksPath e commit -n`nEOF" } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 0; What = 'git log -n 5'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git log -n 5 --oneline' } } }
+    @{ Hook = 'deny-no-verify.ps1'; Expected = 0; What = 'commit seguito da un altro comando con -n'
+       Input = @{ tool_name = 'Bash'; tool_input = @{ command = 'git commit -m x && head -n 3 file.txt' } } }
 )
 
 $temp = [IO.Path]::GetTempFileName()

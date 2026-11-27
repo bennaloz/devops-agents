@@ -110,6 +110,7 @@ $script:ColonneBacheca = @(
     @{ chiave = 'inCollaudo'; titolo = 'Collaudo automatico'; sigla = 'COLL' }
     @{ chiave = 'inProvaUmana'; titolo = 'Prova in Test'; sigla = 'TEST' }
     @{ chiave = 'daUnire'; titolo = 'Da unire'; sigla = 'MERGE' }
+    @{ chiave = 'daDeployTest'; titolo = 'Da deployare in Test'; sigla = 'DTEST' }
     @{ chiave = 'daRilasciare'; titolo = 'Da rilasciare'; sigla = 'REL' }
 )
 

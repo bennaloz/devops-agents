@@ -2000,11 +2000,11 @@ Describe 'Smistatore: un giro' {
             Should -Invoke Set-AdoCard -Times 0 -Exactly
             (Get-StatoFinale $script:Dati)['5']['completaPr'] | Should -Be '9@20'
             (Get-Content (Get-ChildItem (Join-Path $script:Dati 'log') -Filter 'smistatore-*.log' | Select-Object -First 1).FullName -Raw) | Should -Match 'card 5: chiesto il completamento della PR 9'
-            # al giro dopo la PR e completata: la card passa in Ready to release
+            # al giro dopo la PR e completata: la card passa in Ready to deploy (test) (D61)
             $global:Mondo.Pr['feature/5-x'] = [pscustomobject]@{ Id = 9; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null }
             Invoke-Giro $script:Dati | Out-Null
             Should -Invoke Complete-AdoPr -Times 1 -Exactly
-            Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Id -eq 5 -and $Stato -eq 'Ready to release' }
+            Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Id -eq 5 -and $Stato -eq 'Ready to deploy (test)' }
         }
 
         It 'Ready to merge legge anche la PR completata del ramo' {
@@ -2671,26 +2671,26 @@ Describe 'Smistatore: un giro' {
                 (Get-StatoFinale $script:Dati)['22']['ritornoCommit'] | Should -Be 'c2'
             }
 
-            It 'Ready to merge, PR completata: Ready to release, la Feature Resolved e ricordata nello stato; nessun worktree da togliere' {
+            It 'Ready to merge, PR completata: Ready to deploy (test) (D61), la Feature Resolved e ricordata nello stato; nessun worktree da togliere' {
                 $global:Fx.StatoChiusura = (St 'daUnire')
                 $global:Mondo.Cards = @(New-FintaFunz 22 'daUnire')
                 $global:Mondo.Pr['feature/f7-la-funzione'] = [pscustomobject]@{ Id = 9; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null; UltimoCommit = 'c1' }
                 Set-StatoDiPartenza $script:Dati @{ '22' = (& $script:StatoChiusura) }
                 Invoke-Giro $script:Dati @{ Radice = $script:RadiceF } | Out-Null
-                Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Id -eq 22 -and $Stato -eq (St 'daRilasciare') }
+                Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Id -eq 22 -and $Stato -eq (St 'daDeployTest') }
                 Should -Invoke Set-AdoStatoFeature -Times 1 -Exactly -ParameterFilter { $FeatureId -eq 7 -and $Stato -eq 'Resolved' }
                 (Get-StatoFinale $script:Dati)['22']['featureDaChiudere'] | Should -Be 7
                 Should -Invoke Remove-WorktreeCard -Times 0 -Exactly
             }
 
-            It 'se la Feature non passa Resolved (errore) la card va comunque in Ready to release, e il giro dopo riprova senza ricordarla ancora' {
+            It 'se la Feature non passa Resolved (errore) la card va comunque in Ready to deploy (test), e il giro dopo riprova senza ricordarla ancora' {
                 Mock Set-AdoStatoFeature { throw 'permesso negato' }
                 $global:Fx.StatoChiusura = (St 'daUnire')
                 $global:Mondo.Cards = @(New-FintaFunz 22 'daUnire')
                 $global:Mondo.Pr['feature/f7-la-funzione'] = [pscustomobject]@{ Id = 9; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null; UltimoCommit = 'c1' }
                 Set-StatoDiPartenza $script:Dati @{ '22' = (& $script:StatoChiusura) }
                 Invoke-Giro $script:Dati @{ Radice = $script:RadiceF } | Out-Null
-                Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Id -eq 22 -and $Stato -eq (St 'daRilasciare') }
+                Should -Invoke Set-AdoCard -Times 1 -Exactly -ParameterFilter { $Id -eq 22 -and $Stato -eq (St 'daDeployTest') }
                 (Get-StatoFinale $script:Dati)['22']['featureDaChiudere'] | Should -BeNullOrEmpty
                 # il giro dopo: la card e in Ready to release, la Feature e ancora Active
                 $global:Fx.StatoChiusura = (St 'daRilasciare')

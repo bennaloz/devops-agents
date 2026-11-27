@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 # di sessioni (solo i piccoli aiuti di Comune.psm1). Nessun nome di stato o di tag e' scritto qui: si usano le chiavi di config/stati.json, tradotte nei nomi
 # veri da Contesto.Stati.
 #
-# Istantanea: Card, Commenti (dopo ultimoCommento), Storia (cambi di stato), Pr, Run, StatoCard, Voce, RevNostre
+# Istantanea: Card, Commenti (dopo ultimoCommento), Storia (cambi di stato), Pr, Run, DeployDevelop (D61: Contenuto, RunId, Url), StatoCard, Voce, RevNostre
 #             (revisioni scritte da noi, da Get-RevNostre), Task (i task figli della card: Id, Stato; assente = nessuno).
 #             Un task e aperto se il suo stato non e taskChiuso ne taskRimosso (chiavi di config/stati.json).
 #             Predecessori (solo per le card in New e in Ready to develop; assente = nessuno): le card che devono essere unite
@@ -213,7 +213,8 @@ function Test-PredecessoreUnito($Stati, $P, $FeatureId = $null) {
             $padre = Get-Campo $P 'PadreId'
             return $null -ne $FeatureId -and $null -ne $padre -and [int]$padre -eq [int]$FeatureId
         }
-        'daRilasciare' { return $null -ne (Get-Campo $P 'prId') -and [string]::IsNullOrWhiteSpace("$(Get-Campo $P 'cartella')") }
+        # D61: in Ready to deploy (test) il lavoro e gia in develop come in Ready to release
+        { $_ -in 'daDeployTest', 'daRilasciare' } { return $null -ne (Get-Campo $P 'prId') -and [string]::IsNullOrWhiteSpace("$(Get-Campo $P 'cartella')") }
         default { return $false }
     }
 }
@@ -257,7 +258,7 @@ function Test-CardChiusura($a) {
 # D52: una sorella e unita quando il suo lavoro e nel ramo della funzionalita: In feature branch o oltre. Sono figlie della stessa Feature
 # per definizione, quindi non serve altro (Test-PredecessoreUnito, per i predecessori veri, chiede lo stato locale).
 function Test-SorellaUnita($Stati, $S) {
-    (Get-ChiaveStato $Stati (Get-Campo $S 'Stato')) -in 'inFeature', 'daRilasciare', 'inRilascio', 'chiusa'
+    (Get-ChiaveStato $Stati (Get-Campo $S 'Stato')) -in 'inFeature', 'daDeployTest', 'daRilasciare', 'inRilascio', 'chiusa'
 }
 
 # D52: le sorelle della card di chiusura non ancora unite nel ramo (Sorelle non porta mai le Removed: Get-ComposizioneFunzionalita).
@@ -913,6 +914,27 @@ function Get-AzioniDaRilasciare($a) {
     if ($a.TaskAperti.Count -gt 0) { return Get-AzioniTaskAggiunto $a }
 }
 
+# D61: Ready to deploy (test): la PR e unita in develop e la card aspetta un deploy di develop in Test che contenga il suo commit di
+# merge (lo lancia Titolare a mano; lo smistatore lo legge e basta, DeployDevelop dell'istantanea). Con quel deploy riuscito la card va
+# in Ready to release. Intanto vale tutto quello che vale in Ready to release (worktree tolto, Feature risolta, task aggiunto). Un
+# componente senza deploy in Test (niente pipelineDeploy) non ha un deploy da aspettare: va dritto in Ready to release. Una card della
+# funzionalita non ha un merge suo in develop: segue la card di chiusura, come In feature branch.
+function Get-AzioniDaDeployTest($a) {
+    if (Test-CardFunzionalita $a) {
+        if ($null -ne (Get-Campo $a.SC 'cartella')) { New-Azione 'RimuoviWorktree' }
+        if ((Get-ChiaveStato $a.Stati (Get-Campo $a.Funzionalita 'StatoChiusura')) -in 'daRilasciare', 'inRilascio', 'chiusa') {
+            New-Azione 'SpostaCard' @{ Stato = 'daRilasciare' }
+        }
+        return
+    }
+    $azioni = @(Get-AzioniDaRilasciare $a)
+    # un task aggiunto prima del merge riporta la card indietro (Get-AzioniTaskAggiunto): non e il momento di avanzare
+    if (@($azioni | Where-Object { $_.Tipo -ne 'RimuoviWorktree' -and $_.Tipo -ne 'AggiornaFeature' }).Count -gt 0) { return $azioni }
+    $avanza = -not (Get-Campo $a.Voce 'pipelineDeploy') -or [bool](Get-Campo $a.DeployDevelop 'Contenuto')
+    if ($avanza) { $azioni += New-Azione 'SpostaCard' @{ Stato = 'daRilasciare' } }
+    $azioni
+}
+
 # In feature branch (D52): la card della funzionalita ha la PR unita nel ramo della funzionalita e aspetta la card di chiusura. Si
 # toglie il worktree; quando la card di chiusura e in Ready to release o oltre (il ramo e in develop) la card la segue. Un task
 # aperto qui non riporta indietro la card, come fa Get-AzioniTaskAggiunto: il lavoro e gia nel ramo, e il lavoro nuovo va in una
@@ -921,9 +943,10 @@ function Get-AzioniInFeature($a) {
     # la card e della funzionalita (altrimenti Get-AzioniDelloStato e fermo prima); col worktree si toglie solo a PR completata
     if (Get-BloccoPartenza $a) { return }
     if ($null -ne (Get-Campo $a.SC 'cartella')) { New-Azione 'RimuoviWorktree' }
-    if ((Get-ChiaveStato $a.Stati (Get-Campo $a.Funzionalita 'StatoChiusura')) -in 'daRilasciare', 'inRilascio', 'chiusa') {
-        New-Azione 'SpostaCard' @{ Stato = 'daRilasciare' }
-    }
+    # D61: la card segue la chiusura: in Ready to deploy (test) finche la chiusura aspetta il deploy di develop, poi in Ready to release
+    $chiusura = Get-ChiaveStato $a.Stati (Get-Campo $a.Funzionalita 'StatoChiusura')
+    if ($chiusura -eq 'daDeployTest') { New-Azione 'SpostaCard' @{ Stato = 'daDeployTest' } }
+    elseif ($chiusura -in 'daRilasciare', 'inRilascio', 'chiusa') { New-Azione 'SpostaCard' @{ Stato = 'daRilasciare' } }
     # i task si leggono solo finche c'e il worktree: l'avviso vale solo in quel tratto
     if ($a.TaskAperti.Count -gt 0 -and $null -ne (Get-Campo $a.SC 'cartella')) {
         $chiave = "taskInFeature@$($a.RevIngresso)"
@@ -946,10 +969,11 @@ function Get-AzioniDaUnire($a) {
     $statoPr = if ($null -ne $a.Pr) { Get-Campo $a.Pr 'Stato' } else { $null }
     $chiusura = Test-CardChiusura $a
     # D52: la PR di una card della funzionalita e unita nel ramo della funzionalita, non in develop: la card aspetta In feature branch.
-    # La card di chiusura, a PR completata, va in Ready to release e la Feature passa Resolved.
+    # La card di chiusura, a PR completata, va in Ready to deploy (test) e la Feature passa Resolved. D61: unita in develop vuol dire
+    # Ready to deploy (test), non piu Ready to release: in Ready to release la porta il deploy di develop in Test che la contiene.
     if ($statoPr -eq 'completed') {
-        if ($chiusura) { New-Azione 'SpostaCard' @{ Stato = 'daRilasciare' }; Get-AzioneFeatureRisolta $a; return }
-        return New-Azione 'SpostaCard' @{ Stato = $(if (Test-CardFunzionalita $a) { 'inFeature' } else { 'daRilasciare' }) }
+        if ($chiusura) { New-Azione 'SpostaCard' @{ Stato = 'daDeployTest' }; Get-AzioneFeatureRisolta $a; return }
+        return New-Azione 'SpostaCard' @{ Stato = $(if (Test-CardFunzionalita $a) { 'inFeature' } else { 'daDeployTest' }) }
     }
     if ($statoPr -eq 'active') {
         # D52: la card di chiusura non torna a dev (non ha worktree ne sviluppo): i conflitti con develop li risolve la Bug sorella
@@ -1093,7 +1117,7 @@ function Get-AzioniMentore($a, $Azioni, [bool]$OnHoldTolto) {
 
     # la PR unita di un Bug: e li che il diff (e il blame) mostrano dove il difetto e passato
     $prId = Get-Campo $a.Pr 'Id'
-    if ((Get-Campo $a.Card 'Tipo') -eq 'Bug' -and $null -ne $prId -and @($Azioni | Where-Object { $_.Tipo -eq 'SpostaCard' -and $_.Stato -eq 'daRilasciare' }).Count -gt 0) {
+    if ((Get-Campo $a.Card 'Tipo') -eq 'Bug' -and $null -ne $prId -and @($Azioni | Where-Object { $_.Tipo -eq 'SpostaCard' -and $_.Stato -in 'daDeployTest', 'daRilasciare' }).Count -gt 0) {
         $testo = "$(Get-Campo $a.Card 'Titolo')`n`n$(Get-Campo $a.Card 'Descrizione')`n`nPR $prId"
         $proposte += New-LancioMentore @('dev', 'collaudatore', 'reviewer') 'bug' 'bug' $testo "bug@$prId"
     }
@@ -1161,7 +1185,7 @@ function Get-AzioniDelloStato($a) {
         }
         # D52: in Ready to release senza stato locale il ramo della funzionalita non c'e piu (lo cancella il merge): il ramo e la PR si
         # prendono dalla PR collegata alla card, cosi la Feature passa Resolved e nasce featureDaChiudere anche dopo una presa in carico.
-        if ($a.Chiave -eq 'daRilasciare' -and -not (Get-Campo $a.SC 'ramo')) { return New-Azione 'ImpostaRamoChiusura' @{ Ramo = $null; DaPrCollegata = $true } }
+        if ($a.Chiave -in 'daDeployTest', 'daRilasciare' -and -not (Get-Campo $a.SC 'ramo')) { return New-Azione 'ImpostaRamoChiusura' @{ Ramo = $null; DaPrCollegata = $true } }
         # D52: senza ramo salvato (card mai passata da qui, o presa in carico da un altro PC) la chiusura lo prende dalla funzionalita; non ha un
         # worktree da creare. In Ready to develop prima le sorelle: finche aspetta non serve.
         if (($inTest -or $a.Chiave -eq 'pronto') -and -not (Get-Campo $a.SC 'ramo') -and -not ($a.Chiave -eq 'pronto' -and (Get-BloccoPartenza $a))) {
@@ -1181,6 +1205,7 @@ function Get-AzioniDelloStato($a) {
         'inProvaUmana' { Get-AzioniInProvaUmana $a }
         'daUnire' { Get-AzioniDaUnire $a }
         'inFeature' { Get-AzioniInFeature $a }
+        'daDeployTest' { Get-AzioniDaDeployTest $a }
         'daRilasciare' { Get-AzioniDaRilasciare $a }
         default { }   # bozza, inRilascio, chiusa, rimossa: niente da fare
     }
@@ -1222,7 +1247,7 @@ function New-Ambiente($Istantanea, $Contesto, $SC) {
         Id = [int](Get-Campo $card 'Id'); Tag = @(Get-Campo $card 'Tag')
         Chiave = Get-ChiaveStato $stati $stato
         Commenti = @(@(Get-Campo $Istantanea 'Commenti') | Where-Object { $null -ne $_ })
-        Pr = Get-Campo $Istantanea 'Pr'; Run = Get-Campo $Istantanea 'Run'
+        Pr = Get-Campo $Istantanea 'Pr'; Run = Get-Campo $Istantanea 'Run'; DeployDevelop = Get-Campo $Istantanea 'DeployDevelop'
         SC = $SC; Voce = Get-Campo $Istantanea 'Voce'
         RevNostre = @(@(Get-Campo $Istantanea 'RevNostre') | Where-Object { $null -ne $_ } | ForEach-Object { [int]$_ })
         Storia = $storia; CommentiTutti = @(@(Get-Campo $Istantanea 'CommentiTutti') | Where-Object { $null -ne $_ })
@@ -1869,6 +1894,10 @@ function Get-AttivitaOperatore {
     $a = New-Ambiente $Istantanea $Contesto (Get-Campo $Istantanea 'StatoCard')
     if ($a.Chiave -eq 'daChiarire' -and $azioni.Count -eq 0 -and -not $motivo) {
         return @{ Attivita = 'rispondi'; Ferma = $true; Testo = 'responsabile aspetta una tua risposta sulla card' }
+    }
+    # D61: il deploy di develop in Test lo lancia Titolare; la card non e ferma, aspetta quel deploy
+    if ($a.Chiave -eq 'daDeployTest' -and -not (Test-CardFunzionalita $a) -and (Get-Campo $a.Voce 'pipelineDeploy')) {
+        return @{ Attivita = 'deployTest'; Ferma = $false; Testo = 'unita in develop: aspetta un deploy di develop in Test che la contenga' }
     }
     if ($a.Chiave -eq 'daRilasciare') { return @{ Attivita = 'rilascia'; Ferma = $false; Testo = 'unita in develop: aspetta il rilascio in produzione' } }
     $null

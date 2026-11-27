@@ -26,16 +26,18 @@ Describe 'Install-Attrezzi -Hook' {
         Remove-Item $script:Claude -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    It 'aggiunge le cinque voci PreToolUse a un file che ha solo Notification' {
+    It 'aggiunge le sette voci PreToolUse a un file che ha solo Notification' {
         & $script:Install -Hook -ClaudeDir $script:Claude
         $s = Get-Content $script:Settings -Raw | ConvertFrom-Json
         $voci = Get-Voci $s
-        $voci.Count | Should -Be 5
+        $voci.Count | Should -Be 7
         ($voci | Where-Object { $_.hooks.command -like '*deny-commit-outside-worktree.ps1*' }).matcher | Should -Be 'Bash|PowerShell'
         ($voci | Where-Object { $_.hooks.command -like '*deny-secrets-in-repo.ps1*' }).matcher | Should -Be 'Write|Edit'
         ($voci | Where-Object { $_.hooks.command -like '*deny-pat.ps1*' }).matcher | Should -Be 'Bash|PowerShell|Read'
         ($voci | Where-Object { $_.hooks.command -like '*deny-identita.ps1*' }).matcher | Should -Be 'Bash|PowerShell'
         ($voci | Where-Object { $_.hooks.command -like '*deny-host-collaudo.ps1*' }).matcher | Should -Be 'Bash|PowerShell|WebFetch'
+        ($voci | Where-Object { $_.hooks.command -like '*deny-no-verify.ps1*' }).matcher | Should -Be 'Bash|PowerShell'
+        ($voci | Where-Object { $_.hooks.command -like '*suggest-compact.ps1*' }).matcher | Should -Be 'Edit|Write'
         foreach ($c in (Get-Comandi $s)) {
             $c | Should -BeLike 'pwsh -NoProfile -File "C:/develop/GIT/DevOps.Agents/hooks/*.ps1"'
         }
@@ -45,8 +47,8 @@ Describe 'Install-Attrezzi -Hook' {
         & $script:Install -Hook -ClaudeDir $script:Claude
         & $script:Install -Hook -ClaudeDir $script:Claude
         $s = Get-Content $script:Settings -Raw | ConvertFrom-Json
-        (Get-Voci $s).Count | Should -Be 5
-        @(Get-Comandi $s | Select-Object -Unique).Count | Should -Be 5
+        (Get-Voci $s).Count | Should -Be 7
+        @(Get-Comandi $s | Select-Object -Unique).Count | Should -Be 7
     }
 
     It 'conserva le altre chiavi' {
@@ -63,7 +65,7 @@ Describe 'Install-Attrezzi -Hook' {
 '@ | Set-Content $script:Settings -Encoding utf8
         & $script:Install -Hook -ClaudeDir $script:Claude
         $s = Get-Content $script:Settings -Raw | ConvertFrom-Json
-        (Get-Voci $s).Count | Should -Be 6
+        (Get-Voci $s).Count | Should -Be 8
         Get-Comandi $s | Should -Contain 'echo altro'
     }
 
@@ -78,7 +80,7 @@ Describe 'Install-Attrezzi -Hook' {
     It 'crea il file se non esiste' {
         Remove-Item $script:Settings
         & $script:Install -Hook -ClaudeDir $script:Claude
-        (Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 5
+        (Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 7
     }
 }
 
@@ -308,19 +310,19 @@ Describe 'Install-Attrezzi -Hook: i percorsi si confrontano senza badare a barre
         $prima = Get-Content $script:Settings -Raw
         & $script:Install -Hook -ClaudeDir $script:Claude -RadicePrincipale 'C:\develop\GIT\DevOps.Agents'
         (Get-Content $script:Settings -Raw) | Should -Be $prima
-        @(Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 5
+        @(Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 7
     }
     It 'vale anche per le maiuscole e per una voce scritta a mano con le barre rovesciate' {
         & $script:Install -Hook -ClaudeDir $script:Claude
         $s = (Get-Content $script:Settings -Raw).Replace('C:/develop/GIT/DevOps.Agents', 'c:\\DEVELOP\\git\\devops.agents')
         Set-Content $script:Settings $s -Encoding utf8
         & $script:Install -Hook -ClaudeDir $script:Claude -RadicePrincipale 'C:\develop\GIT\DevOps.Agents'
-        @(Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 5
+        @(Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 7
     }
     It 'una voce davvero diversa (un altra radice) si aggiunge' {
         & $script:Install -Hook -ClaudeDir $script:Claude -RadicePrincipale 'C:/develop/GIT/DevOps.Agents'
         & $script:Install -Hook -ClaudeDir $script:Claude -RadicePrincipale 'D:\altrove'
-        @(Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 10
+        @(Get-Voci (Get-Content $script:Settings -Raw | ConvertFrom-Json)).Count | Should -Be 14
     }
 }
 

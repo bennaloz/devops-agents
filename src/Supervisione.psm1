@@ -131,7 +131,7 @@ function Test-SupervisoreContinuo {
 $script:SezioniProblemi = [ordered]@{
     smistatore = '^(smistatore-|lettura-smistatore)'
     log        = '^(errore-card-|lettura-log)'
-    card       = '^(card-\d+-|ferma-|validazione-lunga-|rilasci$|lettura-card)'
+    card       = '^(card-\d+-|ferma-|validazione-lunga-|rilasci$|deploy-test$|lettura-card)'
     pipeline   = '^(approvazione-|coda-|run-fallito-|lettura-pipeline)'
     agenti     = '^(agente-offline-|lettura-agenti)'
     quota      = '^(quota-|lettura-quota)'
@@ -304,7 +304,7 @@ function Get-ProblemiCard {
     # senza il PAT dello smistatore non si legge niente: il problema e il PAT, non le card
     if ([bool](Get-Campo $o 'SenzaPat')) { return @() }
     if (-not $c.Letto) { return @(New-Problema 'lettura-card' "Non riesco a leggere le card: $(Get-RigaBreve $c.Errore)" 'controlla l''accesso ad Azure DevOps e il log di oggi') }
-    $rilasci = @(); $chiusureInBozza = @{}
+    $rilasci = @(); $deployTest = @(); $chiusureInBozza = @{}
     # D57: per ogni card, le card che la aspettano come predecessore (il motivo 'predecessori'): la voce del suo on-hold le nomina
     $aspettano = @{}
     foreach ($r in @($c.Righe | Where-Object { $null -ne $_ })) {
@@ -334,6 +334,8 @@ function Get-ProblemiCard {
         if ($att -and -not [bool](Get-Campo $r 'TogliAttesa')) {
             # le card da rilasciare non sono una voce ciascuna: una voce sola per tutte (Get-ProblemaRilasci)
             if ($att.Attivita -eq 'rilascia') { $rilasci += $r; continue }
+            # D61: le card unite che aspettano un deploy di develop in Test: una voce sola, il gesto e uno per tutte
+            if ($att.Attivita -eq 'deployTest') { $deployTest += $r; continue }
             # on-hold nato da un bloccato del collaudatore o del responsabile: non la regola generica ("togli il tag", che
             # riprende la sessione e la riblocca) ma il suo resoconto; senza resoconto la diagnosi del modello
             $bloccato = Get-Campo $r 'Bloccato'
@@ -390,6 +392,21 @@ function Get-ProblemiCard {
         }
     }
     if ($rilasci.Count -gt 0) { Get-ProblemaRilasci -Righe $rilasci -Config $Config -Adesso $o.Adesso }
+    if ($deployTest.Count -gt 0) { Get-ProblemaDeployTest -Righe $deployTest }
+}
+
+# D61: le card unite in develop che aspettano un deploy di develop in Test, come una voce sola (chiave deploy-test): il deploy lo lancia
+# Titolare, uno per tutte. Una riga per card; la voce torna quando ne arriva una nuova (Elementi), non si ricorda ogni giorno.
+function Get-ProblemaDeployTest {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()]$Righe)
+    $card = @($Righe | Where-Object { $null -ne $_ } | Sort-Object { [int]$_.Id })
+    $righeVoce = @($card | ForEach-Object { "#$($_.Id) $(Get-RigaBreve ([string](Get-Campo $_ 'Titolo')) 70)" })
+    $n = $card.Count
+    $testo = if ($n -eq 1) { "La card #$($card[0].Id) e unita in develop e aspetta un deploy di develop in Test." }
+             else { "$n card unite in develop aspettano un deploy di develop in Test: $((@($card | ForEach-Object { "#$($_.Id)" })) -join ', ')." }
+    New-Problema 'deploy-test' $testo 'lancia il deploy di develop in Test: lo smistatore porta le card in Ready to release quando e riuscito' ([string](Get-Campo $card[0] 'Url')) `
+        -Righe $righeVoce -Elementi @($card | ForEach-Object { "$($_.Id)" }) -Ricorda $false
 }
 
 # Da quando una card in attesa di rilascio e li: l'ingresso nello stato dalla storia (InStatoDa) se l'istantanea lo ha, altrimenti il
@@ -986,7 +1003,7 @@ function Remove-RilanciatiVecchi {
     }
 }
 
-Export-ModuleMember -Function Set-RilasciDa, Get-ProblemaRilasci, Get-GruppiRilasci, Get-RigaBreve, Get-SezioneDelProblema, Get-SezioniNonLette, Get-ChiaveUltimoRun, Add-ConteggioDiagnosi, Add-SessioneDiagnosi, ConvertTo-EsitoDiagnosi,
+Export-ModuleMember -Function Set-RilasciDa, Get-ProblemaRilasci, Get-ProblemaDeployTest, Get-GruppiRilasci, Get-RigaBreve, Get-SezioneDelProblema, Get-SezioniNonLette, Get-ChiaveUltimoRun, Add-ConteggioDiagnosi, Add-SessioneDiagnosi, ConvertTo-EsitoDiagnosi,
     Compare-ImprontaDiagnosi, Add-EventoSupervisore, Get-ProblemiEventi, Sync-DiagnosiConservate, Remove-RilanciatiVecchi,
     Test-SupervisoreContinuo, Get-DiagnosiDaLanciare, Register-DiagnosiLanciata, ConvertTo-TestoDiagnosi, Complete-Diagnosi, Add-EsecuzioneSupervisore, Get-ConfigSupervisore, New-Problema, Format-Attesa, ConvertFrom-RigheLog, Get-ErroriDiFilaPerCard,
     Get-ProblemiSmistatore, Get-ProblemiErroriCard, Get-ProblemiVista, Get-FirmaCard, Update-FirmeCard, Get-ResocontoBloccato, Get-ProblemiCard,

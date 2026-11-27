@@ -116,7 +116,7 @@ pre.azioni { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background:
 .voce details.dettagli summary .anteprima { display: inline-block; max-width: calc(100% - 22px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .voce details.dettagli[open] summary .anteprima { display: none; }
 .voce details.dettagli[open] summary::after { content: "meno"; }
-.voce.att-sblocca details.dettagli summary, .voce.att-rispondi details.dettagli summary, .voce.att-prova details.dettagli summary, .voce.att-rilascia details.dettagli summary { color: inherit; }
+.voce.att-sblocca details.dettagli summary, .voce.att-rispondi details.dettagli summary, .voce.att-prova details.dettagli summary, .voce.att-rilascia details.dettagli summary, .voce.att-deployTest details.dettagli summary { color: inherit; }
 .voce .motivo { display: block; font-size: 13px; color: var(--attenuato); white-space: pre-line; }
 .voce .stato { font-size: 12px; color: var(--attenuato); }
 .aspetta { margin: 8px 0 2px; padding: 8px 10px; border: 1px solid var(--bordo); border-left: 4px solid var(--ambra); border-radius: 8px; background: var(--codice-sfondo); font-size: 14px; line-height: 1.35; }
@@ -149,13 +149,13 @@ pre.azioni { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background:
 .att-sblocca { background: var(--sblocca-sfondo); color: var(--sblocca-testo); }
 .att-rispondi { background: var(--rispondi-sfondo); color: var(--rispondi-testo); }
 .att-prova { background: var(--prova-sfondo); color: var(--prova-testo); }
-.att-rilascia { background: var(--rilascia-sfondo); color: var(--rilascia-testo); }
-.voce.att-sblocca, .voce.att-rispondi, .voce.att-prova, .voce.att-rilascia { border-left-width: 4px; }
+.att-rilascia, .att-deployTest { background: var(--rilascia-sfondo); color: var(--rilascia-testo); }
+.voce.att-sblocca, .voce.att-rispondi, .voce.att-prova, .voce.att-rilascia, .voce.att-deployTest { border-left-width: 4px; }
 .voce.att-sblocca { border-left-color: var(--sblocca-testo); }
 .voce.att-rispondi { border-left-color: var(--rispondi-testo); }
 .voce.att-prova { border-left-color: var(--prova-testo); }
-.voce.att-rilascia { border-left-color: var(--rilascia-testo); }
-.voce.att-sblocca .motivo, .voce.att-rispondi .motivo, .voce.att-prova .motivo, .voce.att-rilascia .motivo, .voce.att-sblocca .fase, .voce.att-rispondi .fase, .voce.att-prova .fase, .voce.att-rilascia .fase { color: inherit; }
+.voce.att-rilascia, .voce.att-deployTest { border-left-color: var(--rilascia-testo); }
+.voce.att-sblocca .motivo, .voce.att-rispondi .motivo, .voce.att-prova .motivo, .voce.att-rilascia .motivo, .voce.att-sblocca .fase, .voce.att-rispondi .fase, .voce.att-prova .fase, .voce.att-rilascia .fase, .voce.att-deployTest .motivo, .voce.att-deployTest .fase { color: inherit; }
 .voce.att-rispondi .motivo { margin-top: 4px; line-height: 1.45; }
 .voce.att-rispondi .motivo b { display: inline-block; margin-top: 6px; }
 .proposta { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; opacity: .75; }
@@ -209,7 +209,7 @@ section.apprendimento td.num { text-align: right; font-variant-numeric: tabular-
 .campione.att-sblocca { background: var(--sblocca-sfondo); border-color: var(--sblocca-testo); }
 .campione.att-rispondi { background: var(--rispondi-sfondo); border-color: var(--rispondi-testo); }
 .campione.att-prova { background: var(--prova-sfondo); border-color: var(--prova-testo); }
-.campione.att-rilascia { background: var(--rilascia-sfondo); border-color: var(--rilascia-testo); }
+.campione.att-rilascia, .campione.att-deployTest { background: var(--rilascia-sfondo); border-color: var(--rilascia-testo); }
 .campione.stato-unita { background: var(--verde); border-color: var(--verde); }
 .campione.stato-lavorazione { background: var(--ambra); border-color: var(--ambra); }
 .campione.stato-coda { background: var(--superficie); border-color: var(--grigio); }
@@ -794,7 +794,7 @@ function Format-StatoBoard($P) {
         { $_ -in 'bozza', 'nuova', 'daChiarire' } { 'analisi'; break }
         { $_ -in 'pronto', 'inSviluppo' } { 'sviluppo'; break }
         { $_ -in 'inRevisione', 'inDeployTest', 'inCollaudo', 'inProvaUmana' } { 'verifica'; break }
-        { $_ -in 'daUnire', 'inFeature', 'daRilasciare', 'inRilascio', 'chiusa' } { 'unione'; break }
+        { $_ -in 'daUnire', 'inFeature', 'daDeployTest', 'daRilasciare', 'inRilascio', 'chiusa' } { 'unione'; break }
         'rimossa' { 'rimossa'; break }
         default { 'altro' }
     }
@@ -910,7 +910,8 @@ function Format-ColonnaOperatore($Operatore) {
         '<li><span class="campione att-sblocca"></span><span><b>Sblocca</b>: on-hold, un limite o un problema da sbloccare</span></li>' +
         '<li><span class="campione att-rispondi"></span><span><b>Rispondi</b>: responsabile ha fatto una domanda</span></li>' +
         '<li><span class="campione att-prova"></span><span><b>Prova in Test</b>: la prova tocca a una persona</span></li>' +
-        '<li><span class="campione att-rilascia"></span><span><b>Rilascia</b>: pronta per la produzione</span></li></ul>')
+        '<li><span class="campione att-rilascia"></span><span><b>Rilascia</b>: pronta per la produzione</span></li>' +
+        '<li><span class="campione att-deployTest"></span><span><b>Deploy di develop in Test</b>: unita in develop, aspetta un deploy di develop in Test</span></li></ul>')
     [void]$t.AppendLine('</section>')
     $t.ToString()
 }

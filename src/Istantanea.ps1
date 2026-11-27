@@ -174,6 +174,20 @@ function Get-ErroriBuildChiusura($Voce, [string]$Chiave, $Pr, $Run, $Sc) {
     $testo
 }
 
+# D61: per una card in Ready to deploy (test) con il suo commit di merge, l'ultimo deploy di develop in Test riuscito e se lo contiene.
+# Solo lettura: il deploy lo lancia Titolare. Null se la card non aspetta un deploy (altro stato, nessuna pipeline, merge non ancora
+# noto) o se Azure DevOps non risponde (la card aspetta il giro dopo).
+function Get-DeployDevelop($Voce, [string]$Chiave, $Sc) {
+    if ($Chiave -ne 'daDeployTest' -or -not (Get-Campo $Voce 'pipelineDeploy') -or -not $Sc['commitMerge']) { return $null }
+    try {
+        $run = Get-AdoUltimoRunRiuscito -Progetto $Voce.progettoAdo -DefinizioneId ([int]$Voce.pipelineDeploy) -Ramo 'develop'
+        if (-not $run -or -not $run.Commit) { return [pscustomobject]@{ Contenuto = $false; RunId = $null; Url = $null } }
+        $dentro = Test-AdoCommitContenuto -Progetto $Voce.progettoAdo -Repo $Voce.repo -Commit ([string]$Sc['commitMerge']) -In $run.Commit
+        [pscustomobject]@{ Contenuto = [bool]$dentro; RunId = $run.Id; Url = $run.Url }
+    }
+    catch { $null }
+}
+
 function Get-IstantaneaCard($Cfg, $CardAdo, $Voce, $Sc, $Stato, [string]$PercorsoStato, $Ctx = $null) {
     $chiave = Get-ChiaveStato $Cfg.Stati $CardAdo.Stato
     $pr = $null; $run = $null
@@ -186,8 +200,11 @@ function Get-IstantaneaCard($Cfg, $CardAdo, $Voce, $Sc, $Stato, [string]$Percors
         # completata (la completa CompletaPr): serve a RimuoviWorktree vederla. La PR va verso la destinazione salvata nello stato
         # della card: il ramo della funzionalita, o develop.
         $pr = Get-AdoPr -Progetto $Voce.progettoAdo -Repo $Voce.repo -Ramo ([string]$Sc['ramo']) -Destinazione (Get-DestinazioneCard $Sc) `
-            -AncheCompletate:($chiave -in 'daUnire', 'inFeature', 'daRilasciare')
+            -AncheCompletate:($chiave -in 'daUnire', 'inFeature', 'daDeployTest', 'daRilasciare')
     }
+    # D61: il commit di merge in develop si ricorda nello stato quando la PR completata si vede (dopo RimuoviWorktree la PR non si cerca piu)
+    if ($chiave -eq 'daDeployTest' -and $pr -and $pr.Stato -eq 'completed' -and (Get-Campo $pr 'CommitMerge')) { $Sc['commitMerge'] = [string]$pr.CommitMerge }
+    $deployDevelop = Get-DeployDevelop $Voce $chiave $Sc
     # I task servono dove si lancia dev su un task (Ready to develop, In development) e dove un task aggiunto dopo lo
     # sviluppo riporta la card In development (da In review a Ready to release, finche il worktree c'e). In feature branch (D52) un
     # task aperto non riporta indietro la card ma si segnala, e anche li i task si leggono solo finche il worktree c'e.
@@ -226,7 +243,7 @@ function Get-IstantaneaCard($Cfg, $CardAdo, $Voce, $Sc, $Stato, [string]$Percors
         # tutti, letti e no: il mentore della prova umana (D46) legge anche quelli che il lancio del responsabile ha gia consumato
         CommentiTutti = $tutti
         Storia = $storia
-        Pr = $pr; Run = $run; StatoCard = $Sc; Voce = $Voce; Task = $task; Predecessori = $predecessori; Deploy = $deploy
+        Pr = $pr; Run = $run; DeployDevelop = $deployDevelop; StatoCard = $Sc; Voce = $Voce; Task = $task; Predecessori = $predecessori; Deploy = $deploy
         RevNostre = @(Get-RevNostre -Id $CardAdo.Id -Percorso $PercorsoStato)
         LimiteUltimaSessione = $limiteUltima
         Funzionalita = $funzionalita

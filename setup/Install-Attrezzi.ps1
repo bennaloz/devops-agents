@@ -93,6 +93,8 @@ if ($Hook) {
         @{ Matcher = 'Bash|PowerShell|Read'; File = 'deny-pat.ps1' }
         @{ Matcher = 'Bash|PowerShell'; File = 'deny-identita.ps1' }
         @{ Matcher = 'Bash|PowerShell|WebFetch'; File = 'deny-host-collaudo.ps1' }
+        @{ Matcher = 'Bash|PowerShell'; File = 'deny-no-verify.ps1' }
+        @{ Matcher = 'Edit|Write'; File = 'suggest-compact.ps1' }
     )
     $file = Join-Path $ClaudeDir 'settings.json'
     if (-not (Test-Path -LiteralPath $ClaudeDir)) { New-Item -ItemType Directory -Path $ClaudeDir -Force | Out-Null }

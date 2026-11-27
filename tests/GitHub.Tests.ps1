@@ -120,6 +120,25 @@ Describe 'GitHub: chiamate' {
         $pr.UltimoCommit | Should -Be 'HEAD9'
     }
 
+    It 'Get-GhPr: la PR unita porta il commit di merge (D61); null se GitHub non lo da' {
+        Mock Invoke-RestMethod -ModuleName GitHub { $p = New-PrGh 9 'closed' 'HEAD9' '2026-11-20T10:00:00Z'; $p | Add-Member merge_commit_sha 'M9'; @($p) }
+        (Get-GhPr 'acme/web' 'feature/42-x' -AncheCompletate).CommitMerge | Should -Be 'M9'
+        Mock Invoke-RestMethod -ModuleName GitHub { @(New-PrGh 9 'closed' 'HEAD9' '2026-11-20T10:00:00Z') }
+        (Get-GhPr 'acme/web' 'feature/42-x' -AncheCompletate).CommitMerge | Should -BeNullOrEmpty
+    }
+
+    It 'Test-GhCommitContenuto: vero se il deploy e avanti o uguale al commit, falso se e indietro o divergente' {
+        Mock Invoke-RestMethod -ModuleName GitHub { [pscustomobject]@{ status = 'ahead' } }
+        Test-GhCommitContenuto 'acme/web' 'm1' 'd9' | Should -BeTrue
+        Should -Invoke Invoke-RestMethod -ModuleName GitHub -Times 1 -Exactly -ParameterFilter { $Uri -like '*/repos/acme/web/compare/m1...d9' }
+        Mock Invoke-RestMethod -ModuleName GitHub { [pscustomobject]@{ status = 'identical' } }
+        Test-GhCommitContenuto 'acme/web' 'm1' 'd9' | Should -BeTrue
+        Mock Invoke-RestMethod -ModuleName GitHub { [pscustomobject]@{ status = 'diverged' } }
+        Test-GhCommitContenuto 'acme/web' 'm1' 'd9' | Should -BeFalse
+        Mock Invoke-RestMethod -ModuleName GitHub { [pscustomobject]@{ status = 'behind' } }
+        Test-GhCommitContenuto 'acme/web' 'm1' 'd9' | Should -BeFalse
+    }
+
     It 'New-GhPr apre la PR verso la destinazione con AB#<card> nella descrizione' {
         Mock Invoke-RestMethod -ModuleName GitHub { [pscustomobject]@{ number = 15; html_url = 'https://github.com/acme/web/pull/15' } }
         $r = New-GhPr 'acme/web' 'feature/42-x' 'Titolo' 'Testo' 42 'develop'
@@ -219,6 +238,13 @@ Describe 'Ado: il codice di un area su GitHub' {
         $pr.Validazione | Should -Be 'rossa'
         $pr.UrlLog | Should -Be 'https://acme.visualstudio.com/Acme.Web/_build/results?buildId=55'
         Should -Invoke Get-GhPr -ModuleName Ado -Times 1 -Exactly -ParameterFilter { $RepoGh -eq 'acme/web' -and $Ramo -eq 'feature/42-x' }
+    }
+
+    It 'Test-AdoCommitContenuto su un area GitHub chiede a GitHub, non ad Azure DevOps (D61)' {
+        Mock Test-GhCommitContenuto -ModuleName Ado { $true }
+        Mock Invoke-RestMethod -ModuleName Ado { throw 'nessuna chiamata ad Azure DevOps' }
+        Test-AdoCommitContenuto -Progetto 'Acme.Web' -Repo 'Acme.Web' -Commit 'm1' -In 'd9' | Should -BeTrue
+        Should -Invoke Test-GhCommitContenuto -ModuleName Ado -Times 1 -Exactly -ParameterFilter { $RepoGh -eq 'acme/web' -and $Commit -eq 'm1' -and $In -eq 'd9' }
     }
 
     It 'New-AdoPr su un area GitHub apre la PR su GitHub e mette il link sulla card' {

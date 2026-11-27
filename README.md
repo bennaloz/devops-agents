@@ -107,8 +107,9 @@ per componente) si contano su tutta la board.
 
 Deploy in Test e merge in `develop` vanno da soli: a revisione superata la card passa in Deploying to test e parte il deploy, poi in Automated test (prova il collaudatore) o, con `human-test`, in Human test; la prova
 umana la fa chi ha chiesto la card, e il `responsabile` la porta in Ready to merge quando conferma (altrimenti torna In
-development con un task). In Ready to merge lo smistatore completa la PR e porta la card in Ready to release. A mano
-resta solo il rilascio in produzione.
+development con un task). In Ready to merge lo smistatore completa la PR e porta la card in Ready to deploy (test); quando un
+deploy di `develop` in Test la contiene la porta in Ready to release (D61). A mano restano il deploy di `develop` in Test e il
+rilascio in produzione.
 
 Per prendere le card di chi è assente basta riassegnarle dalla board: lo smistatore del nuovo assegnatario ricrea il
 worktree dal ramo pubblicato su origin e riprende da lì. Si perde solo una sessione interrotta a metà. Una card presa

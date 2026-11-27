@@ -135,7 +135,9 @@ function Get-GhPr([string]$RepoGh, [string]$Ramo, [switch]$AncheCompletate, [str
     if (-not $pr -and $AncheCompletate) {
         $unita = $trovate | Where-Object { (ConvertTo-StatoPrGh $_) -eq 'completed' } | Select-Object -First 1
         if ($unita) {
-            return [pscustomobject]@{ Id = [int]$unita.number; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null; UltimoCommit = (Get-GhCommitTesta $unita); RunActions = $null }
+            return [pscustomobject]@{ Id = [int]$unita.number; Stato = 'completed'; Validazione = 'assente'; BuildId = $null; UrlLog = $null; UltimoCommit = (Get-GhCommitTesta $unita); RunActions = $null
+                # D61: il commit di merge in develop serve a riconoscere il deploy di develop che contiene la card
+                CommitMerge = $(if (Get-Campo $unita 'merge_commit_sha') { [string]$unita.merge_commit_sha } else { $null }) }
         }
     }
     if (-not $pr) { return $null }
@@ -227,6 +229,13 @@ function Get-GhFile([string]$RepoGh, [string]$Percorso, [string]$Ramo) {
     [string](Invoke-Gh -Metodo Get -Percorso "$(Get-GhBaseRepo $RepoGh)/contents/$($p)?ref=$([uri]::EscapeDataString($Ramo))" -Accept 'application/vnd.github.raw+json')
 }
 
+# D61: vero se Commit e contenuto in In (e un suo antenato, o e lui): il confronto di GitHub fra i due dice ahead o identical.
+function Test-GhCommitContenuto([string]$RepoGh, [string]$Commit, [string]$In) {
+    if ($Commit -ieq $In) { return $true }
+    $r = Invoke-Gh -Metodo Get -Percorso "$(Get-GhBaseRepo $RepoGh)/compare/$Commit...$In"
+    [string](Get-Campo $r 'status') -in 'ahead', 'identical'
+}
+
 function Get-GhUrlPr([string]$RepoGh, [int]$Id) { "$script:WebGitHub/$RepoGh/pull/$Id" }
 
 # Il link alla PR salvato sulla card (relazione Hyperlink): repo e numero, o null se non e una PR di GitHub.
@@ -238,4 +247,4 @@ function ConvertFrom-GhUrlPr([string]$Url) {
 
 Export-ModuleMember -Function Get-PercorsoFilePatGitHub, Get-GhIntestazione, Invoke-Gh, ConvertTo-StatoPrGh, Get-GhPrDelRamo, Get-EsitoControlloGh,
     Get-OrigineControlloGh, Get-GhControlli, Get-GhPr, New-GhPr, Get-GhPrSingola, Get-GhDescrizionePr, Set-GhPr, Complete-GhPr, Start-GhRivalutazione,
-    Get-GhRami, Get-GhFile, Get-GhUrlPr, ConvertFrom-GhUrlPr
+    Get-GhRami, Get-GhFile, Get-GhUrlPr, ConvertFrom-GhUrlPr, Test-GhCommitContenuto

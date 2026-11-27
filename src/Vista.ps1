@@ -281,13 +281,14 @@ function Get-FaseFlusso($Stati, $R) {
         'inCollaudo' { return 'collaudo' }
         'inProvaUmana' { return 'prova in Test' }
         'inFeature' { return 'feature branch' }
+        'daDeployTest' { return 'deploy di develop' }
         { $_ -in 'daRilasciare', 'inRilascio' } { return 'rilascio' }
         default { return $null }
     }
 }
 
 # Il verbo mostrato per ogni attivita dell'operatore (quale attivita e lo decide Get-AttivitaOperatore in Decisioni).
-$script:VerbiAttivita = @{ sblocca = 'Sblocca'; rispondi = 'Rispondi'; prova = 'Prova in Test'; rilascia = 'Rilascia' }
+$script:VerbiAttivita = @{ sblocca = 'Sblocca'; rispondi = 'Rispondi'; prova = 'Prova in Test'; rilascia = 'Rilascia'; deployTest = 'Deploy di develop in Test' }
 
 function Get-TestoCoda($R) {
     if ($R.Errore) { "non letta: $($R.Errore)" }
